@@ -697,6 +697,9 @@ export const MODEL_OPS = {
   },
   model_delete(a, source) {
     getModel(this, a.name);
+    // the model file goes to the trash (art_cleanup restore), unless cleanup.trash_deletes is false
+    const trash = this.cleanup?.trashFiles('model', a.name, source, 'art_model delete');
+    if (trash) return { deleted: a.name, trash };
     models(this).delete(a.name);
     fs.rmSync(path.join(modelDir(this), `${a.name}.json`), { force: true });
     this.emit('event', { type: 'model', model: a.name, deleted: true, source, ts: Date.now() });

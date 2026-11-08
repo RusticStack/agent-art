@@ -314,6 +314,22 @@ Read:
 - find {tag|rel|text|kind} = matching nodes (rel alone lists those edges). path {from, to} = shortest relation chain.
 Output is capped (max_chars, default 1600); narrow with rel, depth or limit. The web UI shows the graph live (Graph view).`;
 
+TOPICS.cleanup = `CLEANUP (art_cleanup): retire superseded assets without leaving junk or breaking what still uses them
+1. replace {old:"marine_old", new:"marine"} (or pairs:[{old,new}]) records "new replaces old", moves old's semantic graph edges (variant_of, group membership, ...) and its OPEN review notes to new, and marks old superseded (its tags stay, to select it).
+2. plan {select:{superseded:true}, include_exports:true} = dry run: what goes (count, sizes, first 10), what blocks it, warnings (pinned, still rendered from / variant of a kept asset), export files refused by the path rules. Nothing changes.
+3. apply {plan_id, confirm:true} moves exactly the planned assets to <workspace>/trash/<batch>/ (soft delete), with their stored graph edges, tags/notes/approval, review notes (+ images), pins and pruned manifest entries.
+4. restore {ids:["t..."]} (a batch) or {ids:["canvas:x"]} (one asset) or {all:true} puts files, edges, notes and pins back exactly. trash lists batches. empty {older_than?:"30d", ids?, confirm:true} is the ONLY hard delete.
+select (fields AND together; arrays inside a field OR; an array of selects is a union):
+- names:["marine_*", "weapons/rifle/*"] (globs: * = not "/", ** = anything) | ids:[...] | kind:"canvas"|"rig"|"model"|"audio"|"project"|"export" | tag | group (nested groups too) | project | exclude:[globs]
+- rel:{rel:"rendered_from", to:"model:rifle_v1"} (assets with that edge to x) or {rel, from} (x's targets)
+- superseded:true | orphans:true (no inbound edges, not in a project or group, not pinned) | stale_exports:true (export files whose source asset is gone)
+- older_than:"30d" (last edit) | unused_since:"14d" (no edit, export, relation or review since); number = days, or an ISO date.
+Export files are only touched when chosen (kind:"export", stale_exports, or include_exports) and only inside workspace/exports or a folder the USER allowlisted (cleanup.allow_paths in <workspace>/config.json, or the web UI); symlinks and paths that resolve outside are refused.
+Safety: an asset a kept asset needs (rig parts of a kept rig, a texture of a kept model, the project palette of kept canvases: depends_on, uses_palette, part_of project) blocks the plan; include_dependents:true removes those dependents too ("all" also soft ones like rendered_from), force:true ignores them. Approved assets need allow_approved:true; pinned ones warn.
+prune_manifest:{file, keys?:["sprites.marine_idle"]} also removes entries from a JSON manifest (no keys = entries naming a removed export file); the original goes to the trash.
+usage = disk use by kind, project and group, biggest offenders, trash size. Replies are compact (counts + first N; limit, full:true).
+art_canvas/art_model/art_audio/art_project delete also move the files to the trash (graph and notes unchanged, as before); cleanup.trash_deletes:false in config.json restores hard deletes.`;
+
 export function helpText(a = {}) {
   if (a.op) {
     const u = opUsage(a.op);

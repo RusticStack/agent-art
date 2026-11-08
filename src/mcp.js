@@ -25,8 +25,9 @@ Multi-asset work: art_project create (shared palette + style notes), review with
 3D (HD-2D maps, props -> .glb): art_model. Planets, ground terrain, skyboxes, asteroid fields: art_planet. First-person arms + gun/attachment sweeps: art_fp.
 Audio (SFX, music, mixing; you cannot hear, so read analyze/critique reports): art_audio.
 The user leaves review notes on assets in the web UI: art_review list (replies say when the asset you touch has open notes).
+Retire superseded art with art_cleanup (plan -> apply; soft delete to a trash, restore undoes it).
 Orient yourself with art_graph (summary / query: what is part of what, a few hundred chars) instead of art_info on everything; record relations with art_graph link / group / tag / note.
-Details on demand: art_help {topic: workflow|textures|characters|animation|rig|library|scenes|hires|minecraft|3d|audio|music|mixing|perception|graph|planets} or {op:"<draw command>"}.`;
+Details on demand: art_help {topic: workflow|textures|characters|animation|rig|library|scenes|hires|minecraft|3d|audio|music|mixing|perception|graph|planets|cleanup} or {op:"<draw command>"}.`;
 
 const S = {
   canvas: { type: 'string' },
@@ -407,6 +408,20 @@ export const TOOLS = [
     run: (call, a) => call(`review_${a.action}`, a),
   },
   {
+    name: 'art_cleanup',
+    description: 'Retire old assets: soft delete to a trash, dependency-aware, compact (full:true = all). plan {select, include_exports?, include_dependents?, prune_manifest?} = dry run; apply {plan_id, confirm:true}; replace {old, new}; trash; restore {ids|all}; empty {older_than?, confirm:true} (only hard delete); usage. select: names (globs), ids, kind, tag, group, project, rel:{rel,to}, superseded, orphans, stale_exports, older_than, unused_since. art_help {topic:"cleanup"}.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { enum: ['plan', 'apply', 'replace', 'trash', 'restore', 'empty', 'usage', 'config'] }, select: { type: ['object', 'array'] }, plan_id: { type: 'string' }, confirm: { type: 'boolean' },
+        include_exports: { type: 'boolean' }, include_dependents: { type: ['boolean', 'string'] }, force: { type: 'boolean' }, allow_approved: { type: 'boolean' }, prune_manifest: { type: 'object' },
+        old: { type: 'string' }, new: { type: 'string' }, ids: { type: 'array' }, all: { type: 'boolean' }, older_than: { type: ['string', 'number'] }, full: { type: 'boolean' }, limit: { type: 'integer' },
+      },
+      required: ['action'],
+    },
+    run: (call, a) => call(`cleanup_${a.action}`, a),
+  },
+  {
     name: 'art_undo',
     description: 'Undo (redo:true = redo) the last N steps; each art_draw call is one step.',
     inputSchema: { type: 'object', properties: { canvas: S.canvas, steps: { type: 'integer' }, redo: { type: 'boolean' } }, required: ['canvas'] },
@@ -462,7 +477,7 @@ export const TOOLS = [
 export function touchedAssets(tool, a = {}) {
   const ids = [];
   const add = (kind, n) => { if (typeof n === 'string' && n && !n.includes('*')) ids.push(`${kind}:${n}`); };
-  if (['art_review', 'art_graph', 'art_help', 'art_list', 'art_open_ui', 'art_project'].includes(tool)) return ids;
+  if (['art_review', 'art_graph', 'art_help', 'art_list', 'art_open_ui', 'art_project', 'art_cleanup'].includes(tool)) return ids;
   if (tool === 'art_rig') { add('rig', a.name); add('canvas', a.canvas || a.name); if (a.name) add('canvas', `${a.name}_parts`); }
   else if (tool === 'art_model') { add('model', a.name); add('canvas', a.canvas); }
   else if (tool === 'art_audio') { add('audio', a.name); for (const n of a.names || []) add('audio', n); }

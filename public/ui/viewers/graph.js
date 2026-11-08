@@ -256,6 +256,13 @@ export class GraphViewer {
       // badges: open review notes, approved
       if (n.reviews) { x.fillStyle = '#f5a524'; x.beginPath(); x.arc(n.x + r, n.y - r, 7 / Math.max(0.7, k), 0, Math.PI * 2); x.fill(); x.fillStyle = '#111'; x.font = `bold ${9 / Math.max(0.7, k)}px system-ui`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(String(n.reviews), n.x + r, n.y - r + 0.5); x.textAlign = 'left'; x.textBaseline = 'alphabetic'; }
       if (n.approved) { x.fillStyle = '#22c55e'; x.font = `bold ${12 / Math.max(0.7, k)}px system-ui`; x.fillText('✓', n.x - r - 10 / Math.max(0.7, k), n.y - r + 4); }
+      // cleanup badges: superseded (red slash + dashed ring), orphan (dashed grey ring)
+      if (n.superseded || n.orphan) {
+        x.save(); x.setLineDash([3 / k, 3 / k]); x.lineWidth = 1.5 / k; x.strokeStyle = n.superseded ? '#f87171' : '#8b93a1';
+        x.beginPath(); x.arc(n.x, n.y, r + 7 / Math.max(0.7, k), 0, Math.PI * 2); x.stroke(); x.restore();
+        if (n.superseded) { x.strokeStyle = '#f87171'; x.lineWidth = 2 / k; x.beginPath(); x.moveTo(n.x - r * 0.8, n.y + r * 0.8); x.lineTo(n.x + r * 0.8, n.y - r * 0.8); x.stroke(); }
+        if (k > 0.6) { x.fillStyle = n.superseded ? '#fca5a5' : '#a5b0c2'; x.font = `${9 / Math.max(0.75, k)}px system-ui`; x.fillText(n.superseded ? 'superseded' : 'orphan', n.x - r, n.y + r + 12 / Math.max(0.75, k)); }
+      }
       if (k > 0.45 || n.id === sel || hl.has(n.id) || n.kind === 'group') {
         x.fillStyle = n.missing ? '#6b7280' : '#e6e9ef'; x.font = `${(n.kind === 'group' ? 12 : 11) / Math.max(0.75, k)}px system-ui`;
         x.fillText(n.kind === 'group' || n.kind === 'project' ? n.id : n.name, n.x + r + 4, n.y + 4);
@@ -291,7 +298,7 @@ export class GraphViewer {
         const n = this.hit(e);
         if (n?.id !== this.hover?.id) { this.hover = n; this.dirty = true; }
         this.tip.hidden = !n;
-        if (n) { this.tip.textContent = `${n.id}${n.note ? ` — ${n.note}` : ''}${n.reviews ? ` · ${n.reviews} open review` : ''}${n.approved ? ' · approved' : ''}`; const r = this.stage.getBoundingClientRect(); this.tip.style.left = e.clientX - r.left + 14 + 'px'; this.tip.style.top = e.clientY - r.top + 10 + 'px'; }
+        if (n) { this.tip.textContent = `${n.id}${n.note ? ` — ${n.note}` : ''}${n.reviews ? ` · ${n.reviews} open review` : ''}${n.approved ? ' · approved' : ''}${n.superseded ? ' · superseded' : ''}${n.orphan ? ' · orphan' : ''}`; const r = this.stage.getBoundingClientRect(); this.tip.style.left = e.clientX - r.left + 14 + 'px'; this.tip.style.top = e.clientY - r.top + 10 + 'px'; }
         return;
       }
       if (Math.abs(e.clientX - d.x) + Math.abs(e.clientY - d.y) > 3) d.moved = true;

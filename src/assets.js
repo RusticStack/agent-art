@@ -73,5 +73,9 @@ export function assetIndex(engine) {
   } catch { /* no audio */ }
   const projects = [...engine.projects.values()].map((p) => ({ name: p.name, description: p.description, palette: Object.keys(p.palette || {}).length }));
   const groups = Object.entries(engine.graph.data.groups).map(([name, g]) => ({ name, parent: g.parent || null, note: g.note, members: engine.graph.members(name) }));
-  return { canvases, rigs, models, audio, projects, groups, exports: walkExports(engine.exportDir), home: engine.home };
+  // cleanup badges (superseded / orphan) and graph tags for the browser's multi-select
+  let flags = { superseded: [], orphans: [] };
+  try { const f = engine.cleanup.flags(); flags = { superseded: [...f.superseded], orphans: [...f.orphans] }; } catch { /* best effort */ }
+  const tags = Object.fromEntries(Object.entries(engine.graph.data.nodes).filter(([, n]) => n.tags?.length).map(([id, n]) => [id, n.tags]));
+  return { canvases, rigs, models, audio, projects, groups, exports: walkExports(engine.exportDir), home: engine.home, flags, tags };
 }

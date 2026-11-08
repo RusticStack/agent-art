@@ -15,6 +15,7 @@ import { ProjectViewer } from './ui/viewers/project.js';
 import { ExportViewer } from './ui/viewers/export.js';
 import { GraphViewer } from './ui/viewers/graph.js';
 import { LayersViewer } from './ui/viewers/layers.js';
+import { cleanupPanel } from './ui/cleanup.js';
 
 const ACTIVE_REVIEW = new Set(['open', 'in_progress', 'reopened']);
 
@@ -81,6 +82,7 @@ class App {
   // ---------- data ----------
   async refreshAssets() {
     try { this.assets = await getJSON('/api/assets'); } catch { return; }
+    this.flags = { superseded: new Set(this.assets.flags?.superseded || []), orphans: new Set(this.assets.flags?.orphans || []) };
     this.browser.render();
     $('wsPath').textContent = this.assets.home;
     $('wsPath').title = `workspace: ${this.assets.home}`;
@@ -339,6 +341,7 @@ class App {
     $('reviewBtn').onclick = () => this.setReviewMode(!this.reviewMode);
     $('reviewListBtn').onclick = () => this.showReviewList();
     $('graphBtn').onclick = () => this.open({ kind: 'graph' });
+    $('cleanupBtn').onclick = () => cleanupPanel(this);
     $('helpBtn').onclick = () => this.toggleHelp();
     $('help').onclick = (e) => { if (e.target.id === 'help') this.toggleHelp(); };
     $('toggleBrowser').onclick = () => this.togglePane('browser');

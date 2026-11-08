@@ -550,6 +550,7 @@ art_fp { action:"check", out:"public/assets" }
 | `art_animation` | Frame ops, tags with per-frame durations, forward/reverse/pingpong, filmstrip, GIF/spritesheet export |
 | `art_graph` | Asset graph: what is part of what (`part_of`, `variant_of`, `view_of`, `rendered_from`, ...), tags, notes and nested groups. `summary` / `query` answer in a few hundred characters, so the agent orients itself without `art_info` on everything. Structural edges are automatic |
 | `art_review` | Review notes the user leaves in the web UI (a box or pin on a frame, view, part or audio range, with a category and a "compare with" asset). `list` is one line per note, `get` returns the marked region then / now / compared as an image, `update` moves a note to `in_progress` / `fixed`, `add` asks the user something |
+| `art_cleanup` | Retire superseded assets in bulk, safely. `plan` is a dry run (selectors: globs, kind, tag, group, project, graph relation, `superseded`, `orphans`, `stale_exports`, `older_than`, `unused_since`) with sizes and blockers; `apply` moves the plan to a trash; `restore` puts files, graph links, review notes and pins back byte for byte; `empty` is the only hard delete. `replace {old, new}` marks old superseded and moves its links and open notes. `usage` reports disk use |
 | `art_undo`, `art_import`, `art_export`, `art_list`, `art_info`, `art_open_ui` | The rest |
 | `art_minecraft` | Optional: Minecraft Java resource packs (vanilla texture names and sizes for reference, pack build plus zip) |
 
@@ -606,9 +607,57 @@ The agent's side of the graph and the notes:
 
 More screenshots are in [docs/ui](docs/ui).
 
+### Cleanup: retiring superseded art
+
+When a set of assets is replaced (baked-gun sprites by rigged characters, old FP strips by separate arm and gun sweeps), `art_cleanup` removes the old set without leaving junk and without breaking what still uses it.
+
+```jsonc
+{ "action": "replace", "pairs": [{ "old": "marine_old_idle", "new": "marine_idle" }] }  // old is now superseded
+{ "action": "plan", "select": { "superseded": true }, "include_exports": true }           // dry run: counts, sizes, first 10, blockers
+{ "action": "apply", "plan_id": "p…", "confirm": true }                                    // soft delete into workspace/trash/<batch>
+{ "action": "restore", "ids": ["t…"] }                                                     // or {"ids":["canvas:marine_old_idle"]}, {"all":true}
+{ "action": "empty", "older_than": "30d", "confirm": true }                                // the only hard delete
+```
+
+- **Dependency-aware.** An asset that a kept asset needs blocks the plan: the parts of a kept rig (a rig is one asset with its parts canvas), the texture of a kept model, the project palette of kept canvases (`depends_on`, `uses_palette`, `part_of` a project). `include_dependents: true` removes those dependents too (`"all"` also takes soft users such as `rendered_from` sprites), and `force: true` ignores them. Soft users are listed as warnings.
+- **Protected.** Assets approved in review need `allow_approved: true`. Pinned assets produce a warning.
+- **Export files** are only moved when they are inside `workspace/exports` or a folder the user allowlists in `cleanup.allow_paths` (in `<workspace>/config.json`, or the web UI under Cleanup › Settings; the agent cannot change it). Symlinks, paths that resolve outside the allowed folder, path traversal and workspace internals are refused. Moved files keep their original paths in the trash, so restore returns them. `prune_manifest: {file, keys?}` also removes entries from a JSON manifest (with no keys, the entries that name a removed file are removed); the original is kept in the trash.
+- **Logged.** Every apply or restore is a `removed` / `restored` entry in the activity timeline and in the graph's event log, with the plan id and the trash batch id.
+- **Compact.** Plans and results return counts and the first 10 items (`limit`, or `full: true` for everything).
+- **Single deletes** (`art_canvas`, `art_model`, `art_audio`, `art_project` `delete`) keep their old graph behaviour but now move the files to the trash too, so they can be restored. `cleanup.trash_deletes: false` in `config.json` restores hard deletes.
+
+In the web UI, **☐ Select** in the asset browser adds checkboxes (Shift+click selects a range; *All shown* takes the filtered rows; *by tag* adds a tag), and **Plan cleanup…** shows the dry run with blockers and sizes before you apply it. The **🗑 Cleanup** button opens the Trash (restore or empty, with sizes), Disk usage (by kind, project and group, biggest first) and Settings. Superseded and orphan assets carry badges in the browser and in the graph.
+
+| Select | Plan (blocked) | Plan |
+| --- | --- | --- |
+| ![select](docs/ui/20-cleanup-select.png) | ![blocked](docs/ui/21-cleanup-plan-blocked.png) | ![plan](docs/ui/22-cleanup-plan.png) |
+| **Trash** | **Disk usage** | **Graph badges** |
+| ![trash](docs/ui/23-cleanup-trash.png) | ![usage](docs/ui/24-cleanup-usage.png) | ![graph](docs/ui/25-cleanup-graph-badges.png) |
+
+### Adding an asset kind (registration hook)
+
+A new kind of asset (planets, ships, animation sets, ...) takes part in the asset graph and in cleanup through one call in its own module, `registerAssetType` from `src/assettypes.js`. No other file needs a per-kind case:
+
+```js
+import { registerAssetType } from './assettypes.js';
+registerAssetType('planet', {
+  list: (engine) => [...planets(engine).keys()],                       // required: every name of this kind
+  files: (engine, name) => [path.join(dir(engine), `${name}.json`)],   // required for cleanup: every file it is made of
+  unload: (engine, name, source) => planets(engine).delete(name),      // its files are already in the trash
+  reload: (engine, name, source) => loadPlanet(engine, name),          // its files are back: load it again
+  info: (engine, name) => ({ project, updated }),                      // optional: project / older_than / unused_since selectors, usage
+  edges: (engine, add) => add('planet:mars', 'depends_on', 'canvas:mars_tex'), // optional: derived graph edges (depends_on = hard dependency)
+  sub: ['planetlayer'],                                                 // optional: sub-node kinds (planetlayer:mars/clouds) owned by it
+  container: false,                                                    // true: part_of edges into it are hard dependencies (like a project)
+  flush: (engine, name) => {},                                         // optional: write pending in-memory changes before measuring / moving
+});
+```
+
+Once registered, `planet:mars` (or the bare name `mars`) resolves in `art_graph`, `art_cleanup` selects it by kind, name, tag, group or project, dependencies through its edges block or cascade, and apply / restore move its files, graph links, notes and pins.
+
 ## Data and configuration
 
-The workspace is `~/.agent-art` (`--home` or `AGENT_ART_HOME` changes it). Since 0.3.0 there is no implicit fallback to a `./workspace` folder next to a source checkout, because it silently split work between clients started from different folders. If that folder exists, `serve` and `mcp` print a note; pass `--home ./workspace` to keep using it. It holds `canvases/*.json` (layers stored as PNG), `models/*.json` (3D model definitions), `projects/`, `exports/` and `packs/`, plus `graph.json` (asset graph and review notes), `reviews/` (review note crops) and `ui-state.json` (hidden and pinned assets in the UI). The port is `AGENT_ART_PORT` (default 7420). The server binds to 127.0.0.1 and refuses cross-origin writes.
+The workspace is `~/.agent-art` (`--home` or `AGENT_ART_HOME` changes it). Since 0.3.0 there is no implicit fallback to a `./workspace` folder next to a source checkout, because it silently split work between clients started from different folders. If that folder exists, `serve` and `mcp` print a note; pass `--home ./workspace` to keep using it. It holds `canvases/*.json` (layers stored as PNG), `models/*.json` (3D model definitions), `projects/`, `exports/` and `packs/`, plus `graph.json` (asset graph and review notes), `reviews/` (review note crops), `ui-state.json` (hidden and pinned assets in the UI), `trash/` (cleanup batches and single deletes, until emptied) and `config.json` (`cleanup.allow_paths`, `cleanup.trash_deletes`). The port is `AGENT_ART_PORT` (default 7420). The server binds to 127.0.0.1 and refuses cross-origin writes.
 
 ## License
 

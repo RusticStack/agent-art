@@ -19,6 +19,7 @@ import { PLANET_OPS } from './space/ops.js';
 import { Activity } from './activity.js';
 import { Graph, GRAPH_OPS } from './graph.js';
 import { Reviews, REVIEW_OPS } from './review.js';
+import { Cleanup, CLEANUP_OPS } from './cleanup.js';
 import crypto from 'node:crypto';
 
 const NAME_RE = /^[A-Za-z0-9_\-.]{1,64}$/;
@@ -67,6 +68,8 @@ export class Engine extends EventEmitter {
     this.activity = new Activity(this);
     this.graph = new Graph(this);
     this.reviews = new Reviews(this, this.graph);
+    // bulk, dependency-aware cleanup with a trash (art_cleanup); single deletes use its trash too
+    this.cleanup = new Cleanup(this);
   }
 
   load() {
@@ -203,6 +206,8 @@ export class Engine extends EventEmitter {
   }
 }
 
+const isRigPartsDoc = (d) => /_parts$/.test(d.name) && d.meta?.rig && typeof d.meta.rig === 'object';
+
 function uiHint(engine, name) {
   return engine.uiUrl ? `${engine.uiUrl}/#${encodeURIComponent(name)}` : undefined;
 }
@@ -293,11 +298,15 @@ const OPS = {
     const docs = this.projectDocs(p.name);
     if (a.delete_canvases) for (const d of docs) OPS.delete.call(this, { canvas: d.name }, source);
     else for (const d of docs) { d.project = null; this.scheduleSave(d); }
-    this.projects.delete(p.name);
-    fs.rmSync(path.join(this.projectDir, `${p.name}.json`), { force: true });
-    const ev = { type: 'project', project: p.name, deleted: true, source, ts: Date.now() };
-    this.emit('event', ev);
-    return { deleted: p.name, canvases: a.delete_canvases ? docs.length : 0 };
+    // the project file goes to the trash (art_cleanup restore), unless cleanup.trash_deletes is false
+    const trash = this.cleanup.trashFiles('project', p.name, source, 'art_project delete');
+    if (!trash) {
+      this.projects.delete(p.name);
+      fs.rmSync(path.join(this.projectDir, `${p.name}.json`), { force: true });
+      const ev = { type: 'project', project: p.name, deleted: true, source, ts: Date.now() };
+      this.emit('event', ev);
+    }
+    return { deleted: p.name, canvases: a.delete_canvases ? docs.length : 0, ...(trash ? { trash } : {}) };
   },
 
   meta(a, source) {
@@ -581,6 +590,9 @@ const OPS = {
 
   delete(a, source) {
     const d = this.get(a.canvas);
+    // the canvas file goes to the trash (art_cleanup restore), unless cleanup.trash_deletes is false
+    const trash = this.cleanup.trashFiles(isRigPartsDoc(d) ? 'rig' : 'canvas', isRigPartsDoc(d) ? d.name.slice(0, -6) : d.name, source, 'art_canvas delete');
+    if (trash) return { deleted: d.name, trash };
     this.docs.delete(d.name);
     clearTimeout(this.saveTimers.get(d.name));
     fs.rmSync(path.join(this.canvasDir, `${d.name}.json`), { force: true });
@@ -984,5 +996,5 @@ const OPS = {
   },
 };
 
-Object.assign(OPS, RIG_OPS, MODEL_OPS, AUDIO_OPS, GRAPH_OPS, REVIEW_OPS, LIB_OPS, PLANET_OPS, FP_OPS, FP2D_OPS);
+Object.assign(OPS, RIG_OPS, MODEL_OPS, AUDIO_OPS, GRAPH_OPS, REVIEW_OPS, LIB_OPS, PLANET_OPS, FP_OPS, FP2D_OPS, CLEANUP_OPS);
 export const OP_NAMES = Object.keys(OPS);
