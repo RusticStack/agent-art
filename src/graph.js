@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { audioStore } from './audio/ops.js';
 import { modelDefs } from './modelops.js';
+import { expandDef } from './kitparts.js';
 import { assetType, assetTypes, subOwnerKind } from './assettypes.js';
 
 export const RELS = ['part_of', 'variant_of', 'view_of', 'layer_of', 'uses_palette', 'rendered_from', 'exports_to', 'depends_on', 'replaces'];
@@ -139,16 +140,38 @@ export class Graph {
       const id = `model:${m.name}`;
       if (m.project) add(id, 'part_of', `project:${m.project}`);
       const textures = new Set(), sub = new Set();
+      const tex = (v) => { if (e.docs.has(v)) textures.add(v); };
       const scan = (v, key) => {
-        if (typeof v === 'string') { if (key === 'model') sub.add(v); else if (TEX_KEYS.has(key) && e.docs.has(v)) textures.add(v); return; }
+        if (typeof v === 'string') {
+          if (key === 'model') sub.add(v);
+          else if (key === 'trim') { const i = v.lastIndexOf(':'); tex(i > 0 ? v.slice(0, i) : v); } // trim:"sheet:strip"
+          else if (TEX_KEYS.has(key)) tex(v);
+          return;
+        }
         if (Array.isArray(v)) { for (const x of v) scan(x, key); return; }
-        if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) scan(x, k === 'canvas' ? key || 'texture' : k);
+        if (v && typeof v === 'object') {
+          for (const [k, x] of Object.entries(v)) {
+            // {canvas} inherits its slot; every slot of a textures:{} map is a texture; trim:{sheet}
+            const ck = k === 'canvas' ? (key && key !== 'trim' ? key : 'texture') : TEX_MAPS.has(key) ? 'texture' : key === 'trim' && k === 'sheet' ? 'texture' : k;
+            scan(x, ck);
+          }
+        }
+      };
+      const scanPart = (p) => {
+        if (!p || typeof p !== 'object') return;
+        if (p.type === 'baked' && typeof p.mesh === 'string') sub.add(p.mesh); // art_model boolean / remesh / decimate result
+        scan(p, null);
       };
       for (const p of m.parts || []) {
         if (!p) continue;
         if (p.name) add(`modelpart:${m.name}/${p.name}`, 'part_of', id);
-        scan(p, null);
+        scanPart(p);
       }
+      // kit assemblies (ships, rooms, industrial pieces) expand into plain parts: their slots
+      // (nozzle, frame, glass, ...) only become texture fields after expansion
+      try { const x = expandDef(m); if (x !== m) for (const p of x.parts || []) scanPart(p); } catch { /* an invalid kit part must not break the graph */ }
+      scan(m.overlays, 'overlays');
+      scan(m.materials, 'materials'); // materials v2: detail {texture, normal}
       for (const t of textures) add(id, 'depends_on', `canvas:${t}`);
       for (const s of sub) if (s !== m.name) add(id, 'depends_on', `model:${s}`);
     }
@@ -548,7 +571,17 @@ export class Graph {
 }
 
 /** Part fields that name a texture canvas. */
-const TEX_KEYS = new Set(['texture', 'side', 'top', 'bottom', 'front', 'back', 'left', 'right', 'faces', 'emissive', 'overlay', 'overlays', 'base', 'variants', 'texture_top', 'texture_side']);
+const TEX_KEYS = new Set([
+  'texture', 'side', 'top', 'bottom', 'front', 'back', 'left', 'right', 'faces', 'emissive', 'overlay', 'overlays', 'base', 'variants', 'texture_top', 'texture_side',
+  // extrude / lathe / sweep / ruins images and masks
+  'holes', 'depth_map', 'profile', 'cap', 'mask', 'avoid',
+  // hulls and structures
+  'rim', 'inner', 'groove', 'plate_texture', 'tex', 'rail', 'rail_texture', 'brace_texture', 'frame',
+  // materials v2 detail maps
+  'detail', 'normal',
+]);
+/** Part fields whose every value is a texture slot (kit assemblies: textures:{frame, glass, ...}). */
+const TEX_MAPS = new Set(['textures']);
 
 const textOut = (r) => ({ text: r.text });
 
