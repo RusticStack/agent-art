@@ -365,9 +365,19 @@ function applyIK(rig, VP, src) {
       const D = Math.hypot(pe.x - pa.x, pe.y - pa.y), d = Math.hypot(T[0] - pa.x, T[1] - pa.y);
       if (D > 1e-6) {
         const sa = poseOf(rig, VP, A).sy, sb = poseOf(rig, VP, B).sy;
-        const f = clamp(d / D, 0.25, 1 / Math.max(sa, sb, 1e-6));
-        set(A, 'sy', sa * lerp(1, f, w));
-        set(B, 'sy', sb * lerp(1, f, w));
+        // shorten both bones uniformly; lengthen each foreshortened bone toward its full length
+        // (sy 1), so one bone already at full length does not lock the other
+        let fa, fb;
+        if (d <= D) fa = fb = Math.max(d / D, 0.25);
+        else {
+          const la = Math.hypot(pb.x - pa.x, pb.y - pa.y), lb = Math.hypot(pe.x - pb.x, pe.y - pb.y);
+          const ra = sa < 1 ? la * (1 / Math.max(sa, 1e-6) - 1) : 0, rb = sb < 1 ? lb * (1 / Math.max(sb, 1e-6) - 1) : 0;
+          const k = ra + rb > 1e-9 ? Math.min(1, (d - D) / (ra + rb)) : 0;
+          fa = la > 1e-6 ? 1 + (k * ra) / la : 1;
+          fb = lb > 1e-6 ? 1 + (k * rb) / lb : 1;
+        }
+        set(A, 'sy', sa * lerp(1, fa, w));
+        set(B, 'sy', sb * lerp(1, fb, w));
         W = worldOf(rig, VP, src);
         const q = W[end], aim = adiff(Math.atan2(q.y - pa.y, q.x - pa.x) / D2R, Math.atan2(T[1] - pa.y, T[0] - pa.x) / D2R);
         set(A, 'rot', poseOf(rig, VP, A).rot + w * aim);

@@ -412,3 +412,21 @@ test('spritesheet export: json:false skips the sidecar', () => {
   const b = e.run('export_animation', { canvas: 'bot', format: 'spritesheet', path: path.join(dir, 'b') });
   assert.ok(fs.existsSync(b.json), 'default still writes the json');
 });
+
+test('plant: depth-plane leg IK lengthens a foreshortened bone even when the other is at full length', () => {
+  const e = new Engine({ home: tmp() });
+  e.run('rig_create', { name: 'hd', frame: [128, 192], template: 'humanoid_hd' });
+  const def = e.get('hd_parts').meta.rig;
+  const rig = normalizeRig(def);
+  for (const view of ['front', 'back']) {
+    const ground = solvePose(rig, {}, view).world.foot_f.y;
+    const poses = plantFeet(rig, animatePoses(rig, { keys: def.presets.crouch_walk.keys, frames: 16 }), view);
+    let n = 0;
+    for (const p of poses) for (const foot of rig.feet) if (p.views?.[view]?.ik?.[foot]) {
+      n++;
+      const y = solvePose(rig, p, view).world[foot].y;
+      assert.ok(Math.abs(y - ground) < 1, `${view} ${foot}: planted ankle ${y.toFixed(2)} on ground ${ground}`);
+    }
+    assert.ok(n > 0);
+  }
+});
