@@ -22,12 +22,12 @@ const log = (...a) => process.stderr.write(`[agent-art] ${a.join(' ')}\n`);
 export const INSTRUCTIONS = `Agent Art: pixel-art editor for agents (sprites, tiles, textures, icons, UI, animations, 2.5D scenes, game assets). The user watches live in a web UI (art_open_ui).
 Workflow: palette ramps first (art_palette ramp) -> flat silhouettes -> shade (auto form shading) -> outline -> hand detail (grid) -> art_critique -> fix -> art_view.
 Multi-asset work: art_project create (shared palette + style notes), review with art_sheet. Any character/creature with more than one view or frame: use art_rig (template:"humanoid"|"humanoid_hd" (detailed 64x96+)|"blob"|"flyer" is fastest; templates are only defaults) instead of hand-drawing frames, so every frame stays the same asset. Several characters sharing motion: art_anim (skeleton + clip library + skins + batch to game strips).
-3D (HD-2D maps, props -> .glb): art_model. Planets, ground terrain, skyboxes, asteroid fields: art_planet. First-person arms + gun/attachment sweeps: art_fp.
+3D (HD-2D maps, props -> .glb): art_model. Planets, ground terrain, skyboxes, asteroid fields: art_planet. First-person arms + gun/attachment sweeps: art_fp. Combat effects (muzzle flashes, impacts, decals, explosions): art_fx.
 Audio (SFX, music, mixing; you cannot hear, so read analyze/critique reports): art_audio.
 The user leaves review notes on assets in the web UI: art_review list (replies say when the asset you touch has open notes).
 Retire superseded art with art_cleanup (plan -> apply; soft delete to a trash, restore undoes it).
 Orient yourself with art_graph (summary / query: what is part of what, a few hundred chars) instead of art_info on everything; record relations with art_graph link / group / tag / note.
-Details on demand: art_help {topic: workflow|textures|characters|animation|rig|library|melee|skin2d|scenes|hires|minecraft|3d|materials|audio|music|mixing|perception|graph|planets|cleanup} or {op:"<draw command>"}.`;
+Details on demand: art_help {topic: workflow|textures|characters|animation|rig|library|melee|skin2d|scenes|hires|minecraft|3d|materials|audio|music|mixing|perception|graph|planets|cleanup|fx} or {op:"<draw command>"}.`;
 
 const S = {
   canvas: { type: 'string' },
@@ -130,7 +130,7 @@ export const TOOLS = [
   },
   {
     name: 'art_help',
-    description: 'Docs on demand: {op:"shade"} full options + example for a draw command; {topic} guides: workflow, textures, characters, animation, rig, library, scenes, hires, minecraft, 3d, audio, music, mixing, perception, graph, planets; {skill} step-by-step recipes.',
+    description: 'Docs on demand: {op:"shade"} full options + example for a draw command; {topic} guides: workflow, textures, characters, animation, rig, library, scenes, hires, minecraft, 3d, audio, music, mixing, perception, graph, planets, fx; {skill} step-by-step recipes.',
     inputSchema: {
       type: 'object',
       properties: { op: { type: 'string' }, topic: { type: 'string', enum: ['index', 'ops', ...Object.keys(TOPICS)] }, skill: { type: 'string', enum: Object.keys(SKILLS) } },
@@ -384,6 +384,19 @@ export const TOOLS = [
       required: ['action'],
     },
     run: (call, a) => call(`fp_${a.action}`, a),
+  },
+  {
+    name: 'art_fx',
+    description: 'Combat FX as seeded pixel-art flipbooks (sheets <= 1024 px, Roblox grids) + engine metadata (blend, fps, loop, pivot, emitters, light curve, fp shake/flash, sound) in exports/fx/fx.json. make {type: muzzle|tracer|casing|dust|impact|decal|explosion|smoke|fire|sparks|steam|strobe|haze|particles, variant, seed, size, frames, palette, hue, view?, suppressed?}; batch {preset|items}; preview {..., over?:{canvas, anchor}} (GIF); list; export {group}. art_help {topic:"fx"}.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['make', 'batch', 'preview', 'list', 'export'] }, type: { type: 'string' }, variant: { type: ['string', 'array'] }, seed: { type: ['integer', 'string'] }, size: { type: ['integer', 'array'] },
+        frames: { type: 'integer' }, fps: { type: 'number' }, palette: { type: ['string', 'array'] }, hue: { type: 'number' }, view: { type: 'string' }, suppressed: { type: 'boolean' }, name: { type: 'string' }, group: { type: 'string' }, items: { type: 'array' }, preset: { type: 'string' }, over: { type: 'object' },
+      },
+      required: ['action'],
+    },
+    run: (call, a) => call(`fx_${a.action}`, a),
   },
   {
     name: 'art_graph',

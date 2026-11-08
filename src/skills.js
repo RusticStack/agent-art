@@ -3,6 +3,7 @@
 // {skill}, as MCP prompts, and as Claude Code / agent skill files (skills/<name>/SKILL.md).
 import { AUDIO_SKILLS } from './audio/docs.js';
 import { PLANET_SKILLS } from './space/docs.js';
+import { FX_SKILLS } from './fx/docs.js';
 
 const J = (o) => JSON.stringify(o);
 
@@ -261,7 +262,7 @@ Keep pieces light (< 500 tris), reuse a few textures, characters stay 2D billboa
   },
 };
 
-Object.assign(SKILLS, AUDIO_SKILLS, PLANET_SKILLS);
+Object.assign(SKILLS, AUDIO_SKILLS, PLANET_SKILLS, FX_SKILLS);
 
 export function skillText(name) {
   const s = SKILLS[name];

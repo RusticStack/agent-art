@@ -1,0 +1,189 @@
+// art_fx engine ops: make / batch / preview / list / export. Sheets + JSON go to <exports>/<path|"fx">/;
+// every make merges its entry into <dir>/fx.json (groups -> id -> metadata) that export validates and
+// writes out as the manifest the game loads.
+import fs from 'node:fs';
+import path from 'node:path';
+import { encodePNG } from '../png.js';
+import { encodeGIF } from '../gif.js';
+import { packImages } from '../sheet.js';
+import { Doc } from '../doc.js';
+import { upscale } from '../space/noise.js';
+import { FX, FX_TYPES, WEAPONS, SURFACES, FP_FRAME, FP_MUZZLE } from './effects.js';
+import { DECAL_KINDS } from './decals.js';
+import { normFx, renderFx, validateFxMeta, presetItems, renderAt, BLENDS, FACINGS, ALL_TYPES } from './render.js';
+import { compositeOver, backdrop, hexRGB, texLimit, MAX_TEX } from './raster.js';
+
+const GROUP_RE = /^[A-Za-z0-9_\-.]{1,64}$/;
+const MANIFEST = 'fx.json';
+
+function outDir(engine, a) {
+  const d = engine.resolvePath(a.path || 'fx', engine.exportDir);
+  fs.mkdirSync(d, { recursive: true });
+  return d;
+}
+function paletteOf(engine, v) {
+  if (!v) return null;
+  if (Array.isArray(v)) { if (!v.length) throw new Error('palette is empty'); return v.map(hexRGB); }
+  if (typeof v === 'string' && v.startsWith('project:')) {
+    const p = engine.getProject(v.slice(8)), pal = Object.values(p.palette || {}).map((c) => hexRGB(String(c).slice(0, 7)));
+    if (!pal.length) throw new Error(`project "${p.name}" has no palette`);
+    return pal;
+  }
+  throw new Error('palette must be a list of #rrggbb or "project:<name>"');
+}
+function readManifest(dir) {
+  const f = path.join(dir, MANIFEST);
+  return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : { version: 1, generator: 'agent-art art_fx', groups: {} };
+}
+const writeJSON = (f, o) => fs.writeFileSync(f, JSON.stringify(o, null, 1));
+const png = (dir, rel, w, h, data) => { texLimit(w, h, rel); fs.writeFileSync(path.join(dir, rel), encodePNG(w, h, data)); return rel; };
+function groupOf(a) { const g = a.group ?? 'fx'; if (!GROUP_RE.test(g)) throw new Error('"group" must be 1-64 chars of letters, digits, _ - .'); return g; }
+
+/** Peak frame of an effect over a backdrop (contact sheets / previews). */
+function peakImage(r) {
+  if (r.decal) { const bg = backdrop(r.decal.width, r.decal.height); return compositeOver(bg, { width: r.decal.width, data: r.decal.albedo }, 'alpha'); }
+  const bg = backdrop(r.sheet.width, r.sheet.height);
+  return compositeOver(bg, r.sheet, r.o.blend === 'distortion' ? 'alpha' : r.o.blend);
+}
+/** Write one rendered effect's files; -> meta (file names filled). */
+function writeFx(dir, r) {
+  const { o, meta } = r;
+  if (r.decal) {
+    const A = r.decal, id = o.id;
+    meta.maps.albedo = meta.file = png(dir, `${id}.png`, A.width, A.height, A.albedo);
+    meta.maps.normal = png(dir, `${id}_n.png`, A.width, A.height, A.normal);
+    meta.maps.height = png(dir, `${id}_h.png`, A.width, A.height, A.heightmap);
+    if (A.emissive) meta.maps.emissive = png(dir, `${id}_e.png`, A.width, A.height, A.emissive);
+    return meta;
+  }
+  meta.file = png(dir, `${o.id}.png`, r.sheet.width, r.sheet.height, r.sheet.data);
+  meta.roblox.file = r.straight ? png(dir, `${o.id}_straight.png`, r.straight.width, r.straight.height, r.straight.data) : meta.file;
+  return meta;
+}
+function toCanvas(engine, name, r, source) {
+  const fr = r.frames, [w, h] = r.o.cell, d = new Doc({ name, width: w, height: h * fr.length, frameHeight: fr.length > 1 ? h : null });
+  fr.forEach((f, k) => d.layers[0].data.set(f, k * w * h * 4));
+  d.meta = { generated: 'art_fx', fx: r.meta.id, blend: r.o.blend };
+  if (fr.length > 1) d.animations[r.o.id.slice(0, 64)] = { frames: fr.map((_, k) => k), durations: fr.map(() => Math.round(1000 / r.o.fps)), loop: r.o.loop, direction: 'forward' };
+  engine.attach(d);
+  engine.changed(d, { op: 'fx', source, label: 'art_fx render', structural: true });
+  return name;
+}
+function makeOne(engine, a, dir, group, man, source) {
+  const o = normFx({ ...a, palette_rgb: paletteOf(engine, a.palette) });
+  const r = renderFx(o), meta = writeFx(dir, r), errs = validateFxMeta(meta);
+  if (errs.length) throw new Error(`fx metadata invalid: ${errs.join('; ')}`);
+  (man.groups[group] ??= {})[o.id] = meta;
+  if (a.canvas && !r.decal) toCanvas(engine, typeof a.canvas === 'string' ? a.canvas : o.id, r, source);
+  return r;
+}
+const summary = (m) => ({ id: m.id, file: m.file, sheet: m.sheet, cell: m.cell, frames: m.frames, fps: m.fps, loop: m.loop, blend: m.blend, ...(m.roblox?.flipbook ? { roblox: m.roblox.flipbook } : {}), ms: m.ms });
+
+// ---------- ops ----------
+function fxMake(a, source) {
+  const dir = outDir(this, a), group = groupOf(a), man = readManifest(dir);
+  const r = makeOne(this, a, dir, group, man, source);
+  writeJSON(path.join(dir, MANIFEST), man);
+  const img = upscale(peakImage(r), Math.max(1, Math.min(4, Math.floor(512 / Math.max(r.meta.sheet[0], r.meta.sheet[1])))));
+  return { ...summary(r.meta), dir, group, meta: r.meta, image: encodePNG(img.width, img.height, img.data) };
+}
+
+function fxBatch(a, source) {
+  const t0 = Date.now(), dir = outDir(this, a), group = groupOf(a), man = readManifest(dir);
+  const base = { seed: a.seed, hue: a.hue, palette: a.palette };
+  const items = a.items ?? presetItems(a.preset ?? 'all');
+  if (!Array.isArray(items) || !items.length) throw new Error('batch needs items:[{type, variant, ...}] or preset: all | muzzle | impact');
+  // validate everything before writing anything
+  items.forEach((it, i) => { try { normFx({ ...base, ...it }); } catch (e) { throw new Error(`items[${i}]: ${e.message}`); } });
+  const shown = [], made = [];
+  for (const it of items) {
+    const r = makeOne(this, { ...base, ...it }, dir, group, man, source);
+    made.push(summary(r.meta));
+    shown.push({ img: peakImage(r), label: r.o.id.replace(/_/g, ' ').slice(0, 26), sub: `${r.meta.sheet[0]}x${r.meta.sheet[1]} ${r.meta.frames}f` });
+  }
+  writeJSON(path.join(dir, MANIFEST), man);
+  const sheet = packImages(shown, { checker: false, cell: a.cell ?? 128, columns: a.columns ?? Math.min(8, shown.length) });
+  const contact = `${group}_contact.png`;
+  fs.writeFileSync(path.join(dir, contact), encodePNG(sheet.width, sheet.height, sheet.data));
+  const big = Math.max(...made.map((m) => Math.max(...m.sheet)));
+  return { group, dir, count: made.length, largest_sheet_px: big, contact, ms: Date.now() - t0, effects: a.verbose ? made : made.map((m) => m.id), image: encodePNG(sheet.width, sheet.height, sheet.data) };
+}
+
+/** Sheet + GIF; over:{canvas, frame?, anchor?} composites an fp muzzle flash (or any effect) on a canvas frame. */
+function fxPreview(a) {
+  const dir = path.join(outDir(this, a), 'previews');
+  fs.mkdirSync(dir, { recursive: true });
+  const scale = Math.max(1, Math.min(8, Math.round(Number(a.scale ?? 3))));
+  let at = null, bgImg = null;
+  const args = { ...a };
+  if (a.over) {
+    const d = this.get(a.over.canvas), f = Math.round(Number(a.over.frame ?? 0)), fh = d.frameHeight || d.height;
+    if (!(f >= 0 && f < d.frames)) throw new Error(`over.frame out of range (0..${d.frames - 1})`);
+    const full = d.composite();
+    bgImg = { width: d.width, height: fh, data: full.slice(f * d.width * fh * 4, (f + 1) * d.width * fh * 4) };
+    if (Array.isArray(a.over.anchor)) at = a.over.anchor.map(Number);
+    else {
+      const name = a.over.anchor ?? 'socket_muzzle', anim = Object.values(d.meta?.anchors ?? {})[0], an = anim?.[f]?.[name];
+      if (!an) throw new Error(`canvas "${d.name}" has no anchor "${name}" on frame ${f} (art_model render with sockets writes them; or give over.anchor:[x, y])`);
+      at = an;
+      if (args.type === 'muzzle' && args.aim_deg === undefined && args.anchor === undefined && an[2] !== undefined) args.aim_deg = an[2];
+    }
+    if (args.type === 'muzzle') { args.view ??= 'fp'; if (args.anchor === undefined && args.aim_deg === undefined) args.anchor = at.slice(0, 2), args.frame_size = [d.width, fh]; }
+  }
+  const o = normFx({ ...args, palette_rgb: paletteOf(this, a.palette) }), r = renderFx(o);
+  if (r.decal) {
+    const img = upscale(peakImage(r), scale), f = `${o.id}_preview.png`;
+    fs.writeFileSync(path.join(dir, f), encodePNG(img.width, img.height, img.data));
+    return { id: o.id, dir, files: [f], image: encodePNG(img.width, img.height, img.data) };
+  }
+  const piv = FX[o.type].meta(o).pivot, [cw, ch] = o.cell, blend = o.blend === 'distortion' ? 'alpha' : o.blend;
+  const frames = r.frames.map((fr) => {
+    let bg;
+    if (bgImg) { bg = { ...bgImg, data: bgImg.data.slice() }; for (let i = 3; i < bg.data.length; i += 4) if (!bg.data[i]) { bg.data[i - 3] = 26; bg.data[i - 2] = 28; bg.data[i - 1] = 34; bg.data[i] = 255; } compositeOver(bg, { width: cw, data: fr }, blend, Math.round(at[0] - piv[0]), Math.round(at[1] - piv[1]), cw); }
+    else { bg = backdrop(cw, ch); compositeOver(bg, { width: cw, data: fr }, blend); }
+    return upscale(bg, scale);
+  });
+  const W = frames[0].width, H = frames[0].height;
+  const gif = encodeGIF(W, H, frames.map((f) => ({ data: f.data, delay: Math.round(1000 / o.fps) })), { loop: true });
+  const gf = `${o.id}${bgImg ? '_over' : ''}.gif`;
+  fs.writeFileSync(path.join(dir, gf), gif);
+  // strip of every frame (reply image + file)
+  const strip = packImages(frames.map((f, k) => ({ img: f, label: `${k}` })), { checker: false, columns: Math.min(frames.length, bgImg ? 2 : 8) });
+  const sf = `${o.id}${bgImg ? '_over' : ''}_frames.png`;
+  fs.writeFileSync(path.join(dir, sf), encodePNG(strip.width, strip.height, strip.data));
+  return { id: o.id, dir, files: [gf, sf], frames: o.frames, fps: o.fps, ...(at ? { anchor: at, aim_deg: +((o.aim ?? 0) * 180 / Math.PI).toFixed(1) } : {}), image: encodePNG(strip.width, strip.height, strip.data) };
+}
+
+function fxList(a) {
+  const dir = this.resolvePath(a.path || 'fx', this.exportDir), man = fs.existsSync(path.join(dir, MANIFEST)) ? readManifest(dir) : null;
+  return {
+    types: Object.fromEntries(FX_TYPES.map((t) => [t, { about: FX[t].about, variants: FX[t].variants }]).concat([['decal', { about: 'decal atlas (albedo + normal + height + emissive), rows = kinds, columns = seeded variants', variants: ['all', ...Object.keys(DECAL_KINDS)] }]])),
+    weapon_classes: Object.fromEntries(Object.entries(WEAPONS).map(([k, w]) => [k, { cell: w.cell, sound: w.sound }])), surfaces: Object.fromEntries(Object.entries(SURFACES).map(([k, s]) => [k, { blend: s.blend, decal: s.decal, sound: s.sound }])),
+    muzzle_views: ['side', 'front', 'fp'], fp: { frame: FP_FRAME, default_anchor: FP_MUZZLE }, blends: BLENDS, facings: FACINGS, presets: ['all', 'muzzle', 'impact'], limits: { sheet_px: MAX_TEX, frames: '1..64 (Roblox: 4, 16, 64)', size: '4..256 px per cell' },
+    manifest: man ? Object.fromEntries(Object.entries(man.groups).map(([g, m]) => [g, Object.keys(m).length])) : null,
+  };
+}
+
+/** Validate a manifest group (or all) and write <group>.fx.json (the file the game loads). */
+function fxExport(a) {
+  const dir = this.resolvePath(a.path || 'fx', this.exportDir), man = readManifest(dir);
+  const groups = a.group ? [groupOf(a)] : Object.keys(man.groups);
+  if (!groups.length) throw new Error(`no effects in ${path.join(dir, MANIFEST)}: run art_fx make / batch first`);
+  const issues = [], written = [];
+  for (const g of groups) {
+    const ents = man.groups[g];
+    if (!ents) throw new Error(`no group "${g}" (have: ${Object.keys(man.groups).join(', ')})`);
+    for (const m of Object.values(ents)) {
+      issues.push(...validateFxMeta(m));
+      for (const f of [m.file, m.roblox?.file, ...Object.values(m.maps || {})].filter(Boolean)) if (!fs.existsSync(path.join(dir, f))) issues.push(`${m.id}: missing file ${f}`);
+    }
+    const out = { version: 1, generator: 'agent-art art_fx', group: g, base: './', fp_frame: FP_FRAME, effects: ents };
+    const f = `${g}.fx.json`;
+    writeJSON(path.join(dir, f), out);
+    written.push({ group: g, file: f, effects: Object.keys(ents).length });
+  }
+  return { dir, written, valid: !issues.length, issues: issues.slice(0, 40) };
+}
+
+export const FX_OPS = { fx_make: fxMake, fx_batch: fxBatch, fx_preview: fxPreview, fx_list: fxList, fx_export: fxExport };
+export { ALL_TYPES, renderAt };

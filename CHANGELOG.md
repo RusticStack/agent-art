@@ -22,6 +22,18 @@
 - `art_help {topic:"melee"}`: workflow, manifest fields, Three.js and Roblox runtime notes. Demos in `docs/melee/` (`scripts/melee-demos.js`).
 - The tool-list size limit rises from 40340 to 40700 (40655 measured on this branch, 40107 on 0.8.0).
 
+### Combat FX (`art_fx`)
+
+- New tool `art_fx` (ops in `src/fx/`): seeded, deterministic pixel-art effect flipbooks plus engine metadata.
+  - `make {type, variant, seed, size, frames, fps, hue, palette, ...}`: muzzle flashes for pistol / smg / rifle / dmr / shotgun / lmg / sniper / launcher / energy / plasma in `side`, `front` and `fp` views (fp: centred on the fp muzzle anchor, flame cone toward the frame centre), `suppressed`; tracers (ballistic, energy, plasma); casing spin loops (rifle, pistol, shotgun); mag-drop / landing dust; impacts per surface (metal, concrete, stone, glass, dirt, sand, water, flesh, armor, shield hex ripple, electronics arc); explosions (frag, plasma, emp shockwave, incendiary); smoke (column, grenade, muzzle, trail), fire, sparks (shower, arc), steam, alarm strobes, heat-haze distortion masks, 8x8 particle cells.
+  - `decal`: atlas of bullet holes per surface, scorch, blood and energy burns with normal, height and emissive maps (1 px gutters, uniform cells).
+  - Sheets are at most 1024 px; square cells use Roblox flipbook grids (4 / 16 / 64 frames = 2x2 / 4x4 / 8x8). Alpha is 1-bit; `premultiplied` sheets (glow texels alpha 0, smoke 255) also get a `_straight` copy for Roblox.
+  - Metadata per effect: blend, frames / fps / loop, pivot, facing, world size, emitter hints (count, velocity cone, gravity, drag, lifetime, size / colour / alpha over life), point-light intensity curve, fp shake / flash, `art_audio` recipe names, Roblox settings; validated by `validateFxMeta`.
+  - Colours come from hue-shifted ramps with ordered dither; `palette` (list or `project:<name>`) snaps every ramp onto the palette.
+  - `batch {preset|items}` (contact sheet), `preview` (GIF + frame strip; `over:{canvas, anchor}` composites on a canvas frame at an anchor such as `socket_muzzle`), `list`, `export {group}` (writes `<group>.fx.json`).
+- `art_help {topic:"fx"}` (three.js flipbook + light-curve snippet, Roblox ParticleEmitter notes) and the `combat-fx` skill. Demos in `docs/fx/`.
+- Tool-list budget raised from 40340 to 41266 chars (art_fx: 41216 measured).
+
 ## 0.8.0
 
 ### Skeletal skinning in `art_model`
