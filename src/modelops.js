@@ -499,7 +499,7 @@ export const MODEL_OPS = {
     const def = getModel(this, a.name);
     const built = build(this, def);
     const info = rigOf(def, built, true);
-    const size = a.size === undefined ? [64, 64] : typeof a.size === 'number' ? [a.size, a.size] : a.size;
+    const size = a.size === undefined ? [64, 64] : typeof a.size === 'number' ? [a.size, a.size] : Array.isArray(a.size) ? a.size : [];
     const [FW, FH] = size.map((v) => Math.round(Number(v)));
     if (!(FW >= 4 && FH >= 4 && FW <= 1024 && FH <= 1024)) throw new Error('size must be [w, h] px, 4..1024');
     for (const k of ['only', 'hide']) if (a[k] !== undefined && !Array.isArray(a[k])) throw new Error(`${k} must be a list of part (node) names`);
@@ -520,8 +520,12 @@ export const MODEL_OPS = {
       grid = { columns: yaws.length, rows: pitches.length * rolls.length, yaw: yaws, pitch: pitches, ...(rolls.length > 1 ? { roll: rolls } : {}) };
     } else if (a.angles) {
       if (!Array.isArray(a.angles) || !a.angles.length) throw new Error('angles must be [{yaw?, pitch?, roll?}, ...] degrees');
-      angles = a.angles.map((x) => ({ yaw: Number(x.yaw ?? 0), pitch: Number(x.pitch ?? 0), roll: Number(x.roll ?? 0) }));
+      angles = a.angles.map((x) => {
+        if (!x || typeof x !== 'object') throw new Error('angles must be [{yaw?, pitch?, roll?}, ...] degrees');
+        return { yaw: Number(x.yaw ?? 0), pitch: Number(x.pitch ?? 0), roll: Number(x.roll ?? 0) };
+      });
     }
+    if (a.pivot && !(Array.isArray(a.pivot) && a.pivot.length === 3 && a.pivot.every((v) => Number.isFinite(Number(v))))) throw new Error('pivot must be [x,y,z] px');
     const pivot = a.pivot ? a.pivot.map(Number) : [0, 0, 0];
     const frames = [];
     for (const ang of angles) for (const s of samples) frames.push({ ang, s });
@@ -540,6 +544,7 @@ export const MODEL_OPS = {
     const cam = makeCamera(camSpec, FW, FH, fit, { fov: a.fov, zoom: a.zoom, margin: a.margin });
     const L = a.light || {};
     const lopts = { bg: null };
+    if (L.dir && !(Array.isArray(L.dir) && L.dir.length === 3 && L.dir.every((v) => Number.isFinite(Number(v))))) throw new Error('light.dir must be [x,y,z] (toward the light)');
     if (L.dir) { const d = L.dir.map(Number), l = Math.hypot(...d) || 1; lopts.light = d.map((v) => v / l); }
     if (L.ambient !== undefined) lopts.ambient = Math.max(0, Math.min(1, Number(L.ambient)));
     if (L.color) { const c = parseColor(L.color); lopts.color = [c[0] / 255, c[1] / 255, c[2] / 255]; }
