@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1
+
+### Docs
+
+- README: tested examples for the ship kit, `humanoid_hd` (plant, secondary, IK), FPS/sci-fi SFX and custom glide/glitch sounds; 0.5 behaviour changes; updated tools table.
+- New built-in skills `ship-model` and `rig-hd`; `sfx-pack` covers firearms, weapon handling, footsteps and sci-fi sounds.
+
 ## 0.5.0
 
 ### Audio

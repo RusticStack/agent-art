@@ -1,6 +1,6 @@
 {
   "name": "@rusticstack/agent-art",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Pixel art for AI agents: MCP server + live web UI for sprites, rigs and animations, tilesets, textures, icons and 2.5D scenes.",
   "type": "module",
   "bin": {
