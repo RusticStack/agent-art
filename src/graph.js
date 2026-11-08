@@ -27,12 +27,14 @@ export class Graph {
   constructor(engine) {
     this.engine = engine;
     this.file = path.join(engine.home, 'graph.json');
-    this.data = { version: 1, nodes: {}, edges: [], groups: {} };
+    // null-prototype maps: group names / node ids are user input ("__proto__" must not reach Object.prototype)
+    const dict = (o) => Object.assign(Object.create(null), o && typeof o === 'object' ? o : {});
+    this.data = { version: 1, nodes: dict(), edges: [], groups: dict() };
     this.cache = null;
     try {
       if (fs.existsSync(this.file)) {
         const j = JSON.parse(fs.readFileSync(this.file, 'utf8'));
-        this.data = { version: 1, nodes: j.nodes || {}, edges: Array.isArray(j.edges) ? j.edges : [], groups: j.groups || {}, reviews: Array.isArray(j.reviews) ? j.reviews : [], reviewSeq: j.reviewSeq || 0 };
+        this.data = { version: 1, nodes: dict(j.nodes), edges: Array.isArray(j.edges) ? j.edges : [], groups: dict(j.groups), reviews: Array.isArray(j.reviews) ? j.reviews : [], reviewSeq: j.reviewSeq || 0 };
       }
     } catch (e) {
       process.stderr.write(`[agent-art] could not load graph.json: ${e.message}\n`);
