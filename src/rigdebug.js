@@ -55,7 +55,8 @@ function stackOf(rig, pose, view) {
 /** {view, source, parts, frames:[{frame, stack:[...]}]} for the Layers view. */
 export function rigLayers(engine, name, q = {}) {
   if (hasOp('rig_layers')) {
-    try { return { ...engine.peek('rig_layers', { name, ...q }), source: 'rig_layers' }; } catch { /* use the fallback */ }
+    // only when the op answers in this endpoint's shape (per-frame stacks); art_rig layers (0.7) reports one frame's draw order
+    try { const r = engine.peek('rig_layers', { name, ...q }); if (Array.isArray(r?.frames) && r.frames.every((f) => Array.isArray(f?.stack))) return { ...r, source: 'rig_layers' }; } catch { /* use the fallback */ }
   }
   const { def, rig } = rigOf(engine, name);
   const { view, poses, source } = posesFor(engine, rig, def, q);
@@ -66,7 +67,7 @@ export function rigLayers(engine, name, q = {}) {
 /** One frame as per-part layers (atlas PNG, one frame-sized cell per part in draw order). */
 export function rigDebugRender(engine, name, q = {}) {
   if (hasOp('rig_debug_render')) {
-    try { return { ...engine.peek('rig_debug_render', { name, ...q }), source: 'rig_debug_render' }; } catch { /* fallback */ }
+    try { const r = engine.peek('rig_debug_render', { name, ...q }); if (Array.isArray(r?.stack) && typeof r?.atlas === 'string') return { ...r, source: 'rig_debug_render' }; } catch { /* fallback */ }
   }
   const { d, def, rig } = rigOf(engine, name);
   const { view, poses, source } = posesFor(engine, rig, def, q);

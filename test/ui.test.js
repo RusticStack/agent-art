@@ -141,12 +141,12 @@ test('ui: asset index, model GLB, rig layer stack + debug render, audio, exports
     // the viewer does not write files (export does)
     assert.ok(!fs.existsSync(path.join(home, 'exports', 'crate.glb')));
 
-    const layers = await (await fetch(U('/api/rig/bob/layers?canvas=bob&tag=walk'))).json();
-    assert.equal(layers.frames.length, e.docs.get('bob').animations.walk.frames.length);
+    const layers = await (await fetch(U('/api/rig/bob/layers?canvas=bob&tag=walk_side'))).json();
+    assert.equal(layers.frames.length, e.docs.get('bob').animations.walk_side.frames.length);
     const st = layers.frames[0].stack;
     assert.deepEqual([...st].map((s) => s.z), [...st].map((s) => s.z).sort((x, y) => x - y), 'bottom to top');
     assert.ok(st.every((s) => s.part && typeof s.rule === 'string' && s.rule.length));
-    const dbg = await (await fetch(U('/api/rig/bob/debug?canvas=bob&tag=walk&frame=2'))).json();
+    const dbg = await (await fetch(U('/api/rig/bob/debug?canvas=bob&tag=walk_side&frame=2'))).json();
     assert.deepEqual(dbg.size, [32, 32]);
     assert.ok(dbg.atlas_parts.length >= 5);
     assert.equal(Buffer.from(dbg.atlas, 'base64').subarray(1, 4).toString(), 'PNG');
