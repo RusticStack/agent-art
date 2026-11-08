@@ -26,6 +26,7 @@ export const HANDLING_CLASSES = {
   sniper: { kind: 'long', members: ['sniper'], cell: [46, 11], hands: 2, third_person: 'sniper' },
   launcher: { kind: 'long', members: ['launcher'], cell: [40, 12], hands: 2, third_person: 'launcher' },
   knife: { kind: 'melee', members: ['knife', 'melee'], cell: null, hands: 1, third_person: 'none' },
+  baton: { kind: 'melee', members: ['baton', 'stun_baton', 'club'], cell: null, hands: 1, third_person: 'none' },
   grenade: { kind: 'thrown', members: ['grenade', 'throwable'], cell: null, hands: 1, third_person: 'none' },
   med: { kind: 'item', members: ['med', 'medkit', 'syringe'], cell: null, hands: 2, third_person: 'none' },
   tablet: { kind: 'item', members: ['tablet', 'device'], cell: null, hands: 2, third_person: 'none' },

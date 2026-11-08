@@ -159,14 +159,14 @@ export const MELEE_WEAPONS = {
     model: () => ({
       parts: [
         box([0, -3, -1.2], [1.4, 12, 2.4], rubber, { name: 'handle' }),
-        { ...box([0, 44, -7], [52, 92, 1.8], '#30343a', { bevel: 0.6 }), name: 'panel' },
+        { ...box([0, -2, -7], [52, 92, 1.8], '#30343a', { bevel: 0.6 }), name: 'panel' },
         { ...box([0, 34, -8.1], [26, 9, 0.6], '#8fb8c8', { opacity: 0.65, glass: true }), name: 'visor' },
         box([0, 28, -8.0], [36, 1.6, 0.5], hazard, { name: 'stripe' }),
         { ...box([0, -10, -8.1], [8, 2, 0.6], glow, { material: 'emissive_panel' }), name: 'lamp' },
         { type: 'box', w: 0.1, h: 0.1, d: 0.1, at: [26, 0, -7], texture: dark, name: 'hinge_r', pivot: [0, 0, 0] },
         { type: 'box', w: 0.1, h: 0.1, d: 0.1, at: [-26, 0, -7], texture: dark, name: 'hinge_l', pivot: [0, 0, 0] },
-        { ...box([31, 40, -7], [10, 80, 1.6], '#2b2f34', { bevel: 0.4 }), name: 'wing_r', parent: 'hinge_r' },
-        { ...box([-31, 40, -7], [10, 80, 1.6], '#2b2f34', { bevel: 0.4 }), name: 'wing_l', parent: 'hinge_l' },
+        { ...box([31, -2, -7], [10, 80, 1.6], '#2b2f34', { bevel: 0.4 }), name: 'wing_r', parent: 'hinge_r' },
+        { ...box([-31, -2, -7], [10, 80, 1.6], '#2b2f34', { bevel: 0.4 }), name: 'wing_l', parent: 'hinge_l' },
       ],
       sockets: { grip: S([0, 0, 0]), arm_strap: S([0, -2, 9]), face: S([0, -2, -8]), rim_top: S([0, 44, -8]), rim_bottom: S([0, -48, -8]), edge_a: S([0, 40, -8.2]), edge_b: S([0, -44, -8.2]), strike: S([0, 4, -8.2]), lamp: S([0, -11, -8.4], 'lamp') },
       poses: { folded: { parts: { hinge_r: { rot: [0, -170, 0] }, hinge_l: { rot: [0, 170, 0] } } } },

@@ -6,11 +6,12 @@
 // Gun space: origin = the trigger hand's grip anchor, -Z = muzzle, +Y = up, +X = right.
 import { HANDLING_CLASSES, gripGeometry, scaleGeometry, classOf } from './handling.js';
 import { HEX } from './fppaint.js';
+import { MELEE_WEAPONS } from './meleekit.js';
 
 /** Centimetres per body unit for first-person guns (handling.js geometry is in body units). */
 export const FP_UNIT = { long: { u: 1.6, uw: 2.6 }, pistol: { u: 1.0, uw: 1.5 } };
 export const GUN_CLASSES = ['pistol', 'smg', 'rifle', 'dmr', 'shotgun', 'lmg', 'sniper', 'launcher'];
-export const ITEM_CLASSES = ['unarmed', 'knife', 'grenade', 'med', 'tablet'];
+export const ITEM_CLASSES = ['unarmed', 'knife', 'baton', 'grenade', 'med', 'tablet'];
 export const FP_CLASSES = [...GUN_CLASSES, ...ITEM_CLASSES];
 const r1 = (v) => Math.round(v * 10) / 10;
 
@@ -318,8 +319,27 @@ export const ITEMS = {
   medpen: () => ({ parts: [cyl(0, 0, 6, -6, 1.1, 'hazard', { segments: 10 }), cyl(0, 0, -6, -8, 0.8, 'polymer', { segments: 8 }), cyl(0, 0, 8, 6, 1.0, 'cross_red', { segments: 8 }), box([1.0, -0.3, 0], [0.2, 0.6, 7], 'polymer')], sockets: { grip: { at: [0, 0, 0] }, tip: { at: [0, 0, -8] } } }),
   bandage: () => ({ parts: [{ type: 'cylinder', r: 3.2, h: 5.2, segments: 14, at: [0, -2.6, 0], rotate: [0, 0, 90], pivot: [0, 2.6, 0], texture: HEX.cloth_white }, box([0, 0.2, 2.6], [5, 0.4, 6], 'cloth_white')], sockets: { grip: { at: [0, 0, 0] } } }),
   trauma_kit: () => ({ parts: [box([0, 0, 0], [13, 8, 9], 'od_green', { bevel: 1 }), box([0, 0.2, -4.6], [4.2, 1.2, 0.3], 'cross_red'), box([0, 0.2, -4.6], [1.2, 4.2, 0.3], 'cross_red'), box([0, 4.4, 0], [11, 0.8, 1.2], 'rubber')], sockets: { grip: { at: [0, -1, 4.5] } } }),
+  // melee kit models (meleekit.js, same cm / -Z forward / grip on the origin convention)
+  baton: () => meleeItem('baton'),
+  // the shield as a view model at 0.55 scale: the 92 cm panel at arm's length would fill more than
+  // the frame and overflow a 1024 px sweep cell (its strike line in fpmelee.js uses the same scale)
+  riot_shield: () => meleeItem('riot_shield', FP_SHIELD_SCALE),
   tablet: () => ({ parts: [box([0, 0, 0], [22, 1.6, 15], 'rubber', { bevel: 0.8 }), { ...box([0, 0.85, 0], [18.4, 0.2, 11.6], 'screen'), name: 'screen' }, box([-11.4, 0, 0], [1.4, 2.2, 13], 'polymer_od', { bevel: 0.4 }), box([11.4, 0, 0], [1.4, 2.2, 13], 'polymer_od', { bevel: 0.4 })], sockets: { grip: { at: [-11, 0, 0] }, grip_r: { at: [11, 0, 0] }, screen: { part: 'screen', at: [0, 1, 0] } } }),
 };
+/** View-model scale of the first-person riot shield. */
+export const FP_SHIELD_SCALE = 0.55;
+function meleeItem(id, k = 1) {
+  const m = MELEE_WEAPONS[id].model();
+  if (k === 1) return { parts: m.parts, sockets: m.sockets };
+  // uniform scale of a box-built model (the shield): positions, sizes, bevels, pivots
+  const sv = (v) => v && v.map((x) => r1(x * k));
+  const parts = m.parts.map((p) => {
+    if (p.type !== 'box') throw new Error(`meleeItem scale: ${p.type} parts are not scaled`);
+    return { ...p, w: r1(p.w * k), h: r1(p.h * k), d: r1(p.d * k), at: sv(p.at), ...(p.pivot ? { pivot: sv(p.pivot) } : {}), ...(p.bevel ? { bevel: r1(p.bevel * k) } : {}) };
+  });
+  const sockets = Object.fromEntries(Object.entries(m.sockets).map(([n, o]) => [n, { ...o, at: sv(o.at) }]));
+  return { parts, sockets };
+}
 export function itemModel(id) {
   KIT_BUILDS.item++;
   const mk = ITEMS[id];

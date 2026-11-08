@@ -14,6 +14,8 @@ import { MELEE_WEAPONS, MELEE_IDS, meleeCell } from '../src/meleekit.js';
 import { meleeEvents, segDist, inPoly, hull } from '../src/melee.js';
 import { helpText } from '../src/docs.js';
 import { runTool } from '../src/mcp.js';
+import { bakeClip } from '../src/fpops.js';
+import { fpMeleeCheck } from '../src/fpmelee.js';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'agent-art-melee-'));
 const PAL = { head: '#e0b090', weapon: '#c0c8d0', shield: '#404850', arm: '#7a8a5a', hand: '#d8a070', leg: '#5a6a7a', body: '#6a7a4a', foot: '#3a3020' };
@@ -320,4 +322,66 @@ test('melee: art_anim actions, art_model melee templates and the help topic over
   assert.doesNotMatch(JSON.stringify(m), /error/i);
   const help = helpText({ topic: 'melee' });
   for (const s of ['hits', 'sweep', 'paired', 'root_motion', 'THREE.JS', 'ROBLOX', 'melee_world']) assert.ok(help.includes(s), s);
+});
+
+test('fp melee: gun bash / knife combo / punch / baton / shield clips carry hit events, a volume per active frame, and pass the check', () => {
+  const cases = [['rifle', 'melee', 1], ['pistol', 'melee', 1], ['knife', 'slash', 1], ['knife', 'stab', 1], ['knife', 'combo', 3], ['unarmed', 'melee', 1], ['baton', 'strike', 1], ['baton', 'shield_bash', 1]];
+  for (const [cls, clip, hits] of cases) {
+    const b = bakeClip(cls, clip);
+    const m = b.anim.melee;
+    assert.ok(m, `${cls}.${clip} melee`);
+    assert.equal(m.windows.length, hits, `${cls}.${clip} windows`);
+    const ck = fpMeleeCheck(b.anim);
+    assert.ok(ck.pass, `${cls}.${clip}: ${ck.issues.join('; ')}`);
+    // per hit: windup < active_start <= impact <= active_end < recovery; the impact matches the clip's 'hit' key event
+    const wu = m.events.find((e) => e.e === 'windup').f;
+    m.windows.forEach(([a, z], i) => {
+      const at = (e) => m.events.find((x) => x.e === e && x.hit === i)?.f;
+      assert.ok(wu < at('active_start') && at('active_start') <= at('impact') && at('impact') <= at('active_end') && at('active_end') < at('recovery'), `${cls}.${clip} hit ${i} order`);
+      assert.equal(at('active_start'), a); assert.equal(at('active_end'), z);
+      for (let f = a; f <= z; f++) {
+        const v = m.hits.find((h) => h.f === f)?.volumes[0];
+        assert.ok(v && v.r > 0 && v.eye.a.every(Number.isFinite), `${cls}.${clip} volume on frame ${f}`);
+        assert.ok(v.eye.a[2] < 0 && v.eye.b[2] < 0, `${cls}.${clip} frame ${f}: strike line in front of the eye`);
+      }
+    });
+    const hitKeys = b.anim.events.filter((e) => e.e === 'hit').map((e) => e.f);
+    assert.deepEqual(m.events.filter((e) => e.e === 'impact').map((e) => e.f), hitKeys, `${cls}.${clip} impacts = hit keys`);
+    // events in the fp {f, e} format, sorted
+    assert.ok(m.events.every((e, i) => Number.isInteger(e.f) && typeof e.e === 'string' && (i === 0 || m.events[i - 1].f <= e.f)));
+  }
+  // shield_up: a block window, no strike; the shield rides as item2
+  const su = bakeClip('baton', 'shield_up');
+  assert.deepEqual(su.anim.melee.block, [3, 9]);
+  assert.equal(su.anim.melee.windows.length, 0);
+  assert.ok(su.anim.item2.every((s) => s.id === 'riot_shield') && su.anim.item.every((s) => s.id === 'baton'));
+  // a broken block is reported: impact moved outside its window, a volume removed
+  const bad = structuredClone(bakeClip('knife', 'stab').anim);
+  bad.melee.events.find((e) => e.e === 'impact').f = 9;
+  bad.melee.hits.pop();
+  const r = fpMeleeCheck(bad);
+  assert.ok(!r.pass && r.issues.some((x) => /impact 9 outside/.test(x)) && r.issues.some((x) => /no volume on active frame/.test(x)), r.issues.join('; '));
+});
+
+test('fp melee: deterministic, non-melee fp clips carry no melee block, fp check runs the melee check', () => {
+  const a = bakeClip('knife', 'combo'), b = bakeClip('knife', 'combo');
+  assert.equal(JSON.stringify(a.anim), JSON.stringify(b.anim));
+  assert.ok(Buffer.from(a.back.data).equals(Buffer.from(b.back.data)) && Buffer.from(a.front.data).equals(Buffer.from(b.front.data)));
+  for (const [cls, clip] of [['rifle', 'idle'], ['rifle', 'reload_empty'], ['knife', 'idle'], ['baton', 'walk'], ['grenade', 'throw']]) {
+    const x = bakeClip(cls, clip);
+    assert.equal(x.anim.melee, undefined, `${cls}.${clip}`);
+    assert.equal(x.anim.item2, undefined, `${cls}.${clip}`);
+    // the solved frames' JSON does not carry the 3D poses melee reads
+    assert.ok(!JSON.stringify(x.frames[0]).includes('pose3'));
+  }
+  const e = new Engine({ home: tmp() }), out = path.join(e.home, 'assets');
+  e.run('fp_sweep', { out, guns: [], mags: [], attachments: [], items: ['baton', 'riot_shield'] });
+  e.run('fp_batch', { out, classes: ['baton'], clips: ['strike', 'shield_bash', 'shield_up'], variants: false });
+  const ck = e.run('fp_check', { out, classes: ['baton'] });
+  assert.ok(ck.pass, ck.summary);
+  assert.equal(ck.melee_clips, 3);
+  const fp = JSON.parse(fs.readFileSync(path.join(out, 'manifest', 'fp.json'), 'utf8'));
+  assert.ok(fp.sprites.fp_baton.anims.shield_bash.melee.hits.length === 3 && fp.sprites.fp_baton.anims.shield_bash.item2.length === 10);
+  const c = e.run('fp_composite', { out, class: 'baton', clip: 'shield_bash', frame: 5, zoom: 1 });
+  assert.ok(c.draw_order.includes('item2') && c.draw_order.includes('item'), c.draw_order.join(','));
 });

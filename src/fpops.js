@@ -10,6 +10,7 @@ import { buildRig, renderSweep, packSheets, unpackSheets, anchorJumps } from './
 import { classClips, clipAngles, solveClip, VARIANTS, VARIANT_CLASSES, variantClips } from './fpclips.js';
 import { SKINS, renderBones } from './fparms.js';
 import { colorsOf } from './fppaint.js';
+import { fpMeleeOf, fpMeleeAnim, fpMeleeCheck } from './fpmelee.js';
 import { posedWorld, resolveOffsets } from './modelrig.js';
 import { encodePNG, decodePNG } from './png.js';
 import { packImages } from './sheet.js';
@@ -96,9 +97,9 @@ export function itemGrid(id, step = GRID_STEP) {
     for (const cls of FP_CLASSES) {
       const C = classClips(cls);
       for (const c of Object.values(C)) {
-        if (!c.keys.some((k) => k.item?.id === id)) continue;
+        if (!c.keys.some((k) => k.item?.id === id || k.item2?.id === id)) continue;
         const sol = solveClip(c, classCtx(cls, step, { anglesOnly: true }));
-        for (const fr of sol.frames) if (fr.item?.id === id) vals.push(fr.item);
+        for (const fr of sol.frames) for (const it of [fr.item, fr.item2]) if (it?.id === id) vals.push(it);
       }
     }
     if (!vals.length) return { yaw: [-24, 24, step], pitch: [-24, 24, step] };
@@ -343,7 +344,7 @@ export function bakeClip(cls, clipName, { skin = 'mec', variant = null, engine =
   const sweeps = { gun: ctx.gun, att: ctx.att?.sweep, items: {} };
   const sk = resolveSkin(engine, skin);
   if (magName) sweeps.mag = anySweep(engine, magName, 'mag', magGrid2(engine, magName, cls, step));
-  for (const fr of sol.frames) if (fr.item && !sweeps.items[fr.item.id]) sweeps.items[fr.item.id] = anySweep(engine, fr.item.id, 'item', itemGrid(fr.item.id, step));
+  for (const fr of sol.frames) for (const it of [fr.item, fr.item2]) if (it && !sweeps.items[it.id]) sweeps.items[it.id] = anySweep(engine, it.id, 'item', itemGrid(it.id, step));
   // hands against the props' contact zones: whenever a hand-drawn skin or gun is involved (3D on 3D stays as it was)
   sweeps.contact = contact ?? (sk?.kind === '2d' || ctx.source === '2d');
   const backs = [], fronts = [], locks = [];
@@ -377,8 +378,12 @@ export function bakeClip(cls, clipName, { skin = 'mec', variant = null, engine =
     anim.mag = sol.frames.map((f) => sockOut(f.mag || { state: 'hidden' }));
   } else anim.gun = [{ hidden: true }];
   anim.item = sol.frames.some((f) => f.item) ? sol.frames.map((f) => (f.item ? sockOut(f.item) : { hidden: true })) : [];
+  if (sol.frames.some((f) => f.item2)) anim.item2 = sol.frames.map((f) => (f.item2 ? sockOut(f.item2) : { hidden: true }));
   anim.events = sol.events.map((e) => ({ f: e.f, e: e.e }));
   if (clip.mag === 'shell') anim.mag_sweep = 'shotgun_shell';
+  // melee clips (gun bash, knife, punch, baton, shield): hit events, active windows, per-frame strike volumes
+  const melee = fpMeleeOf(cls, clipName, !!ctx.gun);
+  if (melee) anim.melee = fpMeleeAnim(melee, sol, { cls, geo: fpGeometry(cls) });
   return { anim, back: strip(backs), front: strip(fronts), locks, frames: sol.frames, sweeps, metrics: { worst_hand_miss_px: r1(worstMiss), reach_clamped_frames: clamped } };
 }
 
@@ -642,7 +647,7 @@ export function loadFrameAssets(root, { class: cls, clip, gun: gunName, attachme
   const mName = anim.mag_sweep || magName || gm.sweeps?.[gName]?.mag;
   const mag = mName && mm.sweeps?.[mName] ? loadSweep(root, mm.sweeps[mName]) : null;
   const items = {};
-  for (const it of anim.item || []) if (it.id && !items[it.id] && am.sweeps?.[`item:${it.id}`]) items[it.id] = loadSweep(root, am.sweeps[`item:${it.id}`]);
+  for (const it of [...(anim.item || []), ...(anim.item2 || [])]) if (it.id && !items[it.id] && am.sweeps?.[`item:${it.id}`]) items[it.id] = loadSweep(root, am.sweeps[`item:${it.id}`]);
   return { anim, name, layers, gun, mag, attachments: atts, items };
 }
 export function compositeFromFiles(root, a) {
@@ -672,7 +677,7 @@ export function checkAssets(root, { classes = null, engine = null, limit = 30 } 
     for (const [anim, A] of Object.entries(set.anims)) {
       // contract shape
       for (const k of ['frames', 'fps', 'back', 'front']) if (A[k] === undefined) bad({ set: setName, anim, issue: `missing "${k}"` });
-      for (const [list, name] of [[A.gun, 'gun'], [A.mag, 'mag'], [A.item, 'item']]) {
+      for (const [list, name] of [[A.gun, 'gun'], [A.mag, 'mag'], [A.item, 'item'], [A.item2, 'item2']]) {
         if (!list) continue;
         if (list.length !== 1 && list.length !== A.frames && !(name === 'item' && list.length === 0)) bad({ set: setName, anim, issue: `${name} has ${list.length} entries for ${A.frames} frames (one per frame, or one for all)` });
         for (const [i, s] of list.entries()) {
@@ -682,6 +687,13 @@ export function checkAssets(root, { classes = null, engine = null, limit = 30 } 
         }
       }
       for (const e of A.events || []) if (!(e.f >= 0 && e.f < A.frames)) bad({ set: setName, anim, issue: `event ${e.e} at frame ${e.f} outside 0..${A.frames - 1}` });
+      // melee clips: hit event order, a strike volume on every active frame, the swept area holds the line
+      if (A.melee) {
+        const mc = fpMeleeCheck(A);
+        counts.melee_clips = (counts.melee_clips || 0) + 1;
+        worst.melee_sweep_px = Math.max(worst.melee_sweep_px || 0, mc.metrics.sweep_miss_px || 0);
+        for (const x of mc.issues) bad({ set: setName, anim, issue: `melee: ${x}` });
+      }
       counts.frames += A.frames;
       // hands on anchors for every gun of the class
       const L = locks.anims?.[anim] || [];

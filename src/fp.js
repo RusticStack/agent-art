@@ -240,12 +240,15 @@ export function composite({ anim, f = 0, layers = {}, gun = null, mag = null, at
       }
     }
   }
-  const is = pick(anim.item, f);
-  const isw = is?.id ? items[is.id] : null;
-  if (is && isw && !is.hidden) {
-    const ii = cellIndex(isw.def, is.yaw ?? 0, is.pitch ?? 0);
-    const io = is.order === 'back' ? RENDER_ORDER.item_back : is.order === 'mid' ? RENDER_ORDER.item_mid : RENDER_ORDER.item_front;
-    put('item', io, () => drawCell(out, W, H, isw, ii, anchorOf(isw.def, 'grip', ii) ?? [0, 0], is.x ?? 0, is.y ?? 0, is.rot ?? 0, is.scale ?? 1));
+  // held items: item, and item2 (a second item in the other hand, e.g. a riot shield)
+  for (const key of anim.item2 ? ['item', 'item2'] : ['item']) {
+    const is = pick(anim[key], f);
+    const isw = is?.id ? items[is.id] : null;
+    if (is && isw && !is.hidden) {
+      const ii = cellIndex(isw.def, is.yaw ?? 0, is.pitch ?? 0);
+      const io = is.order === 'back' ? RENDER_ORDER.item_back : is.order === 'mid' ? RENDER_ORDER.item_mid : RENDER_ORDER.item_front;
+      put(key, io, () => drawCell(out, W, H, isw, ii, anchorOf(isw.def, 'grip', ii) ?? [0, 0], is.x ?? 0, is.y ?? 0, is.rot ?? 0, is.scale ?? 1));
+    }
   }
   draws.sort((p, q) => p.order - q.order || p.rank - q.rank);
   for (const d of draws) d.fn();

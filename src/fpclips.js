@@ -64,6 +64,9 @@ export const ITEM_GRASP = {
   bandage: { fingers: [0, -0.3, -1], dorsal: [0, 1, 0], palm: [0, 3.6, 0.5], preset: 'grenade_hold' },
   trauma_kit: { fingers: [0, 0.2, -1], dorsal: [0, 0.3, 1], palm: [0, 0, 1.8], preset: 'support_under' },
   tablet: { fingers: [1, 0.1, -0.2], dorsal: [0, -1, 0], palm: [-0.6, -1.9, 0], preset: 'support_under' },
+  // baton: hammer grip like the knife; riot shield: the left fist round the vertical handle behind the face
+  baton: { fingers: [0, -1, 0], dorsal: [1, 0, 0], palm: [1.9, 1.0, 0.6], preset: 'knife_hammer' },
+  riot_shield: { fingers: [0, 0, -1], dorsal: [-1, 0, 0], palm: [-1.6, 0, 1.4], preset: 'fist' },
 };
 
 // ---------- clip authoring helpers ----------
@@ -188,9 +191,10 @@ function bladeHand(P, blade, dorsalHint, preset = 'knife_hammer') {
 /** Clips for item / hand classes (no gun). */
 function itemClips(cls) {
   const C = {};
-  const idleR = { knife: bladeHand([13, -12, -30], [-0.45, 0.6, -0.65], [0.35, 0.25, 0.9]), grenade: free([12, -13, -30], [-0.2, 0.4, -0.9], [0.7, 0.4, 0.5], 'grenade_hold'), med: free([10, -18, -30], [-0.3, 0.3, -0.9], [0.4, 0.8, 0.3], 'fist'), tablet: free([11, -20, -30], [-1, 0.1, -0.2], [0, -1, 0], 'support_under'), unarmed: free([13, -20, -32], [-0.2, 0.3, -0.9], [0.6, 0.6, 0.4], 'relaxed') }[cls];
-  const idleL = { knife: free([-12, -22, -32], [0.3, 0.4, -0.85], [-0.6, 0.4, 0.6], 'fist'), grenade: LOW_L, med: free([-10, -20, -30], [0.3, 0.3, -0.9], [-0.5, 0.8, 0.3], 'relaxed'), tablet: free([-11, -20, -30], [1, 0.1, -0.2], [0, -1, 0], 'support_under'), unarmed: free([-13, -20, -32], [0.2, 0.3, -0.9], [-0.6, 0.6, 0.4], 'relaxed') }[cls];
-  const item = { knife: { id: 'knife', hand: 'R' }, grenade: { id: 'frag', hand: 'R' }, med: { id: 'trauma_kit', hand: 'L' }, tablet: { id: 'tablet', hand: 'L' }, unarmed: null }[cls];
+  let idleR = { knife: bladeHand([13, -12, -30], [-0.45, 0.6, -0.65], [0.35, 0.25, 0.9]), grenade: free([12, -13, -30], [-0.2, 0.4, -0.9], [0.7, 0.4, 0.5], 'grenade_hold'), med: free([10, -18, -30], [-0.3, 0.3, -0.9], [0.4, 0.8, 0.3], 'fist'), tablet: free([11, -20, -30], [-1, 0.1, -0.2], [0, -1, 0], 'support_under'), unarmed: free([13, -20, -32], [-0.2, 0.3, -0.9], [0.6, 0.6, 0.4], 'relaxed') }[cls];
+  let idleL = { knife: free([-12, -22, -32], [0.3, 0.4, -0.85], [-0.6, 0.4, 0.6], 'fist'), grenade: LOW_L, med: free([-10, -20, -30], [0.3, 0.3, -0.9], [-0.5, 0.8, 0.3], 'relaxed'), tablet: free([-11, -20, -30], [1, 0.1, -0.2], [0, -1, 0], 'support_under'), unarmed: free([-13, -20, -32], [0.2, 0.3, -0.9], [-0.6, 0.6, 0.4], 'relaxed') }[cls];
+  if (cls === 'baton') { idleR = bladeHand([13, -14, -30], [-0.35, 0.75, -0.55], [0.35, 0.25, 0.9]); idleL = free([-12, -22, -32], [0.3, 0.4, -0.85], [-0.6, 0.4, 0.6], 'fist'); }
+  const item = { knife: { id: 'knife', hand: 'R' }, baton: { id: 'baton', hand: 'R' }, grenade: { id: 'frag', hand: 'R' }, med: { id: 'trauma_kit', hand: 'L' }, tablet: { id: 'tablet', hand: 'L' }, unarmed: null }[cls];
   const base = { gun: HID, R: idleR, L: idleL, ...(item ? { item } : {}) };
   const mv2 = (h, d, extra = {}) => ({ ...h, free: add(h.free, d), ...extra });
   C.idle = { frames: 16, fps: 8, loop: true, keys: [{ f: 0, ...base }], layers: ['breathe'] };
@@ -203,6 +207,24 @@ function itemClips(cls) {
     C.slash = { frames: 12, fps: 18, loop: false, keys: [{ f: 0, ...base }, { f: 3, ...base, R: bladeHand([18, -4, -30], [-0.25, 0.9, -0.35], [0.3, 0.1, 0.95]) }, { f: 6, ...base, R: bladeHand([-4, -14, -38], [-0.9, -0.3, -0.3], [0.1, 0.5, 0.85]), e: 'hit' }, { f: 8, ...base, R: bladeHand([-10, -20, -34], [-0.9, -0.4, -0.2], [0.1, 0.5, 0.85]) }, { f: 11, ...base }] };
     C.stab = { frames: 10, fps: 18, loop: false, keys: [{ f: 0, ...base }, { f: 3, ...base, R: bladeHand([14, -14, -22], [-0.15, 0.25, -1], [0.7, 0.5, 0.2]) }, { f: 5, ...base, R: bladeHand([5, -7, -46], [-0.1, 0.1, -1], [0.7, 0.5, 0.2]), e: 'hit' }, { f: 9, ...base }] };
     C.inspect = { frames: 24, fps: 10, loop: false, keys: [{ f: 0, ...base }, { f: 8, ...base, R: bladeHand([6, -8, -28], [-0.9, 0.3, -0.1], [0.1, 0.2, 1]) }, { f: 16, ...base, R: bladeHand([6, -8, -28], [-0.9, 0.3, -0.1], [0.1, 0.9, -0.4]) }, { f: 23, ...base }] };
+    // three-hit combo: forehand slash, backhand slash, stab
+    C.combo = { frames: 22, fps: 18, loop: false, keys: [
+      { f: 0, ...base }, { f: 2, ...base, R: bladeHand([18, -4, -30], [-0.25, 0.9, -0.35], [0.3, 0.1, 0.95]) },
+      { f: 5, ...base, R: bladeHand([-4, -14, -38], [-0.9, -0.3, -0.3], [0.1, 0.5, 0.85]), e: 'hit' },
+      { f: 7, ...base, R: bladeHand([-10, -20, -34], [-0.9, -0.4, -0.2], [0.1, 0.5, 0.85]) },
+      { f: 8, ...base, R: bladeHand([-6, -10, -30], [-0.25, 0.9, -0.35], [0.3, 0.1, 0.95]) },
+      { f: 10, ...base, R: bladeHand([16, -16, -38], [0.8, 0.35, -0.45], [0.1, 0.5, 0.85]), e: 'hit' },
+      { f: 12, ...base, R: bladeHand([12, -14, -22], [-0.15, 0.25, -1], [0.7, 0.5, 0.2]) },
+      { f: 15, ...base, R: bladeHand([4, -7, -47], [-0.1, 0.1, -1], [0.7, 0.5, 0.2]), e: 'hit' },
+      { f: 21, ...base }] };
+  }
+  if (cls === 'baton') {
+    // overhand diagonal strike; the riot shield (second item, left hand) comes up for shield_up / shield_bash
+    C.strike = { frames: 12, fps: 16, loop: false, keys: [{ f: 0, ...base }, { f: 3, ...base, R: bladeHand([20, 2, -26], [-0.15, 0.95, -0.25], [0.6, 0.2, 0.7]) }, { f: 6, ...base, R: bladeHand([-2, -16, -40], [-0.6, -0.5, -0.6], [0.3, 0.6, 0.7]), e: 'hit' }, { f: 8, ...base, R: bladeHand([-8, -22, -34], [-0.7, -0.6, -0.3], [0.3, 0.6, 0.7]) }, { f: 11, ...base }] };
+    const shield = { id: 'riot_shield', hand: 'L' };
+    const sLow = free([-20, -26, -30], [0, 0, -1], [-1, 0, 0], 'fist'), sUp = free([-13, -12, -32], [0, 0, -1], [-1, 0, 0], 'fist'), sOut = free([-10, -10, -46], [0, 0, -1], [-1, 0, 0], 'fist');
+    C.shield_up = { frames: 10, fps: 14, loop: false, keys: [{ f: 0, ...base, L: sLow, item2: shield }, { f: 3, ...base, L: sUp, item2: shield }, { f: 9, ...base, L: sUp, item2: shield }] };
+    C.shield_bash = { frames: 10, fps: 16, loop: false, keys: [{ f: 0, ...base, L: sUp, item2: shield }, { f: 3, ...base, L: free([-15, -13, -26], [0, 0, -1], [-1, 0, 0], 'fist'), item2: shield }, { f: 5, ...base, L: sOut, item2: shield, e: 'hit' }, { f: 9, ...base, L: sUp, item2: shield }] };
   }
   if (cls === 'grenade') {
     const pin = free([4, -12, -28], [0.6, 0.2, -0.8], [0, 0.9, 0.4], 'pin_pull');
@@ -424,17 +446,23 @@ function solveFrame(clip, f, ctx, geo) {
     const ub = comp.at('underbarrel');
     if (ub) frame.props.push({ kind: 'att', x: ub[0], y: ub[1], rot: sock.rot, yaw: sock.yaw, pitch: sock.pitch, depth: project(gunPt('underbarrel'))[2] });
   }
-  // ---- item ----
-  if (itemSpec && itemSpec.id) {
-    const H = hands[itemSpec.hand || 'R'], Gi = ITEM_GRASP[itemSpec.id] || ITEM_GRASP.knife;
+  // ---- items (item; item2 = a second held item, e.g. a riot shield in the other hand) ----
+  const pose3 = { gun, hands: { R: { P: hands.R.palm, R: hands.R.frame }, L: { P: hands.L.palm, R: hands.L.frame } } };
+  const itemSpec2 = stepPick(a, b, u, 'item2') ?? (u < 1 ? a.item2 : b.item2);
+  for (const [key, spec] of [['item', itemSpec], ['item2', itemSpec2]]) {
+    if (!spec || !spec.id) continue;
+    const H = hands[spec.hand || 'R'], Gi = ITEM_GRASP[spec.id] || ITEM_GRASP.knife;
     const Fi = handFrame(Gi.fingers, Gi.dorsal);
     const Ri = mm(H.frame, tr(Fi));
     const ref = sub(H.palm, mv(Ri, Gi.palm));
     const ap = apparent(ref, Ri);
     const [x, y, z] = project(ref);
-    frame.item = { id: itemSpec.id, x: r1(x), y: r1(y), rot: r1(ap.rot), yaw: r1(ap.yaw), pitch: r1(ap.pitch), order: 'mid', ...(itemSpec.hidden ? { hidden: true } : {}) };
-    if (!itemSpec.hidden) frame.props.push({ kind: 'item', id: itemSpec.id, ...frame.item, depth: z });
+    frame[key] = { id: spec.id, x: r1(x), y: r1(y), rot: r1(ap.rot), yaw: r1(ap.yaw), pitch: r1(ap.pitch), order: 'mid', ...(spec.hidden ? { hidden: true } : {}) };
+    if (!spec.hidden) frame.props.push({ kind: 'item', id: spec.id, ...frame[key], depth: z });
+    pose3[key] = { id: spec.id, P: ref, R: Ri, hidden: !!spec.hidden };
   }
+  // 3D poses of the gun, hands and items (melee strike lines); not part of the frame's JSON
+  Object.defineProperty(frame, 'pose3', { value: pose3, enumerable: false });
   // events at this frame
   for (const k of clip.keys) if (k.f === f && k.e) frame.events.push(k.e);
   return frame;

@@ -163,6 +163,16 @@ Author motion once per skeleton and render it on every character. A skeleton is 
   - `composite` shows the baked frame next to the runtime frame.
   - `weapon_check` verifies that the hands stay on the grips of every gun in the class.
   - The class table, grip geometry (in body units), carry positions and `conform` live in `src/handling.js`. They are shared with other pipelines, such as first-person viewmodels.
+- **Melee:** `melee {skeleton, weapon?, shield?}` writes a melee clip set onto a humanoid_hd skeleton.
+  - Strikes per weapon: knife slash / stab / combo, blade and heavy swings, baton strike with a shock tip, rifle butt-stroke, pistol whip, punches, kick and shove. Also block and parry, hit reactions in four directions, stagger, knockdown and get-up.
+  - Paired takedowns (`takedown_rear`, `disarm_front`, `shield_knockdown`) are attacker / victim clips that share one alignment.
+  - `batch` adds `anims.<clip>_<view>.melee` to the characters manifest: phases, events (windup, active start / end, impact, recovery, sound, effect), a hit capsule per active frame and view with the swept polygon since the previous frame, damage type, stamina, root motion, combo windows and paired metadata.
+  - `melee_check` validates event order, sweep coverage, foot slide and contact alignment.
+  - `melee_sheet` renders the eight weapon models (`art_model template:"melee_<id>"`: combat knife, machete, baton, stun baton, vibro-blade, breaching axe and hammer, riot shield) into world sheets of views × pitch with the grip on one pixel.
+  - First-person melee clips (gun bash, knife combo, punch, baton strike, shield up and bash) carry the same events and per-frame capsules in `manifest/fp.json`.
+  - `art_help {topic:"melee"}` has the manifest fields and the Three.js and Roblox runtime notes. Demos: `docs/melee/` (`node scripts/melee-demos.js`).
+
+  ![Melee: knife combo strike frames in eight directions with the hit volumes drawn over them](docs/melee/strike-knife-combo.png)
 
   ![Baked vs runtime: the issued rifle and a dmr with a scope drawn at the same sockets](docs/img/weapon-sockets-composite.png)
 - **glTF:** `gltf {skin, clips?, path?}` exports a skinned cutout mesh: one quad per part from the base-view cells, one joint per part, and the rest pose as the bind pose. Each clip becomes an animation, a hidden part is scaled to 0, and events go in the animation extras.
@@ -534,13 +544,13 @@ art_planet { action:"asteroids", name:"belt", field:{ shape:"belt", count:1200 }
 
 ### First-person viewmodels: `art_fp`
 
-First person built from separate pixel sprites, so the gun reads as 3D with no 3D models in the game (the fp v2 runtime contract). The arms are animated once per **handling class** (pistol, smg, rifle, dmr, shotgun, lmg, sniper, launcher, unarmed, knife, grenade, med, tablet). Guns, magazines, attachments and items are yaw × pitch sprite sweeps that the game turns with look sway and snaps onto per-frame sockets. Adding a gun or a scope never touches the arms.
+First person built from separate pixel sprites, so the gun reads as 3D with no 3D models in the game (the fp v2 runtime contract). The arms are animated once per **handling class** (pistol, smg, rifle, dmr, shotgun, lmg, sniper, launcher, unarmed, knife, baton, grenade, med, tablet). Guns, magazines, attachments and items are yaw × pitch sprite sweeps that the game turns with look sway and snaps onto per-frame sockets. Adding a gun or a scope never touches the arms.
 
 ![two loadouts on the same arms clips](docs/fp/loadouts.png)
 
 - **Arms:** a 3D skeleton in eye space (clavicle, upper arm, forearm, palm, thumb, index and grouped fingers, both sides) solved with two-bone IK onto the anchors the game draws, so both palms stay on the grip and support at every frame. Finger presets cover trigger, support under the handguard, vertical grip, angled grip, magazine, charging-handle pinch, pistol cup, knife hammer grip, grenade hold, pin pull, open palm and fist. Every bone is a part sprite rendered once per view bucket (forearm foreshortening, back of the hand or palm) and placed with RotSprite rotation, so frames stay palette-stable. Skins (`mec`, `severance`) swap sleeves, bracers and gloves without re-animating.
 - **Sweeps:** an `art_model` gun, magazine, attachment or item rendered over a yaw × pitch grid into sheets of at most 1024 px, with every anchor per cell (`grip`, `support`, `mag_well`, `muzzle`, `optic`, `muzzle_mount`, `underbarrel`, `sight`, `mount`). One camera for all of them, so pixels per metre match. Moving parts export as state variants (`rifle@bolt_back`, `pistol@slide_locked`, `shotgun@pump_back`), and optics add a lens layer (`att:scope_4x@lens`).
-- **Clips per class:** idle, walk, sprint, fire and fire_ads (recoil kick and recovery), ads_in and ads_idle (iron sight on the frame centre), reload and reload_empty (mag out, pouch, new mag, seat, charging handle) with events, charge, draw, holster, inspect, jam_clear, firemode, check_mag, melee, a one-handed grenade throw over the held gun, use_med and interact. There is a shotgun shell loop, a sniper bolt cycle, an LMG cover, knife slash and stab, grenade cook and throw, med bandage, stim and kit, and tablet raise and use. `@vgrip` / `@agrip` variants move the support hand onto a foregrip.
+- **Clips per class:** idle, walk, sprint, fire and fire_ads (recoil kick and recovery), ads_in and ads_idle (iron sight on the frame centre), reload and reload_empty (mag out, pouch, new mag, seat, charging handle) with events, charge, draw, holster, inspect, jam_clear, firemode, check_mag, melee, a one-handed grenade throw over the held gun, use_med and interact. There is a shotgun shell loop, a sniper bolt cycle, an LMG cover, knife slash, stab and a three-hit combo, baton strike with riot shield up and bash (the shield is a second held item, `item2`), grenade cook and throw, med bandage, stim and kit, and tablet raise and use. `@vgrip` / `@agrip` variants move the support hand onto a foregrip.
 - **Check:** hands on every gun of a class, the ADS sight centred to 1 px, magazine hand-offs, anchor continuity across the sweep, grip geometry against the class (`handling.js` `conform`) and attachment fits.
 
 ```js

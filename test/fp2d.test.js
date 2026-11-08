@@ -257,7 +257,10 @@ test('fp2d: #16 3D outputs are byte-identical', () => {
   const b = bakeClip('smg', 'reload_empty', { variant: 'vgrip' });
   assert.equal(hash(b.back.data, b.front.data, JSON.stringify(b.anim), JSON.stringify(b.locks)), '4574e39f15a10c9d');
   const k = bakeClip('knife', 'slash', { skin: 'severance' });
-  assert.equal(hash(k.back.data, k.front.data, JSON.stringify(k.anim)), 'ee083e12a90cd584');
+  // the melee block (hit events + strike volumes) is additive: frames and every other field are unchanged
+  const { melee, ...kAnim } = k.anim;
+  assert.ok(melee && melee.windows.length === 1);
+  assert.equal(hash(k.back.data, k.front.data, JSON.stringify(kAnim)), 'ee083e12a90cd584');
   const s = sweepOf(null, 'smg', 'gun', classGrid('smg'));
   assert.equal(hash(...s.cells, ...s.depths, JSON.stringify(s.def)), '1fd1c6b1d4b6d757');
   const m = sweepOf(null, 'smg_mag', 'mag', magGrid('smg_mag'));

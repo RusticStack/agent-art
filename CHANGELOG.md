@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Melee
+
+- Weapon kit: `art_model` templates `melee_combat_knife`, `melee_machete`, `melee_baton`, `melee_stun_baton`, `melee_vibro_blade`, `melee_breach_axe`, `melee_breach_hammer` and `melee_riot_shield` (original designs, cm units).
+  - Sockets: grip, guard, pommel, tip, edge_a, edge_b and strike; the shield has grip, arm_strap, face, rims, edge and strike.
+  - Rig clips: baton extend / collapse, stun arc, vibro-blade unfold and hum, shield deploy / fold.
+- `art_anim melee {skeleton, weapon?, shield?, clips?}`: melee clip sets on humanoid_hd skeletons (knife, blade, baton, heavy, rifle, pistol, unarmed, shield), with block, parry, hit reactions (front, back, left, right), stagger, knockdown, get-up and paired takedowns (`takedown_rear`, `disarm_front`, `shield_knockdown`).
+  - Clips carry a `melee` block: windup / active / impact / recovery timing, damage type (blunt, slash, pierce, shock), stamina, lunge (root motion), combo windows, block arc, sound and effect events, and paired metadata (offset, facing, sync and release frames, contacts).
+  - `batch` writes `anims.<clip>_<view>.melee`: phases, sorted events, active windows and, per active frame and view, hit capsules in frame px with the swept polygon since the previous frame, plus the same capsule in body units for 3D tests. The held weapon gets a per-frame socket for the runtime melee layer.
+  - Clips and exports without melee data are byte-identical.
+- `art_anim melee_check`: per-hit event order, no active frame before the windup, impacts inside their windows, and sweep coverage (the edge sampled 8x between frames must stay in the exported volumes). For paired clips it also checks foot slide, feet against each other, foot sink and contact distance.
+- `art_anim melee_sheet`: world weapon sheets (`weapons_melee/<id>.png`, views × pitch, grip on one pixel) and `manifest/melee_weapons.json`, following the `weapons_world` contract.
+- `art_anim paired`: both actors of a paired clip composited at the shared alignment.
+- First person (`art_fp`), in the fp v2 clip / socket format:
+  - Melee blocks on gun `melee` (butt jab / pistol whip), knife `slash` / `stab` / new `combo`, and unarmed `melee`.
+  - A new `baton` handling class with `strike`, `shield_up` and `shield_bash`.
+  - A second held item (`item2`, a per-frame socket like `item`) carries the riot shield. New fp kit items `baton` and `riot_shield`.
+  - `art_fp check` runs the melee checks. Existing fp clips keep their frames; melee clips only gain the `melee` field.
+- `art_help {topic:"melee"}`: workflow, manifest fields, Three.js and Roblox runtime notes. Demos in `docs/melee/` (`scripts/melee-demos.js`).
+- The tool-list size limit rises from 40340 to 40700 (40655 measured on this branch, 40107 on 0.8.0).
+
 ## 0.8.0
 
 ### Skeletal skinning in `art_model`
