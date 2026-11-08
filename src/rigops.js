@@ -67,6 +67,12 @@ function checkPose(rig, P, where = 'pose') {
   const checkParts = (o, w) => {
     for (const [k, v] of Object.entries(o || {})) {
       if (k === 'ik' || k === 'views') continue;
+      if (k === 'carry' && rig.weapon && w === where) {
+        // a pose may set the carry state (a state name or {state, ...overrides})
+        const st = typeof v === 'string' ? v : v && typeof v === 'object' ? v.state ?? rig.weapon.carry : undefined;
+        if (!rig.weapon.states[st]) throw new Error(`${w}: carry: unknown state ${JSON.stringify(st)} (states: ${Object.keys(rig.weapon.states).join(', ')})`);
+        continue;
+      }
       if (!rig.parts[k]) throw new Error(`${w}: unknown part "${k}" (parts: ${rig.order.join(', ')})`);
       if (v?.variant && !rig.parts[k].variants.includes(v.variant)) throw new Error(`${w}: part "${k}" has no variant "${v.variant}"`);
     }

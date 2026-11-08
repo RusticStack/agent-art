@@ -374,3 +374,14 @@ test('humanoid_hd fixes: near limbs on the correct screen side in 3/4, front and
   assert.deepEqual(VIEWS.map((v) => nc.cells[v].pelvis[1]), [0, 55, 110, 165, 220]);
   assert.deepEqual(VIEWS.map((v) => e.run('rig_info', { name: 'h' }).cells[v].pelvis[1]), [0, 74, 148, 222, 296]);
 });
+
+test('a pose may set carry (art_rig pose / update poses); unknown states are refused', () => {
+  const e = new Engine({ home: tmp() });
+  soldier(e, 'pc', { frame: [96, 144], create: { weapon: { class: 'rifle' } } });
+  e.run('rig_update', { name: 'pc', poses: { hip_pose: { carry: 'hip', head: { rot: 3 } } } });
+  e.run('rig_pose', { name: 'pc', pose: 'high_pose', parts: { carry: { state: 'ready_high' } } });
+  const rig = rigOf(e, 'pc');
+  assert.equal(solvePose(rig, 'hip_pose', 'side').weapon.s.pl.name, 'hip');
+  assert.equal(solvePose(rig, 'high_pose', 'side').weapon.s.pl.name, 'ready_high');
+  assert.throws(() => e.run('rig_pose', { name: 'pc', pose: 'bad', parts: { carry: 'nope' } }), /carry: unknown state "nope"/);
+});
