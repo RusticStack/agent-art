@@ -675,36 +675,7 @@ export const MODEL_OPS = {
       const probe = build(this, def);
       for (const c of probe.tex.used) if (!this.docs.has(`${c}_n`) && !/_n$/.test(c)) this.run('normal_map', { canvas: c }, 'agent');
     }
-    const built = build(this, def, { normal, instances: !!a.instances });
-    const info = rigOf(def, built);
-    let meshes = [], nodes = [], animations, rigClips;
-    if (info) {
-      // rig: one node (own mesh, local TRS) per named part, sockets as empty nodes, clips as animations
-      const rs = rigScene(def, info);
-      ({ meshes, nodes, animations } = rs);
-      rigClips = rs.clips;
-      const meshOf = new Map();
-      for (const [k, it] of built.instances.entries()) {
-        if (!meshOf.has(it.model)) { meshes.push({ name: it.model, groups: it.mesh.groups.values() }); meshOf.set(it.model, meshes.length - 1); }
-        nodes.push({ name: `${it.model}_${k}`, mesh: meshOf.get(it.model), matrix: it.matrix, instance: { model: it.model } });
-        nodes[0].children.push(nodes.length - 1);
-      }
-      if (!meshes.length) throw new Error('model has no triangles to export');
-    } else {
-      if (built.mesh.triangles) { meshes.push({ name: def.name, groups: built.mesh.groups.values() }); nodes.push({ name: def.name, mesh: 0 }); }
-      const meshOf = new Map();
-      for (const [k, it] of built.instances.entries()) {
-        if (!meshOf.has(it.model)) { meshes.push({ name: it.model, groups: it.mesh.groups.values() }); meshOf.set(it.model, meshes.length - 1); }
-        nodes.push({ name: `${it.model}_${k}`, mesh: meshOf.get(it.model), matrix: it.matrix });
-      }
-      if (!nodes.length) throw new Error('model has no triangles to export');
-      if (a.instances) for (const n of nodes.slice(built.mesh.triangles ? 1 : 0)) n.instance = { model: n.name.replace(/_\d+$/, '') };
-    }
-    const ctm = ctmUsed(built);
-    const ctmNames = Object.keys(ctm);
-    let extras = ctmNames.length ? { ctm: { file: path.basename(file).replace(/\.glb$/i, '.ctm.json'), tilesets: ctmNames } } : undefined;
-    if (info) extras = { ...(extras || {}), rig: { nodes: info.nodes.length, sockets: info.sockets.map((s) => s.name), clips: Object.keys(rigClips) } };
-    const { glb, stats } = writeGLB({ meshes, nodes, animations }, { scale, up: a.up, atlas: !!a.atlas, name: def.name, extras });
+    const { glb, stats, built, info, rigClips, ctm, ctmNames } = assembleGLB(this, def, { normal, instances: !!a.instances, scale, up: a.up, atlas: !!a.atlas, ctmFile: path.basename(file).replace(/\.glb$/i, '.ctm.json') });
     fs.writeFileSync(file, glb);
     let ctmFile;
     if (ctmNames.length) {
@@ -838,4 +809,52 @@ function holdAnimate(engine, def, a, source) {
     baked = a.hold.bake_weapon;
   }
   return { model: def.name, clip: a.clip, keys: ck.keys.length, duration: ck.duration, loop: ck.loop, held: holdReport(hs), ...(baked ? { weapon_clip: `${hs.gun.def.name}/${baked}` } : {}), next: `export {name:"${def.name}"} ships the held clip as a glTF animation; check {name:"${def.name}", hold:{weapon:"${hs.gun.def.name}"}} validates every clip and carry state` };
+}
+
+/** Workspace model definitions (name -> def), loaded on first use. */
+export function modelDefs(engine) {
+  return models(engine);
+}
+
+/** Small game-camera thumbnail (PNG Buffer) of a model definition, for the UI. */
+export function modelThumbnail(engine, def, size = 128) {
+  return previewImage(engine, def, { views: ['game'], size }).image;
+}
+
+/**
+ * Build a model as an in-memory .glb (same scene as art_model export, no files written).
+ * Used by export and by the web UI's 3D viewer.
+ */
+export function assembleGLB(engine, def, { normal = false, instances = false, scale = Number(def.scale ?? 32), up, atlas = false, ctmFile } = {}) {
+  const built = build(engine, def, { normal, instances });
+  const info = rigOf(def, built);
+  let meshes = [], nodes = [], animations, rigClips;
+  if (info) {
+    // rig: one node (own mesh, local TRS) per named part, sockets as empty nodes, clips as animations
+    const rs = rigScene(def, info);
+    ({ meshes, nodes, animations } = rs);
+    rigClips = rs.clips;
+    const meshOf = new Map();
+    for (const [k, it] of built.instances.entries()) {
+      if (!meshOf.has(it.model)) { meshes.push({ name: it.model, groups: it.mesh.groups.values() }); meshOf.set(it.model, meshes.length - 1); }
+      nodes.push({ name: `${it.model}_${k}`, mesh: meshOf.get(it.model), matrix: it.matrix, instance: { model: it.model } });
+      nodes[0].children.push(nodes.length - 1);
+    }
+    if (!meshes.length) throw new Error('model has no triangles to export');
+  } else {
+    if (built.mesh.triangles) { meshes.push({ name: def.name, groups: built.mesh.groups.values() }); nodes.push({ name: def.name, mesh: 0 }); }
+    const meshOf = new Map();
+    for (const [k, it] of built.instances.entries()) {
+      if (!meshOf.has(it.model)) { meshes.push({ name: it.model, groups: it.mesh.groups.values() }); meshOf.set(it.model, meshes.length - 1); }
+      nodes.push({ name: `${it.model}_${k}`, mesh: meshOf.get(it.model), matrix: it.matrix });
+    }
+    if (!nodes.length) throw new Error('model has no triangles to export');
+    if (instances) for (const n of nodes.slice(built.mesh.triangles ? 1 : 0)) n.instance = { model: n.name.replace(/_\d+$/, '') };
+  }
+  const ctm = ctmUsed(built);
+  const ctmNames = Object.keys(ctm);
+  let extras = ctmNames.length ? { ctm: { file: ctmFile || `${def.name}.ctm.json`, tilesets: ctmNames } } : undefined;
+  if (info) extras = { ...(extras || {}), rig: { nodes: info.nodes.length, sockets: info.sockets.map((s) => s.name), clips: Object.keys(rigClips) } };
+  const { glb, stats } = writeGLB({ meshes, nodes, animations }, { scale, up, atlas, name: def.name, extras });
+  return { glb, stats, built, info, rigClips, ctm, ctmNames };
 }

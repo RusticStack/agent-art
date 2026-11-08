@@ -21,6 +21,26 @@
 - Compact replies: `art_info` and `art_rig` `info`, `create` and `update` reply with a summary. `full: true` returns everything; `fields:[...]` returns only the fields named.
 - `docs/rig-hd-guide.md`: the view-band offsets are the tallest cell + 1 (0, 74, 148, 222, 296 by default; 55, 110, 165, 220 with `cape: null`). The doc was wrong; the code was right.
 
+### Web UI redesign
+
+- Activity timeline: every MCP tool call (and every UI or CLI op) is a live entry with tool, action, key arguments, duration, result summary or error, and before/after snapshots of the canvases and models it changed. Filters (tool, current asset, errors, agent only) and search; click opens the asset at that state, `⇆` compares before and after.
+- Asset browser for canvases (layers, animation tags), rigs, 3D models, audio, exports, projects and groups, with hide / pin / solo per item. Hidden and pinned state is saved per workspace in `ui-state.json`.
+- Viewers: canvas editor (zoom at cursor, pan, grid, tile, frame scrubber, onion skin), animation player with a per-view (8-direction) grid, rig viewer with a skeleton overlay, 3D viewer (three.js r170 vendored in `public/vendor/three`), audio player with waveform, spectrum and the analysis report, sprite sheet and export preview with anchors, project overview, asset graph, and a Layers view (draw order per frame with the rule that placed each part, debug tint, overlaps, hover hit-test, z-order lanes).
+- Compare mode, follow mode, resizable / dockable panes, keyboard shortcuts, narrow-screen layout.
+- Server: `/api/events` also streams `activity` and `graph` events. New endpoints: `/api/activity`, `/api/trace`, `/api/snapshot/<id>[.png]`, `/api/assets`, `/api/graph`, `/api/graph/node`, `/api/reviews`, `/api/review-image/<file>`, `/api/model/<name>/glb|thumb.png|info`, `/api/rig/<name>`, `/api/rig/<name>/preview.png|layers|debug`, `/api/audio/<name>`, `/api/audio/<name>.wav|/analysis`, `/api/export-file`, `/api/ui-state`. `/api/op` accepts an optional `trace: {call, tool}`. `art_model export` builds its .glb through the same in-memory path the 3D viewer uses (output unchanged).
+
+### Asset graph (`art_graph`)
+
+- Typed relations between assets (`part_of`, `variant_of`, `view_of`, `layer_of`, `uses_palette`, `rendered_from`, `exports_to`, `depends_on`, `replaces`, or a custom label with optional attrs such as `{view:"side"}`), tags, one-line notes and nested groups, stored in `graph.json`.
+- Structural edges are derived from the workspace: project membership, layers, animation tags, rig parts, rig animate and model render outputs, model textures, normal maps, CTM tilesets. Exports are recorded as `exports_to` edges when they run.
+- `summary`, `query {node, depth, rel, dir}`, `find {tag|rel|text|kind}` and `path {from, to}` answer in compact text (default cap 1600 characters). Group nesting refuses cycles; traversal is cycle safe.
+
+### Review notes (`art_review`)
+
+- The user marks a frame, view, layer, part, model view or audio range in the UI with a category (`fix`, `redo`, `inconsistent`, `layering`, `style`, `question`, `approve`), priority, note and an optional asset to compare with.
+- `list` returns one line per note, `get` an image of the marked region when noted, now, and the compared asset, plus the history; `update` moves notes through `open` -> `in_progress` -> `fixed` (attaching the new version) -> `accepted` or `reopened`.
+- Replies of other tools get one extra line when the asset they touch has open notes, or when it is approved by the user.
+
 ## 0.6.0
 
 ### 3D rigs, clips and pre-rendered sprites (`art_model`)

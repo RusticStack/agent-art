@@ -392,6 +392,8 @@ Behaviour changes in 0.5: `crop` on a frame strip takes frame coordinates, `adju
 | `art_layer` | Layers with blend modes (multiply, screen, add, overlay, ...), opacity, order, merge, flatten, `stamp_visible` |
 | `art_canvas` | Resize, crop, scale (`nearest` or `scale2x` pixel-art upscaling), frames, metadata, `normal_map` |
 | `art_animation` | Frame ops, tags with per-frame durations, forward/reverse/pingpong, filmstrip, GIF/spritesheet export |
+| `art_graph` | Asset graph: what is part of what (`part_of`, `variant_of`, `view_of`, `rendered_from`, ...), tags, notes and nested groups. `summary` / `query` answer in a few hundred characters, so the agent orients itself without `art_info` on everything. Structural edges are automatic |
+| `art_review` | Review notes the user leaves in the web UI (a box or pin on a frame, view, part or audio range, with a category and a "compare with" asset). `list` is one line per note, `get` returns the marked region then / now / compared as an image, `update` moves a note to `in_progress` / `fixed` |
 | `art_undo`, `art_import`, `art_export`, `art_list`, `art_info`, `art_open_ui` | The rest |
 | `art_minecraft` | Optional: Minecraft Java resource packs (vanilla texture names and sizes for reference, pack build plus zip) |
 
@@ -421,15 +423,24 @@ agent-art help shade                              # docs for a command, topic or
 
 ## Web UI
 
-- Live canvas list and project overview grids. Changed regions flash. "Follow agent" jumps to whatever the agent is editing.
-- Animation timeline with onion skin and tag playback at the tagged timing.
-- Layers with blend modes, palette and used colours, undo/redo.
-- Pencil, eraser, fill, line, rectangle and picker, with 3×3 tile preview (painting wraps).
-- Zoom (Ctrl+wheel, `+`/`-`, `0`), grid (`#`), tile mode (`t`).
+The UI shows everything the agent does, live, and lets you steer it.
+
+![Agent Art web UI](docs/ui/01-overview.png)
+
+- **Activity timeline.** Every MCP tool call is an entry: tool, action, key arguments, duration, result summary or error, and before/after thumbnails of the canvases and models it changed. Filter by tool, by the open asset, by errors or by source, and search. Clicking an entry opens the asset as it was after that call; `⇆` compares before and after. Dock it right or at the bottom (`P`).
+- **Asset browser.** One tree of the workspace: pinned items, groups, projects, canvases (layers and animation tags), rigs (parts canvas, clips, poses), 3D models (named parts, clips), audio and exported files. Each item can be hidden (eye), pinned or soloed; hidden and pinned state is saved per workspace. New assets appear as the agent makes them.
+- **Viewers.** Canvas editor (zoom at the cursor, pan, pixel grid, 3×3 tile, frame scrubber, onion skin, per-layer view, the paint tools). Animation player with fps, loop and a per-view grid that plays all 8 directions of a rig animation as a compass. Rig viewer with the skeleton drawn from the per-frame part anchors, plus pose previews per view. 3D viewer (three.js, vendored) with orbit, wireframe, vertex normals, UV checker, glTF clips, sockets, pivots and triangle stats. Audio player with waveform, spectrum, loop and range selection, and the analysis report the agent reads. Sprite sheet / export preview with frames and anchors. Project overview grid.
+- **Layers view.** The draw order of a rig clip or a canvas for the current view and frame (name, z, the rule that placed it), view-only eye and solo, a debug tint by draw order with overlap highlighting, hover to see which part drew a pixel and what is underneath, and a z-order lane chart across frames.
+- **Asset graph.** Force-directed or layered view of `art_graph`: thumbnails, colours by kind, relation labels, filters by relation or tag, collapsible groups, review badges.
+- **Review notes.** Press `M`, drag a box or click a pin (on a canvas, an animation view, a rig clip, the 3D view or an audio range) and leave a note: `fix`, `redo`, `inconsistent` (across views), `layering`, `style`, `question` or `approve`, with a priority and an optional asset/view to compare with. The agent sees open notes in `art_review list` and as one line in the reply of any tool that touches that asset; it marks them `fixed` and you accept or reopen them. Approving an asset makes the agent's replies warn before it changes it.
+- **Compare** (`C`) puts two assets or two states side by side. **Follow** (`F`) switches the viewer to whatever the agent is touching; turn it off to browse while events keep streaming.
+- Resizable panes, keyboard shortcuts (`?`), dark theme, and a narrow-screen layout with drawers. Thumbnails are cached by version and load lazily, so hundreds of canvases stay fast.
+
+More screenshots are in [docs/ui](docs/ui).
 
 ## Data and configuration
 
-The workspace is `~/.agent-art` (`--home` or `AGENT_ART_HOME` changes it). Since 0.3.0 there is no implicit fallback to a `./workspace` folder next to a source checkout, because it silently split work between clients started from different folders. If that folder exists, `serve` and `mcp` print a note; pass `--home ./workspace` to keep using it. It holds `canvases/*.json` (layers stored as PNG), `models/*.json` (3D model definitions), `projects/`, `exports/` and `packs/`. The port is `AGENT_ART_PORT` (default 7420). The server binds to 127.0.0.1 and refuses cross-origin writes.
+The workspace is `~/.agent-art` (`--home` or `AGENT_ART_HOME` changes it). Since 0.3.0 there is no implicit fallback to a `./workspace` folder next to a source checkout, because it silently split work between clients started from different folders. If that folder exists, `serve` and `mcp` print a note; pass `--home ./workspace` to keep using it. It holds `canvases/*.json` (layers stored as PNG), `models/*.json` (3D model definitions), `projects/`, `exports/` and `packs/`, plus `graph.json` (asset graph and review notes), `reviews/` (review note crops) and `ui-state.json` (hidden and pinned assets in the UI). The port is `AGENT_ART_PORT` (default 7420). The server binds to 127.0.0.1 and refuses cross-origin writes.
 
 ## License
 
