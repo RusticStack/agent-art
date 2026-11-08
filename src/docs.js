@@ -32,6 +32,7 @@ export const SIGS = {
   cells: ['colors:[dark..light],gap_color?,size?,gap?,layout?,stretch?,seed?,region', 'tileable shaded stones/scales/cracks'],
   noise: ['colors,weights?,scale?,octaves?,despeckle?,seed?,region', 'tileable noise'],
   scatter: ['colors|color,density?|count,size?,seed?,region', 'random specks'],
+  damage: ['amount?,seed?,kinds?,on?,palette?,mirror?,region', 'cracks/scorch/dents/holes/scratches from the palette'],
   outline: ['color,mode?,of?,from_layer?,diagonal?,region', 'outline shapes'],
   bevel: ['light?,dark?,size?,region', 'block edge highlight/shadow'],
   // transform
@@ -76,6 +77,7 @@ export const DETAILS = {
   cells: { doc: `Fills the region with a tileable pattern of separately shaded cells: cobblestone (size 5, gap 1), scales (layout brick), bricks (layout brick, stretch 2, profile flat, depth 1), cracked earth (gap_color dark, size 8), gravel (size 3). variation = per-cell tone shift (steps), jitter 0..1, depth/profile/light like shade. ${REGION}`, ex: { op: 'cells', colors: ['s0', 's1', 's2', 's3'], gap_color: '#2e2c36', size: 5, seed: 3 } },
   noise: { doc: `Tileable value noise. weights = exact share of each color. scale = feature size px (1 = per-pixel). despeckle:1-2 absorbs lone pixels (flat cartoon surfaces). Prefer cells/shade for stone; noise is for subtle variation. "keep" in colors leaves those pixels unchanged (sparse noise). Under a mask, transparent colors do not erase (no holes in the masked art) unless erase:true. ${REGION}`, ex: { op: 'noise', colors: ['d1', 'd2', 'd3'], weights: [0.3, 0.5, 0.2], scale: 3, despeckle: 1 } },
   scatter: { doc: `Random specks/blobs of size px. ${REGION}`, ex: { op: 'scatter', colors: ['g3', 'g4'], density: 0.05, size: 1, seed: 2 } },
+  damage: { doc: `Damage overlay on existing pixel art (armour plates, helmets, sprite props): amount 0..1 (scuffed 0.25, damaged 0.6, wrecked 1), kinds subset of scratches|dents|holes|cracks|scorch (default by amount), on:[colors] = only those pixels (the plates), palette:[colors] (default: the colours already in the region; nothing outside it is ever written). Features sit at the same relative spot of the damaged area's box for the same seed: run it on every frame / view of a rig with one seed (mirror:true on mirrored views). ${REGION}`, ex: { op: 'damage', amount: 0.6, seed: 4, on: ['#5a6878', '#7a8898', '#3c4652'] } },
   outline: { doc: 'mode outer (around shapes, default)|inner (on the shape edge). of: only shapes of these colors (selective outline). from_layer: outline another layer\'s shapes onto this layer. diagonal:true = 8-connected. skip_existing:true = pixels already in the outline color count as outline, not shape, so re-running never doubles it to 2 px (only fills gaps); it is the default when the layer already has that exact color (pass skip_existing:false for a second ring). Region limits where it writes; honours mask. Use a dark hue-shifted color, not pure black.', ex: { op: 'outline', color: '#2a1a22' } },
   bevel: { doc: `Light top/left and dark bottom/right edge lines of size px (blocks, planks, buttons). ${REGION}`, ex: { op: 'bevel', light: 'w3', dark: 'w0' } },
   copy: { doc: 'Copy a block (from this layer, from_layer, from_frame or from_canvas = asset stamp). Order: scale/flip, then hue/saturation/lightness, then tint (multiply), then opacity. skip_transparent defaults true. Build animation frames from a base frame: copy from_frame then move parts.', ex: { op: 'copy', from_frame: 0, x: 0, y: 0, w: 32, h: 32, to_x: 0, to_y: 1 } },
@@ -101,7 +103,7 @@ export const COMMON = 'Every command may set: layer, frame (frame-local coords),
 export function drawDescription() {
   const groups = [
     ['SHAPES', ['grid', 'pixels', 'line', 'curve', 'polygon', 'rect', 'ellipse', 'fill', 'text']],
-    ['FORM/SURFACE', ['shade', 'cells', 'noise', 'scatter', 'outline', 'bevel']],
+    ['FORM/SURFACE', ['shade', 'cells', 'noise', 'scatter', 'outline', 'bevel', 'damage']],
     ['COLOR', ['replace', 'remap', 'gradient', 'adjust', 'quantize']],
     ['TRANSFORM', ['copy', 'flip', 'rotate', 'shift', 'mirror', 'clear']],
     ['LIGHT', ['light', 'fog', 'rays', 'glow', 'blur', 'vignette', 'cast_shadow']],
@@ -352,6 +354,34 @@ EXPORT (art_model export):
 - vertex_colors:true | {color0:"paint"|"masks"|"ao"|"height", color1}, uv2 / uv3:"world"|"box"|"lightmap"|"uv0" (consecutive TEXCOORD_n; meta.vertex_data says which).
 Every v2 export runs the in-repo structural glTF validator (result materials_v2.valid).
 RECIPES: painted hull panel = box {texture:"hull" (height/metal/rough layers), material:"painted_hull"}; brushed part = material:"brushed_metal"; canopy = material:"glass_canopy"; seat = material:"cloth"; neon sign = canvas with an emissive layer + material:{preset:"neon", emissive:{color:"#ff40a0", strength:8, animate:"flicker"}}; lit corridor = light parts + export {profile:"three", lightmap:{sun:false}, probes:true, bake_ao:true}.`;
+
+TOPICS.damage = `DAMAGE + DESTRUCTION (art_model damage / fracture, art_draw damage)
+
+STATES: art_model damage {name, states:["scuffed","damaged","wrecked"] | [{name, amount:0..1, seed?, regions?:[<part> | {parts?, at:[x,y,z] px, r?:16, amount?}], features?:{dents|panels|bend|glass|scorch|scratches|wear|bullets|wires|breach|emissive: weight 0..3}}], kind?, seed?:1, rigid?:{<part>:0..1}, roles?:{panels|glass|screens|lights|bend|leaf|breach|keep:[parts]}, inner?:"#23262c", frame?:"#555a63", sparks?:true, palette?:{soot,scorch,scorch2,hole,ring,scratch,wear,crack:"#rrggbb"}} stores the states on the model and replies with a contact sheet (intact + each state) and per-state features / fx sockets. Presets: scuffed 0.25, damaged 0.6, wrecked 1. delete:true removes them.
+One seeded feature set per model: every feature has an onset amount, so scuffed is inside damaged is inside wrecked (same seed). Features:
+- dents / crumples: impacts on the surface, edge-consistent subdivision (crack-free) + displacement with falloff, scaled by 1 - rigidity (glass 1, screens 0.8, default 0.25; rigid:{part:1} never dents).
+- panels: thin plates (or roles.panels) hinge out (offset) or come off (lost): an inner backing + frame ribs + exposed wiring (sweeps) with spark sockets and small emissive sparks at the wire ends (sparks:false = none). Smaller parts inside a moving or lost panel / door leaf (windows, stripes, bolts) ride along with it.
+- bend: long thin parts (antennas, rails, nozzles, pipes) bend from their base; steam socket at the tip.
+- glass: cracks (decal) then a jagged shard hole growing with the amount (kind "glass": the pane shatters to the frame).
+- screens / lights (emissive faces): cracked, then dead (emissive off, darkened); lights flicker first (fx_flicker socket) then die.
+- breach (hull / engine, or wrecked on the biggest closed part): BSP subtract of a jagged prism (through thin plates, a pocket in thick hulls) with inside-material walls, curled rim petals, exposed ribs and cables.
+- surface decals (pixel-art palette, ordered dither): scorch + soot plumes, scratches, edge wear on sharp edges (tinted from the base texture), bullet-hole clusters, glass / screen cracks. A per-face chart atlas (1 texel = 1 px) under an overlay shell.
+Kinds tune the weights: door (leaf jammed at damaged, blown out at wrecked; roles.leaf), terminal / console (smashed screens, sparks), crate / barrel (burst: outward bulges, lid / sides off, barrel leak socket), glass (pane shatters), light (flicker -> broken), hull (breach + leak), engine (bent nozzles, fire / smoke / steam).
+FX SOCKETS: fx_spark_n, fx_smoke_n, fx_fire_n, fx_steam_n, fx_leak_n, fx_flicker_n per state (position px, direction = emit along, intensity 0..1).
+LOOK: preview {name, damage:"wrecked"} = one state; render {name, damage:"damaged", canvas, camera, size} = sprite frames of a damaged prop.
+
+FRACTURE: art_model fracture {name, groups:[{part:<name|id|index>, pieces?:8 (2-64), method?:"voronoi"|"slice", seed?, inside?:<texture>, debris?:0 (that many of the biggest chunks split into 3 more), density?:600 kg/m^3, group?, parent?:<group>, boolean?:"auto"|"bsp"|"robust" (auto = BSP for small parts, the robust BVH path of art_model boolean above 4000 triangles)}]} = pre-fractured breakables: each chunk = BSP intersect of the closed part with a convex cell (watertight, volumes sum to the part), interior faces in the inside material. Reply: chunks, volume error, watertight, mass + an exploded view in chunk colours. Parts must be closed solids (boxes, cylinders, wedges, extrusions). Big parts: robust booleans / voxel remesh (mesh-processing) can replace the BSP later.
+
+EXPORT: art_model export {name} on a model with damage / fracture writes the usual <name>.glb (unchanged) plus:
+- <name>.damage.glb: root <name>_damage > <name>_intact, <name>_<state> (extras.damage_state, amount, visible; fx socket children <name>_<state>_fx_<kind>_<n>, -Z = emit direction), <name>_fracture > <name>_<group> > <name>_<chunk> (origin = centre of mass, extras.mass_kg, child *_collision convex hull, hidden) > debris.
+- lods:[1,0.5,0.2] (or damage.lods): every state gets <name>_<state>_LOD0..n children (decals kept on LOD1).
+- masks: the intact node is blend-ready: chart UVs in TEXCOORD_1, morph target "damage" (dents) and <name>.damage_mask.png (RGBA = scorch, dent, holes, wear; threshold encoding: a texel is damaged once blend >= 1 - value/255) so one 0..1 blend lerps intact -> wrecked on one mesh. damage:{vertex:true} adds the same 4 channels per vertex (_DAMAGE attribute; vertex:"color" = COLOR_0). mask_channels:true writes the channels as greyscale PNGs.
+- damage:{mode:"files"} = <name>_<state>.glb + <name>_fracture.glb; mode:"blend" = only <name>.blend.glb (intact + masks). damage:false skips it all.
+- damage:{profile:"roblox"} = <name>.damage.roblox.glb: states + chunks as separate MeshParts (<= 20k triangles, simplified when over), masks / morphs / UV2 dropped, decals baked into colour.
+- <name>.damage.json manifest: states (nodes, triangles, lods, sockets in units), blend (mask file, channels, encoding), fracture groups (chunks with volume, mass, centre, bounds, collision, parent / level), usage notes.
+MATERIALS V2: the mask channels are meant to drive material blends (scorch -> roughness up / albedo down, wear -> metal up, holes -> alpha cut, dent -> normal strength) next to paint / wetness masks; until then the mask is a side file on TEXCOORD_1.
+
+SPRITES: art_draw damage {amount, seed, kinds?:[scratches,dents,holes,cracks,scorch], on?:[plate colours], palette?, mirror?, region?} paints damage onto existing pixel art using only palette colours; same seed = same relative spots in every frame / view (armour plates, helmets, 2D props).`;
 
 Object.assign(TOPICS, AUDIO_TOPICS, PLANET_TOPICS);
 

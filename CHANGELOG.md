@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Damage and destruction (`art_model damage` / `fracture`)
+
+- New `art_model damage {name, kind?, seed?, states:["scuffed","damaged","wrecked" | {name, amount 0..1, seed?, regions?}], roles?, rigid?, inner?, frame?}`. One seeded feature set per model, each feature with an onset, so states nest (everything in "damaged" is still there in "wrecked"):
+  - dents and crumples (displacement x (1 - part rigidity), crack-free subdivision near impacts), bent thin parts, panels lost (inner backing, frame ribs and exposed wiring with emissive sparks) or hinged off, door leaves jammed or blown out (with the parts riding on them);
+  - cracked and holed glass and screens (jagged shard holes, dead emissive), lamps that flicker then die, hull breaches (BSP cut with a curled rim and exposed frame), knocked-askew engine nozzles;
+  - decals: scorch / soot, scratches and edge wear, bullet-hole clusters, cracks (dithered, tinted from the base texture);
+  - fx sockets `fx_<spark|smoke|fire|steam|leak|flicker>_<n>` with position, direction and intensity.
+  - Kinds: generic, door, terminal, console, crate, barrel, glass, light, hull, engine. `model_preview` / `model_render` take `damage:<state>`.
+- New `art_model fracture {name, groups:[{part, pieces 2..64, method voronoi|slice, seed, inside, debris, density, parent}]}`: watertight, manifold convex-cell chunks (volumes sum to the part), interior faces in the `inside` material, per-chunk mass, centre of mass, bounds and a convex collision hull; break groups with parents and level-2 debris. Deterministic by seed. Cuts go through `booleanMesh` (`boolean: auto|bsp|robust`; auto switches to the robust mesh-processing path above 4000 triangles).
+- `model_export {damage: true | {mode: nodes|files|blend, masks, vertex: true|"color", mask_channels, profile: "roblox", lods}}`: writes `<name>.damage.glb` (state nodes with LOD chains and fx socket nodes, fracture chunks), a per-texel mask (`.damage_mask.png`, R scorch, G dent, B holes, A wear, threshold-encoded for one 0..1 blend) on a second UV set plus a `damage` morph target and an optional `_DAMAGE` / `COLOR_0` vertex channel, a Roblox profile (`.damage.roblox.glb`: separate MeshParts of at most 20k triangles, decals baked into colour) and the documented `.damage.json` manifest. Materials v2 carry over to the damage glbs (extensions, packing, tangents; the damage channel follows tangent vertex splits); `profile:"roblox"` on the export implies the Roblox damage profile.
+- Sprite op `damage {amount, seed, kinds?, on?, palette?, mirror?}`: palette-only scratches, dents, holes, cracks and scorch placed in the damaged area's normalised box, so one seed lands in the same spot in every view.
+- Help topic `art_help {topic:"damage"}`; demos in `docs/damage/` (built by `docs/damage/build-demos.mjs` with Agent Art's own ops).
+- Existing exports are byte-identical when damage and fracture are unused (golden digests recorded on 0.8.0 tested). The tool-list size cap in `test/quality.test.js` rises from 40340 to 40840 characters for the new art_model actions and parameters (40790 measured).
+
 ## 0.8.0
 
 ### Skeletal skinning in `art_model`

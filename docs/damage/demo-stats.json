@@ -1,0 +1,780 @@
+{
+ "models": {
+  "crate": {
+   "kind": "crate",
+   "ms": 182,
+   "states": [
+    {
+     "name": "intact",
+     "triangles": 60
+    },
+    {
+     "name": "scuffed",
+     "triangles": 120,
+     "features": {
+      "scratches": 12
+     },
+     "sockets": []
+    },
+    {
+     "name": "damaged",
+     "triangles": 4488,
+     "features": {
+      "dents": 3,
+      "panels_offset": 1,
+      "bullets": 6,
+      "scratches": 31
+     },
+     "sockets": []
+    },
+    {
+     "name": "wrecked",
+     "triangles": 2480,
+     "features": {
+      "dents": 5,
+      "panels_lost": 2,
+      "panels_offset": 2,
+      "bullets": 12,
+      "scorch": 1,
+      "scratches": 31,
+      "wires": 2
+     },
+     "sockets": [
+      "fx_spark_1",
+      "fx_spark_2",
+      "fx_fire_1"
+     ]
+    }
+   ]
+  },
+  "door": {
+   "kind": "door",
+   "ms": 132,
+   "states": [
+    {
+     "name": "intact",
+     "triangles": 72
+    },
+    {
+     "name": "scuffed",
+     "triangles": 142,
+     "features": {
+      "scratches": 10
+     },
+     "sockets": []
+    },
+    {
+     "name": "damaged",
+     "triangles": 1386,
+     "features": {
+      "dents": 1,
+      "panels_offset": 1,
+      "bullets": 5,
+      "scratches": 24,
+      "cracks": 1
+     },
+     "sockets": [
+      "fx_spark_1"
+     ]
+    },
+    {
+     "name": "wrecked",
+     "triangles": 3276,
+     "features": {
+      "dents": 3,
+      "panels_offset": 1,
+      "bullets": 8,
+      "scorch": 1,
+      "scratches": 24,
+      "cracks": 1
+     },
+     "sockets": [
+      "fx_spark_1",
+      "fx_smoke_1",
+      "fx_fire_1"
+     ]
+    }
+   ]
+  },
+  "terminal": {
+   "kind": "terminal",
+   "ms": 117,
+   "states": [
+    {
+     "name": "intact",
+     "triangles": 92
+    },
+    {
+     "name": "scuffed",
+     "triangles": 174,
+     "features": {
+      "scratches": 2
+     },
+     "sockets": []
+    },
+    {
+     "name": "damaged",
+     "triangles": 1048,
+     "features": {
+      "dents": 1,
+      "bullets": 6,
+      "scratches": 14,
+      "cracks": 1
+     },
+     "sockets": []
+    },
+    {
+     "name": "wrecked",
+     "triangles": 4808,
+     "features": {
+      "dents": 2,
+      "bent": 1,
+      "glass_holes": 1,
+      "bullets": 6,
+      "scorch": 1,
+      "scratches": 14,
+      "cracks": 1,
+      "emissive_off": 1
+     },
+     "sockets": [
+      "fx_steam_1",
+      "fx_spark_1",
+      "fx_spark_2",
+      "fx_fire_1"
+     ]
+    }
+   ]
+  },
+  "hull_panel": {
+   "kind": "hull",
+   "ms": 590,
+   "states": [
+    {
+     "name": "intact",
+     "triangles": 68
+    },
+    {
+     "name": "scuffed",
+     "triangles": 128,
+     "features": {
+      "scratches": 11
+     },
+     "sockets": []
+    },
+    {
+     "name": "damaged",
+     "triangles": 2502,
+     "features": {
+      "dents": 3,
+      "bullets": 6,
+      "scratches": 37
+     },
+     "sockets": []
+    },
+    {
+     "name": "wrecked",
+     "triangles": 7871,
+     "features": {
+      "dents": 6,
+      "panels_lost": 2,
+      "bent": 2,
+      "breaches": 1,
+      "bullets": 17,
+      "scorch": 2,
+      "scratches": 40,
+      "wires": 7
+     },
+     "sockets": [
+      "fx_spark_1",
+      "fx_spark_2",
+      "fx_spark_3",
+      "fx_spark_4",
+      "fx_spark_5",
+      "fx_smoke_1",
+      "fx_steam_1",
+      "fx_steam_2",
+      "fx_spark_6",
+      "fx_spark_7",
+      "fx_fire_1",
+      "fx_leak_1",
+      "fx_fire_2",
+      "fx_smoke_2"
+     ]
+    }
+   ]
+  },
+  "barrel": {
+   "kind": "barrel",
+   "ms": 97,
+   "states": [
+    {
+     "name": "intact",
+     "triangles": 200
+    },
+    {
+     "name": "scuffed",
+     "triangles": 366,
+     "features": {
+      "scratches": 7
+     },
+     "sockets": []
+    },
+    {
+     "name": "damaged",
+     "triangles": 1764,
+     "features": {
+      "dents": 1,
+      "bullets": 5,
+      "scorch": 1,
+      "scratches": 12
+     },
+     "sockets": [
+      "fx_smoke_1",
+      "fx_leak_1"
+     ]
+    },
+    {
+     "name": "wrecked",
+     "triangles": 3712,
+     "features": {
+      "dents": 3,
+      "panels_lost": 1,
+      "panels_offset": 1,
+      "bullets": 5,
+      "scorch": 1,
+      "scratches": 13,
+      "wires": 3
+     },
+     "sockets": [
+      "fx_spark_1",
+      "fx_spark_2",
+      "fx_spark_3",
+      "fx_fire_1",
+      "fx_leak_1"
+     ]
+    }
+   ]
+  },
+  "glass_pane": {
+   "kind": "glass",
+   "ms": 73,
+   "states": [
+    {
+     "name": "intact",
+     "triangles": 60
+    },
+    {
+     "name": "scuffed",
+     "triangles": 114,
+     "features": {
+      "scratches": 2
+     },
+     "sockets": []
+    },
+    {
+     "name": "damaged",
+     "triangles": 910,
+     "features": {
+      "dents": 1,
+      "bullets": 6,
+      "scratches": 15,
+      "cracks": 1
+     },
+     "sockets": []
+    },
+    {
+     "name": "wrecked",
+     "triangles": 2852,
+     "features": {
+      "dents": 2,
+      "glass_holes": 1,
+      "bullets": 6,
+      "scorch": 1,
+      "scratches": 15,
+      "cracks": 1
+     },
+     "sockets": [
+      "fx_fire_1"
+     ]
+    }
+   ]
+  },
+  "light": {
+   "kind": "light",
+   "ms": 44,
+   "states": [
+    {
+     "name": "intact",
+     "triangles": 36
+    },
+    {
+     "name": "scuffed",
+     "triangles": 68,
+     "features": {
+      "scratches": 1
+     },
+     "sockets": []
+    },
+    {
+     "name": "damaged",
+     "triangles": 1564,
+     "features": {
+      "dents": 1,
+      "bullets": 6,
+      "scratches": 6,
+      "cracks": 1
+     },
+     "sockets": [
+      "fx_flicker_1"
+     ]
+    },
+    {
+     "name": "wrecked",
+     "triangles": 4530,
+     "features": {
+      "dents": 2,
+      "panels_lost": 1,
+      "glass_holes": 1,
+      "bullets": 6,
+      "scorch": 1,
+      "scratches": 6,
+      "cracks": 1,
+      "wires": 3,
+      "emissive_off": 1
+     },
+     "sockets": [
+      "fx_spark_1",
+      "fx_spark_2",
+      "fx_spark_3",
+      "fx_spark_4",
+      "fx_spark_5",
+      "fx_fire_1"
+     ]
+    }
+   ]
+  },
+  "console": {
+   "kind": "console",
+   "ms": 106,
+   "states": [
+    {
+     "name": "intact",
+     "triangles": 60
+    },
+    {
+     "name": "scuffed",
+     "triangles": 118,
+     "features": {
+      "scratches": 9
+     },
+     "sockets": []
+    },
+    {
+     "name": "damaged",
+     "triangles": 2220,
+     "features": {
+      "dents": 1,
+      "bullets": 5,
+      "scratches": 23,
+      "cracks": 2
+     },
+     "sockets": []
+    },
+    {
+     "name": "wrecked",
+     "triangles": 6272,
+     "features": {
+      "dents": 3,
+      "panels_lost": 1,
+      "panels_offset": 1,
+      "glass_holes": 2,
+      "bullets": 8,
+      "scorch": 1,
+      "scratches": 23,
+      "cracks": 2,
+      "wires": 1,
+      "emissive_off": 2
+     },
+     "sockets": [
+      "fx_spark_1",
+      "fx_spark_2",
+      "fx_spark_3",
+      "fx_spark_4",
+      "fx_spark_5",
+      "fx_fire_1"
+     ]
+    }
+   ]
+  },
+  "engine_pod": {
+   "kind": "engine",
+   "ms": 62,
+   "states": [
+    {
+     "name": "intact",
+     "triangles": 168
+    },
+    {
+     "name": "scuffed",
+     "triangles": 314,
+     "features": {
+      "scratches": 8
+     },
+     "sockets": []
+    },
+    {
+     "name": "damaged",
+     "triangles": 1308,
+     "features": {
+      "dents": 1,
+      "scratches": 22
+     },
+     "sockets": [
+      "fx_steam_1"
+     ]
+    },
+    {
+     "name": "wrecked",
+     "triangles": 3920,
+     "features": {
+      "dents": 3,
+      "panels_lost": 2,
+      "panels_offset": 2,
+      "bent": 1,
+      "bullets": 6,
+      "scorch": 2,
+      "scratches": 22,
+      "wires": 2
+     },
+     "sockets": [
+      "fx_spark_1",
+      "fx_spark_2",
+      "fx_smoke_1",
+      "fx_steam_1",
+      "fx_fire_1",
+      "fx_smoke_2",
+      "fx_leak_1",
+      "fx_steam_2"
+     ]
+    }
+   ]
+  }
+ },
+ "fracture": {
+  "crate": {
+   "ms": 40,
+   "groups": [
+    {
+     "group": "body",
+     "part": "body",
+     "parent": null,
+     "method": "voronoi",
+     "boolean": "auto",
+     "seed": 3,
+     "chunks": 10,
+     "debris": 6,
+     "volume_units3": 0.421875,
+     "chunk_volume_error": 0,
+     "watertight": true,
+     "mass_kg": 253.125,
+     "triangles": 612
+    }
+   ]
+  },
+  "door": {
+   "ms": 28,
+   "groups": [
+    {
+     "group": "leaf",
+     "part": "leaf",
+     "parent": null,
+     "method": "slice",
+     "boolean": "auto",
+     "seed": 5,
+     "chunks": 8,
+     "debris": 0,
+     "volume_units3": 0.073486,
+     "chunk_volume_error": 0,
+     "watertight": true,
+     "mass_kg": 44.091797,
+     "triangles": 346
+    },
+    {
+     "group": "window",
+     "part": "window",
+     "parent": "leaf",
+     "method": "voronoi",
+     "boolean": "auto",
+     "seed": 2,
+     "chunks": 6,
+     "debris": 0,
+     "volume_units3": 0.006348,
+     "chunk_volume_error": 0,
+     "watertight": true,
+     "mass_kg": 3.808594,
+     "triangles": 298
+    }
+   ]
+  }
+ },
+ "exports": {
+  "crate": {
+   "ms": 438,
+   "plain_bytes": 15692,
+   "damage": {
+    "files": [
+     "crate.damage_mask.png",
+     "crate.damage_mask_r.png",
+     "crate.damage_mask_g.png",
+     "crate.damage_mask_b.png",
+     "crate.damage_mask_a.png",
+     "crate.damage.glb",
+     "crate.damage.json"
+    ],
+    "mode": "nodes",
+    "profile": "web",
+    "states": [
+     {
+      "name": "intact",
+      "triangles": 2714,
+      "sockets": 0,
+      "lods": [
+       2714,
+       30,
+       15
+      ]
+     },
+     {
+      "name": "scuffed",
+      "triangles": 120,
+      "sockets": 0,
+      "lods": [
+       120,
+       90,
+       15
+      ]
+     },
+     {
+      "name": "damaged",
+      "triangles": 4488,
+      "sockets": 0,
+      "lods": [
+       4488,
+       3366,
+       561
+      ]
+     },
+     {
+      "name": "wrecked",
+      "triangles": 2480,
+      "sockets": 3,
+      "lods": [
+       2480,
+       1802,
+       338
+      ]
+     }
+    ],
+    "fracture": [
+     {
+      "group": "body",
+      "chunks": 16
+     }
+    ],
+    "mask": "128x128",
+    "glbs": [
+     {
+      "file": "crate.damage.glb",
+      "bytes": 835132,
+      "triangles": 10738,
+      "nodes": 54,
+      "materials": 12
+     }
+    ],
+    "ms": 233
+   },
+   "roblox": [
+    {
+     "file": "crate.damage.roblox.glb",
+     "bytes": 228748,
+     "triangles": 4654,
+     "nodes": 42,
+     "materials": 12
+    }
+   ]
+  },
+  "hull_panel": {
+   "ms": 677,
+   "plain_bytes": 17812,
+   "damage": {
+    "files": [
+     "hull_panel.damage_mask.png",
+     "hull_panel.damage_mask_r.png",
+     "hull_panel.damage_mask_g.png",
+     "hull_panel.damage_mask_b.png",
+     "hull_panel.damage_mask_a.png",
+     "hull_panel.damage.glb",
+     "hull_panel.damage.json"
+    ],
+    "mode": "nodes",
+    "profile": "web",
+    "states": [
+     {
+      "name": "intact",
+      "triangles": 2994,
+      "sockets": 0,
+      "lods": [
+       2994,
+       34,
+       16
+      ]
+     },
+     {
+      "name": "scuffed",
+      "triangles": 128,
+      "sockets": 0,
+      "lods": [
+       128,
+       94,
+       16
+      ]
+     },
+     {
+      "name": "damaged",
+      "triangles": 2502,
+      "sockets": 0,
+      "lods": [
+       2502,
+       1874,
+       312
+      ]
+     },
+     {
+      "name": "wrecked",
+      "triangles": 7871,
+      "sockets": 14,
+      "lods": [
+       7871,
+       5741,
+       1064
+      ]
+     }
+    ],
+    "mask": "128x256",
+    "glbs": [
+     {
+      "file": "hull_panel.damage.glb",
+      "bytes": 1045340,
+      "triangles": 13495,
+      "nodes": 31,
+      "materials": 13
+     }
+    ],
+    "ms": 385
+   },
+   "roblox": [
+    {
+     "file": "hull_panel.damage.roblox.glb",
+     "bytes": 202240,
+     "triangles": 5648,
+     "nodes": 19,
+     "materials": 13
+    }
+   ]
+  },
+  "terminal": {
+   "ms": 233,
+   "plain_bytes": 23520,
+   "damage": {
+    "files": [
+     "terminal.damage_mask.png",
+     "terminal.damage_mask_r.png",
+     "terminal.damage_mask_g.png",
+     "terminal.damage_mask_b.png",
+     "terminal.damage_mask_a.png",
+     "terminal.damage.glb",
+     "terminal.damage.json"
+    ],
+    "mode": "nodes",
+    "profile": "web",
+    "states": [
+     {
+      "name": "intact",
+      "triangles": 816,
+      "sockets": 0,
+      "lods": [
+       816,
+       46,
+       22
+      ]
+     },
+     {
+      "name": "scuffed",
+      "triangles": 174,
+      "sockets": 0,
+      "lods": [
+       174,
+       128,
+       22
+      ]
+     },
+     {
+      "name": "damaged",
+      "triangles": 1048,
+      "sockets": 0,
+      "lods": [
+       1048,
+       786,
+       130
+      ]
+     },
+     {
+      "name": "wrecked",
+      "triangles": 4808,
+      "sockets": 4,
+      "lods": [
+       4808,
+       3470,
+       668
+      ]
+     }
+    ],
+    "mask": "128x64",
+    "glbs": [
+     {
+      "file": "terminal.damage.glb",
+      "bytes": 573788,
+      "triangles": 6846,
+      "nodes": 21,
+      "materials": 9
+     }
+    ],
+    "ms": 149
+   },
+   "roblox": [
+    {
+     "file": "terminal.damage.roblox.glb",
+     "bytes": 119032,
+     "triangles": 3382,
+     "nodes": 9,
+     "materials": 8
+    }
+   ]
+  }
+ },
+ "sprite": {
+  "amount_0": {
+   "off_palette_pixels": 0
+  },
+  "amount_0.25": {
+   "off_palette_pixels": 0
+  },
+  "amount_0.6": {
+   "off_palette_pixels": 0
+  },
+  "amount_1": {
+   "off_palette_pixels": 0
+  }
+ },
+ "total_ms": 3994
+}

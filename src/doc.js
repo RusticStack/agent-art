@@ -5,6 +5,7 @@ import { mulberry32, hash3, smooth, BAYER4, int, BLEND_MODES, blendChannel } fro
 import { EFFECTS } from './effects.js';
 import { ISO, ISO_FIELDS } from './iso.js';
 import { SHADING } from './shading.js';
+import { DAMAGE_SPRITE } from './damagesprite.js';
 import { opUsage } from './docs.js';
 import { rotsprite, upscale } from './pixelops.js';
 import { FONTS, getFont, FONT, FONT_H } from './fonts.js';
@@ -1527,7 +1528,7 @@ const COMMANDS = {
   },
 };
 
-Object.assign(COMMANDS, EFFECTS, ISO, SHADING);
+Object.assign(COMMANDS, EFFECTS, ISO, SHADING, DAMAGE_SPRITE);
 export const COMMAND_NAMES = Object.keys(COMMANDS);
 
 // Known fields per command, read from each command's own source, so typos / invented options

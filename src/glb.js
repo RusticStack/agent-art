@@ -273,7 +273,11 @@ export function writeGLB(scene, opts = {}) {
         TEXCOORD_0: acc(view(p.overlay ? p.uv0 : p.uv, ARRAY), FLOAT, vc, 'VEC2'),
       };
       if (!p.overlay && p.uv1) attributes.TEXCOORD_1 = acc(view(p.uv1, ARRAY), FLOAT, vc, 'VEC2');
-      if (!p.overlay && p.ao && !(p.vattr && p.vattr.COLOR_0)) {
+      // damage vertex channel (art_model damage, export damage.vertex): RGBA = scorch, dent, holes, wear.
+      // COLOR_0 only when nothing else (materials v2 vertex colours) claims it; else _DAMAGE.
+      const dmgAttr = !p.overlay && p.dmg ? (opts.dmgAttr === 'COLOR_0' && p.vattr && p.vattr.COLOR_0 ? '_DAMAGE' : opts.dmgAttr || '_DAMAGE') : null;
+      if (dmgAttr) attributes[dmgAttr] = acc(view(p.dmg, ARRAY), FLOAT, vc, 'VEC4');
+      if (!p.overlay && p.ao && !(p.vattr && p.vattr.COLOR_0) && dmgAttr !== 'COLOR_0') {
         const col = new Float32Array(vc * 3);
         for (let i = 0; i < vc; i++) col.fill(p.ao[i], i * 3, i * 3 + 3);
         attributes.COLOR_0 = acc(view(col, ARRAY), FLOAT, vc, 'VEC3');

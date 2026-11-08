@@ -453,6 +453,17 @@ Big-budget sci-fi set pieces at a pixel-texture budget (renders: `docs/ships/`, 
   - `split:true` keeps every mesh under 20 000 triangles (the Roblox MeshPart limit).
   - `static:true|"<pose>"` bakes a rigged ship so lods, impostor and cull apply.
 
+#### Damage and destruction
+
+`art_model damage` gives a model seeded, nested damage states (scuffed, damaged, wrecked or custom amounts): dents that respect part rigidity, lost or hinged panels with an inner frame and sparking wires, bent parts, shattered glass, scorch, wear, bullet holes, hull breaches, and fx sockets for sparks, smoke, fire, steam and leaks. `art_model fracture` pre-cuts parts into watertight chunks with mass, centre and collision hulls. `model_export {damage:true}` writes the states as nodes (with LODs), blend masks and a manifest; `damage:{profile:"roblox"}` writes MeshParts with baked decals. Details: `art_help {topic:"damage"}`.
+
+![Crate, door, terminal and hull panel: intact, scuffed, damaged, wrecked](docs/damage/interactables.png)
+![Barrel, glass pane, light, console and engine pod](docs/damage/interactables_more.png)
+![Hull breach with exposed frame](docs/damage/hull_breach.png)
+![Fracture: crate (voronoi + debris) and door (slice, window parented to the leaf)](docs/damage/fracture_exploded.png)
+![Blend mask channels](docs/damage/mask_channels.png)
+![Sprite armour damage overlay, three views](docs/damage/sprite_armour.png)
+
 #### World-space UVs at runtime (three.js)
 
 The same mapping the exporter bakes, for runtime-placed tiles. Shown for a Z-up scene; for Y-up swap `up` to `(0,1,0)` and the cap branch accordingly.

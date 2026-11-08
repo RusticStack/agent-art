@@ -26,6 +26,7 @@ import { isKitRef, kitTexture } from './kittex.js';
 import { bakeAO } from './bake.js';
 import { WALK_KINDS, navMesh } from './walk.js';
 import { addMarkerNodes, markerMeta, splitScene, materialize, sceneTriangles, sceneDrawCalls, normBudget, ROBLOX_TRIS, moodOpts, budgetReport } from './modelkit.js';
+import { damageOps, damageExport, wantsDamage, damagedBuilt } from './damageops.js';
 
 const NAME_RE = /^[A-Za-z0-9_\-.]{1,64}$/;
 
@@ -257,7 +258,12 @@ function clipSamples(def, info, clipName, n, fps) {
 function previewImage(engine, def, a) {
   def = expandDef(def);
   const t0 = performance.now();
-  const built = build(engine, def, a.bump !== undefined ? { bump: a.bump } : {});
+  let built = build(engine, def, a.bump !== undefined ? { bump: a.bump } : {});
+  if (a.damage !== undefined && a.damage !== null) {
+    // a damage state is a static mesh: no channel / skinned pose on top of it
+    if (a.channel !== undefined || (isSkinned(def) && (a.clip !== undefined || a.pose !== undefined || a.bones || a.morph))) throw new Error('damage previews one static state: drop channel / clip / pose, or drop damage');
+    built = damagedBuilt(def, built, a.damage);
+  }
   if (a.channel !== undefined) {
     const posing = a.pose !== undefined || a.bones || a.morph || a.parts;
     if (a.clip !== undefined) throw new Error('channel previews one pose: pass pose / bones (skinned) instead of clip, or drop channel for the clip contact sheet');
@@ -427,7 +433,7 @@ function placeFrames(engine, outName, FW, FH, tag, imgs, { durations, loop, proj
 }
 
 /** Model-level options kept on create/update (besides name and parts). */
-export const MODEL_KEYS = ['grid', 'scale', 'origin', 'notes', 'project', 'overlays', 'uv_origin', 'rig', 'sockets', 'poses', 'clips', 'weapon', 'arms', 'merge', 'morphs', 'cull', 'greeble_kind', 'fp', 'skeleton', 'skin', 'materials'];
+export const MODEL_KEYS = ['grid', 'scale', 'origin', 'notes', 'project', 'overlays', 'uv_origin', 'rig', 'sockets', 'poses', 'clips', 'weapon', 'arms', 'merge', 'morphs', 'cull', 'greeble_kind', 'fp', 'skeleton', 'skin', 'materials', 'damage', 'fracture'];
 
 /** Part index from a number or a part name. */
 function partIndex(parts, k, what) {
@@ -600,7 +606,11 @@ export const MODEL_OPS = {
    */
   model_render(a, source) {
     const def = expandDef(getModel(this, a.name));
-    const built = build(this, def);
+    let built = build(this, def);
+    if (a.damage !== undefined && a.damage !== null) {
+      if (isSkinned(def)) throw new Error('damage renders a static state of a rigid model; skinned models: preview {name, damage}');
+      built = damagedBuilt(def, built, a.damage);
+    }
     // skinned models: frames come from the skeleton clip / pose, deformed by linear blend skinning
     const skinned = isSkinned(def) && !a.hold ? skinnedOf(skinCtx(BASE, this, built), def, built) : null;
     if (skinned && (a.only || a.hide)) throw new Error('only / hide are for rigid rigs; a skinned model renders as one mesh');
@@ -814,6 +824,9 @@ export const MODEL_OPS = {
     fs.writeFileSync(file, glb);
     if (ext) ext.after();
     if (v2) for (const [f, buf] of v2.side) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, buf); }
+    // damage states / fracture: extra files next to the plain glb (which stays unchanged)
+    const dmg = wantsDamage(def, a) ? damageExport(this, def, build(this, def, { normal }), a, { file, scale }) : null;
+    if (dmg) dmg.after();
     let ctmFile;
     if (ctmNames.length) {
       // runtime CTM: tilesets + rules (faces are already baked; this is for re-tiling in the engine)
@@ -832,15 +845,17 @@ export const MODEL_OPS = {
       ...(ext ? ext.meta : {}),
       ...(v2 ? v2.meta : {}),
       ...(kit ? kit.meta : {}),
+      ...(dmg ? { damage: { manifest: path.basename(file).replace(/\.glb$/i, '.damage.json'), files: dmg.result.damage.files } } : {}),
     };
     const metaFile = file.replace(/\.glb$/i, '.meta.json');
     fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2));
-    return { file, meta: metaFile, ...(ctmFile ? { ctm: ctmFile } : {}), bytes: glb.length, triangles: stats.triangles, vertices: stats.vertices, materials: stats.materials, nodes: stats.nodes, bounds_units: stats.bounds, atlased: stats.atlased, ...(info ? { animations: Object.keys(rigClips), sockets: info.sockets.map((s) => s.name) } : {}), ...(ext ? ext.result : {}), ...(v2 ? v2.result : {}), ...(kit ? kit.result : {}) };
+    return { file, meta: metaFile, ...(ctmFile ? { ctm: ctmFile } : {}), bytes: glb.length, triangles: stats.triangles, vertices: stats.vertices, materials: stats.materials, nodes: stats.nodes, bounds_units: stats.bounds, atlased: stats.atlased, ...(info ? { animations: Object.keys(rigClips), sockets: info.sockets.map((s) => s.name) } : {}), ...(ext ? ext.result : {}), ...(v2 ? v2.result : {}), ...(kit ? kit.result : {}), ...(dmg ? dmg.result : {}) };
   },
   ...MODEL_EXTRA_OPS,
   ...skinOps({ getModel, saveModel, build, variantOf: (engine, def) => variantOf(engine, def), writeGLB }),
   ...meshOpsFor({ getModel, build, saveModel, modelDir, hasModel: (engine, n) => models(engine).has(n) }),
   ...kitOps({ getModel, saveModel, build, models }),
+  ...damageOps({ getModel, build, saveModel }),
 };
 /** Helpers the skinning ops share with the rest of art_model. */
 const BASE = { getModel, saveModel, build, variantOf: (engine, def) => variantOf(engine, def), writeGLB };
