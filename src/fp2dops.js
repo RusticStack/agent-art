@@ -5,7 +5,7 @@
 // resolves a gun / magazine / attachment / item / skin name to its drawings when they exist.
 import { Doc, Layer } from './doc.js';
 import { GUN_CLASSES, MAGS, ATTACH } from './fpkit.js';
-import { classGrid, magGrid2, attachGrid2, itemGrid, sweep2dOf, assetRoot, readManifest, writeManifest, exportSweep, GRID_STEP, checkFpName } from './fpops.js';
+import { classGrid, magGrid2, attachGrid2, itemGrid, sweep2dOf, assetRoot, readManifest, writeManifest, exportSweep, GRID_STEP, checkFpName, numArg } from './fpops.js';
 import { sources2d, keyOf, gunTemplate, suggestAnchors, anchorsOffArt, artOf, fitSockets, colorSet, KINDS, GUIDES, VIEWS, STATION_VIEWS, stationView } from './fp2d.js';
 import { armTemplate, traceSkin, skin2dOf, HAND_POSES, LIMB_VIEWS, HAND_VIEWS, ARM_PX_PER_CM } from './fp2darms.js';
 import { PX_PER_M, r1 } from './fp.js';
@@ -112,7 +112,7 @@ export const FP2D_OPS = {
     let suggestions;
     if (!arm && (a.suggest || a.accept !== undefined)) {
       suggestions = suggestAnchors(img, next, sourceFit(this, next, d.name));
-      const min = a.accept === undefined ? null : Number(a.accept);
+      const min = a.accept === undefined ? null : numArg(a, 'accept', 0);
       if (min !== null) for (const [n, s] of Object.entries(suggestions)) if (s.confidence >= min && (a.overwrite || !next.anchors[n])) { next.anchors[n] = s.at; changed = true; }
     }
     if (changed) {
@@ -132,7 +132,7 @@ export const FP2D_OPS = {
 
   /** Key drawings -> sweeps (fp_guns / fp_mags / fp_attach), exactly the files art_fp sweep writes. */
   fp_sweep2d(a) {
-    const root = assetRoot(this, a), step = Number(a.step ?? GRID_STEP), t0 = performance.now();
+    const root = assetRoot(this, a), step = numArg(a, 'step', GRID_STEP, { positive: true }), t0 = performance.now();
     const all = sources2d(this);
     const names = a.sources ? [].concat(a.sources) : [...all.keys()];
     if (!names.length) throw new Error('no 2D sources: art_fp template {kind, name, class, view} makes a key canvas (meta.fp2d.source)');

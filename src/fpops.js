@@ -407,6 +407,12 @@ export function exportSweep(root, dir, sweep, extra = {}) {
   return { ...sweep.def, ...extra, sheets: files, px_per_m: PX_PER_M };
 }
 
+/** A finite numeric argument (default when absent); positive:true also requires > 0. */
+export function numArg(a, k, def, { positive = false } = {}) {
+  const v = a[k] === undefined || a[k] === null ? def : Number(a[k]);
+  if (!Number.isFinite(v) || (positive && !(v > 0)) || (typeof a[k] === 'string' && !a[k].trim())) throw new Error(`${k} must be a finite number${positive ? ' > 0' : ''} (got ${JSON.stringify(a[k])})`);
+  return v;
+}
 export function listArg(v, all) { if (v === undefined || v === true) return all; if (v === false || v === null) return []; return [].concat(v); }
 
 export const FP_OPS = {
@@ -423,7 +429,7 @@ export const FP_OPS = {
 
   /** Gun / magazine / attachment / item sweeps -> manifests fp_guns, fp_mags, fp_attach. */
   fp_sweep(a) {
-    const root = assetRoot(this, a), step = Number(a.step ?? GRID_STEP), t0 = performance.now();
+    const root = assetRoot(this, a), step = numArg(a, 'step', GRID_STEP, { positive: true }), t0 = performance.now();
     const out = { guns: {}, mags: {}, attachments: {}, items: {} };
     const mg = readManifest(root, 'fp_guns'), mm = readManifest(root, 'fp_mags'), ma = readManifest(root, 'fp_attach');
     mg.sweeps = mg.sweeps || {}; mm.sweeps = mm.sweeps || {}; ma.sweeps = ma.sweeps || {};
@@ -474,7 +480,7 @@ export const FP_OPS = {
 
   /** Arms strips per skin x class x clip (+ @vgrip / @agrip variants) -> manifest fp. */
   fp_batch(a) {
-    const root = assetRoot(this, a), t0 = performance.now(), step = Number(a.step ?? GRID_STEP);
+    const root = assetRoot(this, a), t0 = performance.now(), step = numArg(a, 'step', GRID_STEP, { positive: true });
     const skins = listArg(a.skins, ['mec']);
     for (const s of skins) { checkFpName(s, 'skin'); resolveSkin(this, s); }
     const classes = listArg(a.classes, FP_CLASSES);
@@ -516,7 +522,7 @@ export const FP_OPS = {
   fp_composite(a) {
     const root = assetRoot(this, a);
     const r = compositeFromFiles(root, a);
-    const k = Math.max(1, Math.min(4, Number(a.zoom ?? 2)));
+    const k = Math.max(1, Math.min(4, numArg(a, 'zoom', 2)));
     const img = k > 1 ? zoomImg(r, k) : r;
     if (a.canvas) {
       checkFpName(a.canvas, 'canvas');
@@ -640,9 +646,10 @@ export function loadFrameAssets(root, { class: cls, clip, gun: gunName, attachme
   return { anim, name, layers, gun, mag, attachments: atts, items };
 }
 export function compositeFromFiles(root, a) {
+  const yawOff = numArg(a, 'yaw_offset', 0), pitchOff = numArg(a, 'pitch_offset', 0), frame = numArg(a, 'frame', 0);
   const A = loadFrameAssets(root, a);
-  const f = Math.max(0, Math.min(A.anim.frames - 1, Number(a.frame ?? 0)));
-  return { ...composite({ anim: A.anim, f, layers: A.layers, gun: A.gun, mag: A.mag, attachments: A.attachments, items: A.items, yawOff: Number(a.yaw_offset ?? 0), pitchOff: Number(a.pitch_offset ?? 0), background: a.background === undefined ? [62, 58, 54, 255] : a.background }), anim: A.name };
+  const f = Math.max(0, Math.min(A.anim.frames - 1, frame));
+  return { ...composite({ anim: A.anim, f, layers: A.layers, gun: A.gun, mag: A.mag, attachments: A.attachments, items: A.items, yawOff, pitchOff, background: a.background === undefined ? [62, 58, 54, 255] : a.background }), anim: A.name };
 }
 
 // ---------- fp check ----------

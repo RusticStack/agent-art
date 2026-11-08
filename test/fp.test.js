@@ -259,3 +259,15 @@ test('fp: every class has its contract clips; apparent angles match the cell cam
   assert.ok(fpGeometry('dmr').support[2] === fpGeometry('rifle').support[2], 'dmr shares the rifle grip geometry (handling.js)');
   void posedWorld;
 });
+
+test('fp: step / offsets / frame / zoom / accept must be finite numbers (no 0-cell sweeps, no silently dropped magazine)', () => {
+  const e = new Engine({ home: tmp() }), out = tmp();
+  for (const step of ['abc', 0, -5, NaN, '']) {
+    assert.throws(() => e.run('fp_sweep', { out, guns: ['pistol'], mags: false, attachments: false, items: false, step }), /step must be a finite number > 0/, JSON.stringify(step));
+    assert.throws(() => e.run('fp_sweep2d', { out, step }), /step must be a finite number > 0/);
+    assert.throws(() => e.run('fp_batch', { out, classes: ['pistol'], clips: ['idle'], variants: false, step }), /step must be a finite number > 0/);
+  }
+  for (const k of ['yaw_offset', 'pitch_offset', 'frame']) assert.throws(() => e.run('fp_composite', { out, class: 'rifle', clip: 'idle', [k]: 'x' }), new RegExp(`${k} must be a finite number`));
+  e.run('fp_template', { kind: 'mag', name: 'm1', class: 'rifle', canvas: 'm1c' });
+  assert.throws(() => e.run('fp_anchors', { canvas: 'm1c', accept: 'most' }), /accept must be a finite number/);
+});
