@@ -123,13 +123,15 @@ const preview = (mesh, a, wire) => {
  * The actions. api = modelops internals: {getModel, build, saveModel, modelDir}.
  */
 export function meshOpsFor(api) {
-  const { getModel, build, saveModel, modelDir } = api;
+  const { getModel, build, saveModel, modelDir, hasModel } = api;
   const scaleOf = (def) => Number(def.scale ?? 32);
   const sourceMesh = (engine, def) => build(engine, def).mesh;
-  const outName = (a, def, suffix) => {
+  const outName = (engine, a, def, suffix) => {
     const n = a.out ?? `${def.name}_${suffix}`;
-    if (!NAME_RE.test(n)) throw new Error('out must be a model name: 1-64 letters, digits, _ - .');
+    if (typeof n !== 'string' || !NAME_RE.test(n)) throw new Error('out must be a model name: 1-64 letters, digits, _ - .');
     if (n === def.name && !a.overwrite) throw new Error(`out "${n}" is the source model; pick another name (or overwrite:true to replace it with the baked result)`);
+    // an existing model is never replaced silently; the default name may be re-derived from the same source
+    if (n !== def.name && hasModel(engine, n) && !a.overwrite && !(a.out === undefined && getModel(engine, n).baked?.from === def.name)) throw new Error(`Model "${n}" exists (overwrite:true replaces it with the baked result; or pick another out name)`);
     return n;
   };
   const saveBaked = (engine, def, out, mesh, info, source) => {
@@ -201,7 +203,7 @@ export function meshOpsFor(api) {
         if (op !== 'union') throw new Error(`${op} needs with:"<model>" (the cutter / other operand); without it boolean unions the model's shells`);
         res = unionAll(A);
       }
-      const out = outName(a, def, op);
+      const out = outName(this, a, def, op);
       const before = A.triangles, mf = manifoldBrief(res.mesh);
       saveBaked(this, def, out, res.mesh, { action: 'boolean', op, with: a.with }, source);
       return { model: out, op, triangles_in: before, triangles: res.mesh.triangles, manifold: mf, stats: res.stats, ms: Math.round(performance.now() - t0), ...preview(res.mesh, a, false), next: `art_model preview {name:"${out}"} | cluster_lod {name:"${out}"} | export {name:"${out}"}` };
@@ -218,7 +220,7 @@ export function meshOpsFor(api) {
       else if (method === 'quad') r = quadRemesh(src, { faces: a.faces, feature_angle: a.feature_angle, symmetry: a.symmetry, iterations: a.iterations });
       else if (method === 'cleanup') r = cleanupRemesh(src, { weld: a.weld !== undefined ? num(a.weld, 'weld', { min: 0 }) * scale : undefined, holes: a.holes });
       else throw new Error('method must be voxel (watertight shell from any soup), quad (quad-dominant retopology) or cleanup (weld, degenerates, winding, small holes)');
-      const out = outName(a, def, method);
+      const out = outName(this, a, def, method);
       const h = hausdorff(src, r.mesh, { perTri: 4 });
       saveBaked(this, def, out, r.mesh, { action: 'remesh', method }, source);
       return {
@@ -235,7 +237,7 @@ export function meshOpsFor(api) {
       if (a.ratio === undefined && a.triangles === undefined && maxError === Infinity) throw new Error('decimate needs ratio (0..1), triangles (target count) or max_error (units: the largest allowed distance from the source)');
       const r = decimateMesh(src, { ratio: a.ratio !== undefined ? num(a.ratio, 'ratio', { min: 0 }) : undefined, triangles: a.triangles !== undefined ? num(a.triangles, 'triangles', { min: 1 }) : undefined, maxError, featureAngle: num(a.feature_angle, 'feature_angle', { min: 0, def: 45 }), seams: a.seams !== false, attrWeight: a.attr_weight });
       const h = hausdorff(src, r.mesh);
-      const out = outName(a, def, 'dec');
+      const out = outName(this, a, def, 'dec');
       saveBaked(this, def, out, r.mesh, { action: 'decimate', ratio: a.ratio, triangles: a.triangles, max_error: a.max_error }, source);
       return {
         model: out, triangles_in: r.source, triangles: r.triangles, ratio: r4(r.triangles / Math.max(1, r.source)),

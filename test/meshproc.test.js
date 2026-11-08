@@ -342,3 +342,19 @@ test('three.js GLTFLoader loads the cluster LOD glb (optional: AGENT_ART_THREE)'
   assert.ok(tris > 0);
   assert.equal(gltf.scene.getObjectByName('pod_union_LOD1').userData.lod, 1);
 });
+
+test('derived meshes never overwrite another existing model unless overwrite:true', () => {
+  const e = new Engine({ home: tmp() });
+  e.run('model_create', { name: 'm', parts: [{ type: 'box', w: 32, h: 32, d: 32 }, { type: 'box', w: 16, h: 16, d: 16, at: [20, 0, 0] }] });
+  e.run('model_create', { name: 'keep', parts: [{ type: 'cylinder', r: 8, h: 20 }] });
+  for (const [op, extra] of [['model_decimate', { ratio: 0.5 }], ['model_remesh', { method: 'cleanup' }], ['model_boolean', {}]]) {
+    assert.throws(() => e.run(op, { name: 'm', out: 'keep', ...extra }), /Model "keep" exists \(overwrite:true/, op);
+  }
+  assert.ok(!JSON.parse(fs.readFileSync(path.join(e.home, 'models', 'keep.json'), 'utf8')).baked, 'keep untouched');
+  // default out name: re-deriving from the same source replaces the previous result
+  e.run('model_decimate', { name: 'm', ratio: 0.5 });
+  e.run('model_decimate', { name: 'm', ratio: 0.4 });
+  // explicit overwrite replaces
+  assert.equal(e.run('model_decimate', { name: 'm', ratio: 0.5, out: 'keep', overwrite: true }).model, 'keep');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(e.home, 'models', 'keep.json'), 'utf8')).baked.from, 'm');
+});

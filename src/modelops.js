@@ -830,7 +830,7 @@ export const MODEL_OPS = {
   },
   ...MODEL_EXTRA_OPS,
   ...skinOps({ getModel, saveModel, build, variantOf: (engine, def) => variantOf(engine, def), writeGLB }),
-  ...meshOpsFor({ getModel, build, saveModel, modelDir }),
+  ...meshOpsFor({ getModel, build, saveModel, modelDir, hasModel: (engine, n) => models(engine).has(n) }),
   ...kitOps({ getModel, saveModel, build, models }),
 };
 /** Helpers the skinning ops share with the rest of art_model. */
