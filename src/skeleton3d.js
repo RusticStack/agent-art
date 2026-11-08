@@ -134,9 +134,15 @@ export const SKELETON_TEMPLATES = {
   },
   /** Tentacle / cable / hose / flag edge: count bones from `from` to `to` (default hanging 32 px down from y=32). */
   chain(o) {
-    const n = Math.max(2, Math.min(64, Math.round(Number(o.count ?? 8))));
-    const A = o.from ? vec3(o.from, 'chain.from') : [0, Number(o.height ?? 32), 0];
-    const B = o.to ? vec3(o.to, 'chain.to') : [A[0], A[1] - Number(o.length ?? o.height ?? 32), A[2]];
+    const fin = (v, what, def) => {
+      if (v === undefined || v === null) return def;
+      const x = Number(v);
+      if (typeof v === 'boolean' || !Number.isFinite(x)) throw new Error(`chain.${what} must be a finite number (got ${JSON.stringify(v)})`);
+      return x;
+    };
+    const n = Math.max(2, Math.min(64, Math.round(fin(o.count, 'count', 8))));
+    const A = o.from ? vec3(o.from, 'chain.from') : [0, fin(o.height, 'height', 32), 0];
+    const B = o.to ? vec3(o.to, 'chain.to') : [A[0], A[1] - fin(o.length, 'length', fin(o.height, 'height', 32)), A[2]];
     const bones = {};
     for (let i = 0; i < n; i++) bones[`chain_${i}`] = { parent: i ? `chain_${i - 1}` : null, head: lerp3(A, B, i / n).map(r4), limits: { x: [-90, 90], y: [-90, 90], z: [-90, 90] } };
     bones.chain_tip = { parent: `chain_${n - 1}`, head: B.map(r4), tail: add(B, mul(nrm(sub(B, A)), len(sub(B, A)) / n / 2)).map(r4) };

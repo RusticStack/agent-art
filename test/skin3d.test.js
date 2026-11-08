@@ -506,3 +506,16 @@ test('art_model skeleton / skin / weights are wired into MCP and help', () => {
   for (const p of ['skeleton', 'skin', 'retarget', 'profile', 'bones', 'bone']) assert.ok(t.inputSchema.properties[p], p);
   assert.match(helpText({ topic: '3d' }), /SKINNING/);
 });
+
+test('skin smooth / paint iterations are bounded; chain template count / height / length must be numbers', () => {
+  const e = new Engine({ home: tmp() });
+  e.run('model_create', { name: 'c', parts: [{ type: 'tube', path: [[0, 32, 0], [0, 16, 0], [0, 2, 0]], r: 2, sides: 6, texture: '#c84', segments: 3 }] });
+  assert.throws(() => e.run('model_skeleton', { name: 'c', skeleton: { template: 'chain', count: 'x' } }), /chain\.count must be a finite number/);
+  assert.throws(() => e.run('model_skeleton', { name: 'c', skeleton: { template: 'chain', height: 'tall' } }), /chain\.height/);
+  e.run('model_skeleton', { name: 'c', skeleton: { template: 'chain', count: 3, from: [0, 32, 0], to: [0, 2, 0] } });
+  const t0 = Date.now();
+  e.run('model_skin', { name: 'c', skin: { method: 'distance', smooth: 1e9 } }); // clamped to 32 passes: returns promptly
+  assert.ok(Date.now() - t0 < 10000, 'smooth clamped');
+  for (const bad of [-1, 'lots', Infinity, true]) assert.throws(() => e.run('model_skin', { name: 'c', skin: { method: 'distance', smooth: bad } }), /skin\.smooth must be a number of smoothing passes 0\.\.32/, String(bad));
+  assert.throws(() => e.run('model_skin', { name: 'c', skin: { method: 'distance', paint: [{ bone: 'chain_0', mode: 'smooth', region: { all: true }, iterations: 'x' }] } }), /paint\[0\]\.iterations/);
+});

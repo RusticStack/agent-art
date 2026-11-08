@@ -19,6 +19,7 @@ export const ROBLOX_MAX_BONES = 50;
 /** Roblox triangle limit per MeshPart. */
 export const ROBLOX_MAX_TRIANGLES = 20000;
 const METHODS = ['distance', 'heat', 'rigid'];
+const MAX_SMOOTH = 32;
 
 // ---------- weights ----------
 /**
@@ -291,7 +292,14 @@ export function skinMesh(spec, ctx) {
     }
   }
   // smoothing (auto-weighted vertices only: rigid parts stay crisp)
-  const smoothN = Math.round(Number(spec.smooth ?? (method === 'rigid' ? 0 : 2)));
+  // bounded: each pass is O(vertices x bones) and the server is synchronous
+  const iters = (v, what, def) => {
+    if (v === undefined || v === null) return def;
+    const x = Number(v);
+    if (typeof v === 'boolean' || !Number.isFinite(x) || x < 0) throw new Error(`${what} must be a number of smoothing passes 0..${MAX_SMOOTH} (got ${JSON.stringify(v)})`);
+    return Math.min(MAX_SMOOTH, Math.round(x));
+  };
+  const smoothN = iters(spec.smooth, 'skin.smooth', method === 'rigid' ? 0 : 2);
   const smoothPass = (list, lam = 0.5) => {
     const next = new Float64Array(Wt);
     for (const i of list) {
@@ -330,7 +338,7 @@ export function skinMesh(spec, ctx) {
         if (o >= 0 && Number.isFinite(d[o])) Wt[i * B + o] = 1 - nw;
       }
     }
-    if (mode === 'smooth') for (let s = 0; s < Math.max(1, Math.round(Number(op.iterations ?? 2))); s++) { smoothPass(hit); for (const i of hit) normRow(i); }
+    if (mode === 'smooth') for (let s = 0; s < Math.max(1, iters(op.iterations, `${w}.iterations`, 2)); s++) { smoothPass(hit); for (const i of hit) normRow(i); }
   }
   // final: <= 4 influences, normalised; unweighted -> nearest bone
   const NJ = new Uint16Array(N * 4), NW = new Float32Array(N * 4), raw = new Uint16Array(N);
