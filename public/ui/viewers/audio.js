@@ -94,9 +94,10 @@ export class AudioViewer {
     const count = Math.min(24, Math.max(1, Math.floor(ch.length / n)));
     const step = Math.max(n, Math.floor(ch.length / count));
     let used = 0;
-    for (let s = 0; s + n <= ch.length && used < count; s += step, used++) {
+    // clips shorter than one window (short SFX) get one zero-padded window instead of none
+    for (let s = 0; (s + n <= ch.length || s === 0) && used < count; s += step, used++) {
       const w = new Float32Array(n);
-      for (let i = 0; i < n; i++) w[i] = ch[s + i] * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (n - 1)));
+      for (let i = 0; i < n; i++) w[i] = (ch[s + i] || 0) * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (n - 1)));
       const m = fftMag(w);
       for (let i = 0; i < m.length; i++) out[i] += m[i];
     }
