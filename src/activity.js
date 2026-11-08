@@ -18,6 +18,7 @@ const EXPORTS = new Set(['export', 'export_animation', 'model_export', 'audio_ex
 const MODEL_WRITES = new Set(['model_create', 'model_update', 'model_pose', 'model_animate', 'model_delete']);
 const SNAP_MAX = 512; // px: larger canvases are snapshotted downsampled
 const SNAP_BUDGET = 64 * 1024 * 1024;
+const SNAP_COUNT = 20000; // tiny canvases: cap the number of snapshots too
 const MAX_ENTRIES = 1500;
 const MAX_ASSETS = 6;
 
@@ -126,11 +127,12 @@ export class Activity {
 
   addSnap(s) {
     const id = `s${++this.snapSeq}`;
+    s.id = id;
     s.bytes = (s.png?.length || 0) + (s.def ? JSON.stringify(s.def).length : 0);
     this.snaps.set(id, s);
     this.snapBytes += s.bytes;
     for (const [k, v] of this.snaps) {
-      if (this.snapBytes <= SNAP_BUDGET) break;
+      if (this.snapBytes <= SNAP_BUDGET && this.snaps.size <= SNAP_COUNT) break;
       this.snaps.delete(k);
       this.snapBytes -= v.bytes;
     }
@@ -141,7 +143,12 @@ export class Activity {
   }
   /** A model snapshot keeps its definition; the thumbnail is rendered when the UI asks. */
   snapModel(def) {
-    return this.addSnap({ kind: 'model', name: def.name, def: structuredClone(def) });
+    try { return this.addSnap({ kind: 'model', name: def.name, def: structuredClone(def) }); } catch { return undefined; }
+  }
+  /** Attach a lazily rendered thumbnail to a snapshot (counted in the byte budget). */
+  setSnapPng(snap, png) {
+    snap.png = png;
+    if (this.snaps.has(snap.id)) { snap.bytes += png.length; this.snapBytes += png.length; }
   }
   snapshot(id) {
     return this.snaps.get(id) || null;
@@ -150,13 +157,13 @@ export class Activity {
   /** Start / end of an MCP tool call (from the MCP layer, local or over /api/trace). */
   toolStart({ call, tool, args, source = 'agent' }) {
     if (!call) return null;
-    const entry = this.push({ id: ++this.seq, type: 'tool', call: String(call), tool: String(tool || '?'), action: args?.action, args: summarizeArgs(args), source, ts: Date.now(), running: true, ok: true, ops: [], assets: [] });
+    const entry = this.push({ id: ++this.seq, type: 'tool', call: String(call).slice(0, 64), tool: String(tool || '?').slice(0, 64), action: args?.action, args: summarizeArgs(args), source, ts: Date.now(), running: true, ok: true, ops: [], assets: [] });
     this.calls.set(entry.call, entry);
     this.emit(entry);
     return entry;
   }
   toolEnd({ call, ok = true, error, ms, summary }) {
-    const entry = this.calls.get(String(call));
+    const entry = this.calls.get(String(call).slice(0, 64));
     if (!entry) return null;
     entry.running = false;
     entry.ok = ok !== false;
@@ -210,7 +217,9 @@ export class Activity {
         }
       }
     }
-    const finish = (result, err) => {
+    // the timeline is best effort: a recording failure must never fail (or mask) the op itself
+    const finish = (result, err) => { try { finishEntry(result, err); } catch { /* ignore */ } };
+    const finishEntry = (result, err) => {
       entry.ms = Math.round(performance.now() - t0);
       entry.ok = !err;
       if (err) entry.error = trunc(String(err.message || err), 400);

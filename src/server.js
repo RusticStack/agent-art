@@ -148,7 +148,7 @@ export function startServer(engine, { port, host = '127.0.0.1' }) {
         if (!s[2]) { const { png, def, ...meta } = snap; return sendJSON(res, 200, { ...meta, hasDef: !!def }); }
         if (!snap.png && snap.def) {
           // model snapshots render their thumbnail on first view (textures are the current canvases)
-          try { snap.png = modelThumbnail(engine, snap.def, 160); } catch (e) { return sendJSON(res, 404, { ok: false, error: e.message }); }
+          try { engine.activity.setSnapPng(snap, modelThumbnail(engine, snap.def, 160)); } catch (e) { return sendJSON(res, 404, { ok: false, error: e.message }); }
         }
         return sendBin(res, 'image/png', snap.png, { 'cache-control': 'private, max-age=86400' });
       }
