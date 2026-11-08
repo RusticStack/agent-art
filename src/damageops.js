@@ -3,6 +3,7 @@
 // Plain exports never come here: <name>.glb stays byte-for-byte the same; the damage outputs are
 // extra files next to it (<name>.damage.glb + .damage.json + .damage_mask.png).
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { Mesh } from './model3d.js';
 import { normDamage, damageState, damageMasks, bakeDecals, explode, implode, STATE_PRESETS, DAMAGE_KINDS, FX_KINDS } from './damage.js';
@@ -21,6 +22,8 @@ const f6 = (v) => +(+v).toFixed(6);
 const groupsOf = (mesh) => [...mesh.groups.values()].filter((g) => g.idx.length);
 const DAMAGE_KEYS = ['states', 'kind', 'seed', 'rigid', 'roles', 'inner', 'frame', 'sparks', 'palette'];
 const ROBLOX_TRIS = 20000;
+/** Fracture work budget: sum over groups of (pieces + 3 x debris) booleans x part input triangles (~30 us each). */
+export const FRACTURE_BUDGET = 250000;
 
 /** Shared camera over several meshes -> labelled contact sheet PNG. */
 function sheet(items, view = 'game', size = 192, columns) {
@@ -70,14 +73,40 @@ export function normFracture(v, def) {
   return out;
 }
 
-/** Fracture every group of a built model. -> [{...group, result}] */
+const FRACTURE_CACHE = new Map(), FRACTURE_CACHE_MAX = 32;
+const texDigest = (h, t) => { h.update(`|${t.key}|${t.width}x${t.height}|`); if (t.data) h.update(Buffer.from(t.data.buffer, t.data.byteOffset, t.data.byteLength)); };
+/** Content key of one fracture job: the part mesh (positions, normals, uvs, textures) + the group options. */
+function fractureKey(mesh, g, inside) {
+  const h = crypto.createHash('sha1');
+  h.update(JSON.stringify([g.pieces, g.method, g.seed, g.debris, g.group, g.boolean]));
+  texDigest(h, inside);
+  for (const gr of mesh.groups.values()) {
+    texDigest(h, gr.tex);
+    h.update(Buffer.from(Float64Array.from(gr.pos).buffer)); h.update(Buffer.from(Float64Array.from(gr.nrm).buffer)); h.update(Buffer.from(Float64Array.from(gr.uv).buffer)); h.update(Buffer.from(Uint32Array.from(gr.idx).buffer));
+  }
+  return h.digest('hex');
+}
+/** Fracture every group of a built model (budgeted; results cached in memory by content). -> [{...group, result}] */
 export function runFracture(built, def, groups) {
   const soup = explode(built.mesh);
-  return groups.map((g) => {
+  const jobs = groups.map((g) => {
     const faces = soup.faces.filter((F) => F.rec.pi === g.pi);
     if (!faces.length) throw new Error(`fracture "${g.group}": part ${g.pi} has no faces (hidden, consumed by a boolean, or a model instance)`);
     const mesh = implode({ faces, overlays: [] });
-    const res = fracturePart(mesh, { pieces: g.pieces, method: g.method, seed: g.seed, inside: built.tex(g.inside), debris: g.debris, name: g.group, boolean: g.boolean });
+    return { g, mesh, work: (g.pieces + 3 * g.debris) * mesh.triangles };
+  });
+  const total = jobs.reduce((s, j) => s + j.work, 0);
+  if (total > FRACTURE_BUDGET) throw new Error(`fracture: ${total} work units over the budget of ${FRACTURE_BUDGET} (sum over groups of (pieces + 3 x debris) x part triangles: ${jobs.map((j) => `${j.g.group} (${j.g.pieces}+3x${j.g.debris}) x ${j.mesh.triangles}`).join(', ')}): fewer pieces / debris / groups, or decimate the part first`);
+  return jobs.map(({ g, mesh }) => {
+    const inside = built.tex(g.inside);
+    const key = fractureKey(mesh, g, inside);
+    let res = FRACTURE_CACHE.get(key);
+    if (res) { FRACTURE_CACHE.delete(key); FRACTURE_CACHE.set(key, res); } // LRU touch
+    else {
+      res = fracturePart(mesh, { pieces: g.pieces, method: g.method, seed: g.seed, inside, debris: g.debris, name: g.group, boolean: g.boolean });
+      FRACTURE_CACHE.set(key, res);
+      while (FRACTURE_CACHE.size > FRACTURE_CACHE_MAX) FRACTURE_CACHE.delete(FRACTURE_CACHE.keys().next().value);
+    }
     return { ...g, result: res };
   });
 }

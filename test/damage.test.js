@@ -365,3 +365,18 @@ test('damage export validates texel / max_size / lods / lod_screen / mode before
   assert.ok(ok.damage.mask.split('x').every((v) => Number(v) <= 256), ok.damage.mask);
 });
 
+test('fracture: total work budget with a clear error; unchanged groups come from the cache', () => {
+  const e = new Engine({ home: tmp() }), dir = tmp();
+  e.run('model_create', { name: 'drum', parts: [{ type: 'cylinder', id: 'c', r: 16, h: 16, segments: 1000, color: '#888' }, { type: 'box', id: 'b', w: 8, h: 8, d: 8, at: [40, 0, 0], color: '#777' }] });
+  assert.throws(() => e.run('model_fracture', { name: 'drum', groups: [{ part: 'c', pieces: 64 }] }), /budget of 250000/);
+  assert.throws(() => e.run('model_fracture', { name: 'drum', groups: [{ part: 'b', pieces: 4 }, { part: 'c', pieces: 40, debris: 16 }] }), /budget/);
+  const a1 = e.run('model_fracture', { name: 'drum', groups: [{ part: 'b', pieces: 12, seed: 2, debris: 2 }] });
+  const a2 = e.run('model_fracture', { name: 'drum', groups: [{ part: 'b', pieces: 12, seed: 2, debris: 2 }] });
+  assert.deepEqual(a2.groups, a1.groups);
+  assert.ok(a2.ms <= Math.max(5, a1.ms / 2), `cached fracture ${a2.ms} ms vs ${a1.ms} ms`);
+  const r = e.run('model_export', { name: 'drum', path: path.join(dir, 'drum.glb') });
+  assert.equal(r.damage.fracture[0].chunks, a1.groups[0].chunks + a1.groups[0].debris);
+  const a3 = e.run('model_fracture', { name: 'drum', groups: [{ part: 'b', pieces: 7, seed: 2 }] });
+  assert.equal(a3.groups[0].chunks, 7, 'changed options re-run');
+});
+
