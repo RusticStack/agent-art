@@ -164,7 +164,7 @@ function fixTJunctions(polys) {
   });
 }
 
-const FACE_PROPS = ['pid', 'tag', 'ov', 'mat', 'node', 'trim', 'edge', 'greeble', 'gh', 'cs', 'rs', 'trimmed'];
+const FACE_PROPS = ['pid', 'tag', 'ov', 'mat', 'node', 'trim', 'edge', 'greeble', 'gh', 'cs', 'rs', 'trimmed', 'pi'];
 /** Polygons -> Mesh faces (fan, or a centroid fan for polygons that gained T-junction points). */
 function toMesh(polys) {
   const m = new Mesh();

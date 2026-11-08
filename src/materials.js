@@ -398,7 +398,7 @@ export function makeV2(o) {
       const t = p.tex;
       const needs = o.tangents && (t.normal || (t.v2 && (t.v2.anisotropy || t.v2.detail || t.v2.height)) || (o.profile === 'three' && t.heightOf));
       if (!needs) return p;
-      const r = computeTangents(p, { uv1: 2, ao: 1 });
+      const r = computeTangents(p, { uv1: 2, ao: 1, dmg: 4 });
       r.prim.tangent = r.tangent;
       report.tangents++;
       report.split_vertices += r.split;

@@ -14,7 +14,7 @@ export const norm3 = (a) => { const l = len3(a) || 1; return [a[0] / l, a[1] / l
 
 // ---------- triangle soup ----------
 /** Face record props carried to processed meshes (pid / tag / material / rig node / shadow flags / greeble drop). */
-export const SOUP_FACE_PROPS = ['pid', 'tag', 'mat', 'node', 'cs', 'rs', 'greeble', 'gh'];
+export const SOUP_FACE_PROPS = ['pid', 'tag', 'mat', 'node', 'cs', 'rs', 'greeble', 'gh', 'pi'];
 
 /**
  * Mesh -> soup: positions welded at 1e-4 px (shared connectivity across materials), triangles with
