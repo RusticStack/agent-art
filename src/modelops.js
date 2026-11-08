@@ -5,10 +5,14 @@ import path from 'node:path';
 import { parseColor, toHex } from './color.js';
 import { buildModel, PART_DOCS } from './model3d.js';
 import { generateCTM, CTM_METHODS } from './ctm.js';
-import { Doc } from './doc.js';
+import { Doc, MAX_SIZE } from './doc.js';
 import { writeGLB } from './glb.js';
-import { renderViews } from './raster3d.js';
+import { renderViews, makeCamera, renderCamera } from './raster3d.js';
 import { encodePNG } from './png.js';
+import { packImages } from './sheet.js';
+import { BAYER4 } from './util.js';
+import { rigInfo, rigSummary, rigScene, rigMeta, resolveOffsets, clipKeys, sampleClip, posedWorld, angleMatrix, subtree } from './modelrig.js';
+import { MODEL_TEMPLATES } from './modeltemplates.js';
 
 const NAME_RE = /^[A-Za-z0-9_\-.]{1,64}$/;
 
@@ -149,35 +153,210 @@ function summary(def, built) {
     bounds_px: { min: b.min.map(r4), max: b.max.map(r4), size: size.map(r4) },
     size_units: size.map((v) => r4(v / scale)), size_cells: size.map((v) => r4(v / grid)), px_per_unit: scale, grid,
     ...(warnings.length ? { warnings } : {}),
+    ...(rigOf(def, built) ? { rig: rigSummary(def, rigOf(def, built)) } : {}),
   };
+}
+/** Rig node tree of a built model (cached on the build), or null for plain models. */
+function rigOf(def, built, force = false) {
+  const k = force ? '_rigF' : '_rig';
+  if (built[k] === undefined) built[k] = rigInfo(def, built, force) || (force ? null : false);
+  return built[k] || null;
+}
+const groupsOf = (mesh) => [...mesh.groups.values()].filter((g) => g.idx.length);
+
+/** Poses of a clip at n evenly spaced times: [{time, pose: Map node -> local TRS}], frame ms. */
+function clipSamples(def, info, clipName, n, fps) {
+  const clip = (def.clips || {})[clipName];
+  if (!clip) throw new Error(`unknown clip "${clipName}" (clips: ${Object.keys(def.clips || {}).join(', ') || 'none'}; add one with art_model animate)`);
+  const ck = clipKeys(def, info, clip);
+  const count = Math.max(1, Math.min(240, Math.round(Number(n ?? Math.max(1, Math.round(ck.duration * (fps ?? 15)) + (ck.loop ? 0 : 1))))));
+  const step = ck.loop ? ck.duration / count : count > 1 ? ck.duration / (count - 1) : 0;
+  const out = [];
+  for (let i = 0; i < count; i++) { const time = i * step; out.push({ time, pose: sampleClip(info, ck, time) }); }
+  return { samples: out, ms: Math.max(10, Math.round((ck.loop ? ck.duration / count : step || ck.duration || 0.1) * 1000)), loop: ck.loop, duration: ck.duration };
 }
 
 function previewImage(engine, def, a) {
   const t0 = performance.now();
   const built = build(engine, def);
+  if (a.clip !== undefined || a.pose !== undefined || a.parts) {
+    const info = rigOf(def, built, true);
+    const filter = { only: a.only, hide: a.hide };
+    if (a.clip !== undefined) {
+      // contact sheet of the clip from one view
+      const { samples } = clipSamples(def, info, a.clip, a.frames ?? 6);
+      const S = Math.max(32, Math.min(512, Math.round(a.size ?? 192)));
+      const posed = samples.map((s) => posedWorld(info, s.pose, filter));
+      const full = samples.map((s) => (a.only || a.hide ? posedWorld(info, s.pose) : null));
+      const fit = [];
+      posed.forEach((p, i) => { const b = (full[i] || p).mesh.bounds(); for (const x of [b.min[0], b.max[0]]) for (const y of [b.min[1], b.max[1]]) for (const z of [b.min[2], b.max[2]]) fit.push([x, y, z]); });
+      const view = a.view ?? (a.views && a.views.length === 1 ? a.views[0] : 'side');
+      const cam = makeCamera(view, S, S, fit, { fov: a.fov });
+      const items = posed.map((p, i) => ({ img: renderCamera(groupsOf(p.mesh), cam, S, S), label: `t=${samples[i].time.toFixed(2)}s` }));
+      const img = packImages(items, { labels: true, checker: false, columns: Math.min(items.length, a.columns ?? 3) });
+      return { image: encodePNG(img.width, img.height, img.data), clip: a.clip, view: cam.label, frames: samples.map((s) => +s.time.toFixed(3)), triangles: built.mesh.triangles, ms: Math.round(performance.now() - t0) };
+    }
+    const { mesh } = posedWorld(info, resolveOffsets(def, info, { pose: a.pose, parts: a.parts }), filter);
+    if (a.view !== undefined && (a.view === 'fp' || (typeof a.view === 'object' && a.view.pos))) {
+      const S = Math.max(32, Math.min(1024, Math.round(a.size ?? 384)));
+      const img = renderCamera(groupsOf(mesh), makeCamera(a.view, S, S, [], { fov: a.fov }), S, S);
+      return { image: encodePNG(img.width, img.height, img.data), pose: a.pose ?? null, views: [{ view: 'fp', pixels: img.drawn }], triangles: mesh.triangles, ms: Math.round(performance.now() - t0) };
+    }
+    const img = renderViews(groupsOf(mesh), { views: a.views || (a.view ? [a.view] : undefined), size: a.size ?? (a.views?.length === 1 || a.view ? 384 : 192) });
+    return { image: encodePNG(img.width, img.height, img.data), pose: a.pose ?? null, views: img.views, triangles: mesh.triangles, ms: Math.round(performance.now() - t0) };
+  }
   const groups = [...built.mesh.groups.values()].filter((g) => g.idx.length);
   const img = renderViews(groups, { views: a.views, size: a.size ?? (a.views?.length === 1 ? 384 : 192) });
   return { image: encodePNG(img.width, img.height, img.data), views: img.views, triangles: built.mesh.triangles, ms: Math.round(performance.now() - t0) };
 }
 
+// ---------- sprite renders: quantize, dither, outline ----------
+/** Median-cut palette of n colours from opaque pixels of several RGBA images. */
+function medianCut(images, n) {
+  const counts = new Map();
+  for (const d of images) for (let i = 0; i < d.length; i += 4) if (d[i + 3] >= 128) { const k = (d[i] << 16) | (d[i + 1] << 8) | d[i + 2]; counts.set(k, (counts.get(k) || 0) + 1); }
+  let boxes = [[...counts].map(([k, c]) => [(k >> 16) & 255, (k >> 8) & 255, k & 255, c])];
+  if (!boxes[0].length) return [];
+  while (boxes.length < n) {
+    let bi = -1, best = 0, ch = 0;
+    boxes.forEach((b, i) => {
+      if (b.length < 2) return;
+      for (let c = 0; c < 3; c++) { let lo = 255, hi = 0; for (const p of b) { if (p[c] < lo) lo = p[c]; if (p[c] > hi) hi = p[c]; } if (hi - lo > best) { best = hi - lo; bi = i; ch = c; } }
+    });
+    if (bi < 0) break;
+    const b = boxes[bi].sort((x, y) => x[ch] - y[ch]), total = b.reduce((s, p) => s + p[3], 0);
+    let acc = 0, cut = 1;
+    for (let i = 0; i < b.length - 1; i++) { acc += b[i][3]; if (acc >= total / 2) { cut = i + 1; break; } cut = i + 1; }
+    boxes.splice(bi, 1, b.slice(0, cut), b.slice(cut));
+  }
+  return boxes.filter((b) => b.length).map((b) => { const w = b.reduce((s, p) => s + p[3], 0); return [0, 1, 2].map((c) => Math.round(b.reduce((s, p) => s + p[c] * p[3], 0) / w)); });
+}
+function quantizeFrames(images, W, pal, dither, strength = 1) {
+  const spread = 40 * strength, cache = new Map();
+  for (const d of images) for (let i = 0; i < d.length; i += 4) {
+    if (!d[i + 3]) continue;
+    const px = (i / 4) % W, py = Math.floor(i / 4 / W);
+    const off = dither ? ((BAYER4[py & 3][px & 3] + 0.5) / 16 - 0.5) * spread : 0;
+    const r = d[i] + off, g = d[i + 1] + off, b = d[i + 2] + off;
+    const key = `${Math.round(r)},${Math.round(g)},${Math.round(b)}`;
+    let best = cache.get(key);
+    if (!best) {
+      let bd = Infinity;
+      for (const p of pal) {
+        const rm = (r + p[0]) / 2;
+        const dd = (2 + rm / 256) * (r - p[0]) ** 2 + 4 * (g - p[1]) ** 2 + (2 + (255 - rm) / 256) * (b - p[2]) ** 2;
+        if (dd < bd) { bd = dd; best = p; }
+      }
+      cache.set(key, best);
+    }
+    d[i] = best[0]; d[i + 1] = best[1]; d[i + 2] = best[2];
+  }
+}
+function outlineFrame(d, W, H, c) {
+  const solid = (x, y) => x >= 0 && y >= 0 && x < W && y < H && d[(y * W + x) * 4 + 3] >= 128;
+  const add = [];
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (!d[(y * W + x) * 4 + 3] && (solid(x - 1, y) || solid(x + 1, y) || solid(x, y - 1) || solid(x, y + 1))) add.push((y * W + x) * 4);
+  for (const o of add) d.set([c[0], c[1], c[2], c[3] ?? 255], o);
+}
+/** [from, to, step] | number -> list of angles (inclusive). */
+function range(v, name) {
+  if (v === undefined || v === null) return [0];
+  if (typeof v === 'number') return [v];
+  if (!Array.isArray(v) || v.length < 2 || v.some((x) => !Number.isFinite(Number(x)))) throw new Error(`sweep.${name} must be a number or [from, to, step] degrees`);
+  const [a, b] = v.map(Number), st = Math.abs(Number(v[2] ?? (b - a))) || 1, out = [];
+  const dir = b >= a ? 1 : -1;
+  for (let x = a; dir > 0 ? x <= b + 1e-9 : x >= b - 1e-9; x += dir * st) { out.push(+x.toFixed(6)); if (out.length > 400) throw new Error('sweep: too many angles (max 400)'); }
+  return out;
+}
+/** Put n frames into a canvas under an animation tag (replace the tag's frames, reuse a blank canvas, or append). */
+function placeFrames(engine, outName, FW, FH, tag, imgs, { durations, loop, project, label, source, meta }) {
+  let out = engine.docs.get(outName);
+  if (out) {
+    if (out.width !== FW || (out.frameHeight || out.height) !== FH) throw new Error(`canvas "${outName}" frames are ${out.width}x${out.frameHeight || out.height}, the render is ${FW}x${FH} (pass size:[${out.width},${out.frameHeight || out.height}] or another canvas)`);
+    out.checkpoint(`model render ${tag}`);
+    if (!out.frameHeight) out.frameHeight = FH;
+  } else {
+    out = new Doc({ name: outName, width: FW, height: FH, frameHeight: FH });
+    if (project) out.project = project;
+    out.meta = {};
+    out._fresh = true;
+    engine.attach(out);
+  }
+  const n = imgs.length;
+  let start;
+  const old = out.animations[tag];
+  const blankSingle = out.frames === 1 && !Object.keys(out.animations).length && !out.layers.some((l) => l.data.some((v, i) => i % 4 === 3 && v));
+  if (old) {
+    const sorted = [...old.frames].sort((x, y) => x - y);
+    const contiguous = sorted.every((f, i) => f === sorted[0] + i) && new Set(old.frames).size === old.frames.length;
+    if (contiguous && sorted.length === n) start = sorted[0];
+    else {
+      const keep = [...Array(out.frames).keys()].filter((f) => !old.frames.includes(f));
+      delete out.animations[tag];
+      out.reorderFrames(keep.length ? keep : [-1]);
+      if (!keep.length) { start = 0; out.reorderFrames([...Array(n).fill(-1)]); }
+    }
+  }
+  if (start === undefined) {
+    const total = (blankSingle ? 0 : out.frames) + n;
+    if (total * FH > MAX_SIZE) throw new Error(`canvas "${outName}" would hold ${total} frames of ${FH}px (${total * FH}px tall, max ${MAX_SIZE}): render into another canvas, fewer frames or a smaller size`);
+    if (blankSingle) { out.reorderFrames(Array(n).fill(-1)); start = 0; }
+    else { start = out.frames; out.reorderFrames([...Array(out.frames).keys(), ...Array(n).fill(-1)]); }
+  }
+  let layer = out.layers.find((l) => l.name === 'render');
+  if (!layer) { layer = out.layers[0]; if (out._fresh) layer.name = 'render'; }
+  delete out._fresh;
+  imgs.forEach((img, i) => layer.data.set(img, (start + i) * FW * FH * 4));
+  out.setAnimation(tag, { from: start, to: start + n - 1, durations, loop });
+  out.meta = { ...(out.meta || {}), ...meta, anchors: { ...(out.meta?.anchors || {}), ...(meta.anchors || {}) } };
+  out.touch?.();
+  engine.changed(out, { op: 'model', source, label, structural: true });
+  return { out, start };
+}
+
 /** Model-level options kept on create/update (besides name and parts). */
-export const MODEL_KEYS = ['grid', 'scale', 'origin', 'notes', 'project', 'overlays', 'uv_origin'];
+export const MODEL_KEYS = ['grid', 'scale', 'origin', 'notes', 'project', 'overlays', 'uv_origin', 'rig', 'sockets', 'poses', 'clips'];
+
+/** Part index from a number or a part name. */
+function partIndex(parts, k, what) {
+  if (/^\d+$/.test(String(k))) return Number(k);
+  const i = parts.findIndex((p) => p && p.name === k);
+  if (i < 0) throw new Error(`${what}: no part ${JSON.stringify(k)} (indices 0..${parts.length - 1} or part names: ${parts.filter((p) => p?.name).map((p) => p.name).join(', ') || 'none'})`);
+  return i;
+}
 
 function applyPatch(def, a) {
   const parts = a.parts !== undefined ? [...a.parts] : [...def.parts];
   if (a.set) for (const [k, patch] of Object.entries(a.set)) {
-    const i = Number(k);
+    const i = partIndex(parts, k, 'set');
     if (!parts[i]) throw new Error(`set: no part ${i} (have 0..${parts.length - 1})`);
     if (patch === null) { parts[i] = null; continue; }
     const p = { ...parts[i] };
     for (const [f, v] of Object.entries(patch)) if (v === null) delete p[f]; else p[f] = v;
     parts[i] = p;
   }
-  if (a.remove) for (const i of [...a.remove].map(Number).sort((x, y) => y - x)) { if (!parts[i]) throw new Error(`remove: no part ${i}`); parts.splice(i, 1); }
+  if (a.remove) for (const i of [...a.remove].map((k) => partIndex(parts, k, 'remove')).sort((x, y) => y - x)) { if (!parts[i]) throw new Error(`remove: no part ${i}`); parts.splice(i, 1); }
   if (a.add) parts.push(...[].concat(a.add));
   const next = { ...def, parts: parts.filter(Boolean) };
   for (const k of MODEL_KEYS) if (a[k] !== undefined) { if (a[k] === null) delete next[k]; else next[k] = a[k]; }
   return next;
+}
+
+/** create {template}: the template's parts/sockets/poses/clips, then the caller's overrides. */
+function fromTemplate(a) {
+  const make = MODEL_TEMPLATES[a.template];
+  if (!make) throw new Error(`unknown template "${a.template}" (templates: ${Object.keys(MODEL_TEMPLATES).join(', ')})`);
+  if (a.parts !== undefined) throw new Error('template: change the template parts with set:{<part name>:{..}}, add:[..] and remove:[names] (parts replaces nothing here)');
+  const t = make(a);
+  const base = { name: a.name, parts: t.parts, sockets: t.sockets, poses: t.poses, clips: t.clips, notes: t.notes };
+  const merged = applyPatch(base, { set: a.set, add: a.add, remove: a.remove });
+  for (const k of ['sockets', 'poses', 'clips']) if (a[k] !== undefined && a[k] !== null) {
+    merged[k] = { ...(merged[k] || {}) };
+    for (const [n, v] of Object.entries(a[k])) { if (v === null) delete merged[k][n]; else merged[k][n] = v; }
+    if (!Object.keys(merged[k]).length) delete merged[k];
+  }
+  for (const k of ['sockets', 'poses', 'clips']) if (merged[k] === undefined) delete merged[k];
+  return merged;
 }
 
 /** CTM tilesets used by a built model (for the runtime json next to the .glb). */
@@ -227,12 +406,15 @@ export const MODEL_OPS = {
   model_create(a, source) {
     if (!NAME_RE.test(a.name || '')) throw new Error('model "name" must be 1-64 chars of letters, digits, _ - .');
     if (models(this).has(a.name) && !a.overwrite) throw new Error(`Model "${a.name}" exists (overwrite:true replaces it; art_model update changes it)`);
-    const def = { name: a.name, parts: a.parts, grid: a.grid ?? 32, scale: a.scale ?? 32, origin: a.origin ?? 'auto' };
+    const tpl = a.template !== undefined ? fromTemplate(a) : null;
+    const def = { name: a.name, parts: tpl ? tpl.parts : a.parts, grid: a.grid ?? 32, scale: a.scale ?? 32, origin: a.origin ?? 'auto' };
+    if (tpl) { for (const k of ['sockets', 'poses', 'clips']) if (tpl[k]) def[k] = tpl[k]; if (a.notes === undefined) def.notes = tpl.notes; def.template = a.template; }
     for (const k of MODEL_KEYS) if (a[k] !== undefined && a[k] !== null && def[k] === undefined) def[k] = a[k];
     def.created = Date.now();
     const s = summary(def, build(this, def));
     saveModel(this, def, source, 'model created');
     let next = `art_model preview {name:"${def.name}"} to look at it, update {set:{i:{..}}|add|remove} to iterate, export {name} for .glb`;
+    if (s.rig) next += `. Rig: pose {name, pose, parts:{<node>:{rot,at}}}, animate {name, clip, keys:[{pose|parts, t}]}, preview {name, clip, view:"fp"|"side"}, render {name, canvas, clip} = pixel sprites`;
     // origin "auto" keeps part coordinates (kit pieces snap to the grid); a standalone prop or vehicle
     // that is off-centre is easier to place in an engine with origin:"bottom"
     if (def.origin === 'auto' && s.origin === 'parts') {
@@ -253,7 +435,151 @@ export const MODEL_OPS = {
     let s;
     try { s = summary(def, build(this, def)); } catch (e) { s = { error: e.message }; }
     const opts = Object.fromEntries(MODEL_KEYS.filter((k) => def[k] !== undefined && k !== 'notes').map((k) => [k, def[k]]));
-    return { model: def.name, parts_def: def.parts, notes: def.notes, options: opts, ...s };
+    return { model: def.name, parts_def: def.parts, notes: def.notes, options: opts, ...(def.template ? { template: def.template } : {}), ...s };
+  },
+  /** Store a named pose: per-node offsets from the rest pose. parts:null deletes it. */
+  model_pose(a, source) {
+    const def = getModel(this, a.name);
+    if (!/^[\w.-]{1,64}$/.test(a.pose || '')) throw new Error('pose needs a "pose" name (e.g. "grip_rifle")');
+    const built = build(this, def);
+    const info = rigOf(def, built, true);
+    const poses = { ...(def.poses || {}) };
+    if (a.parts === null || a.delete) delete poses[a.pose];
+    else {
+      if (!a.parts || typeof a.parts !== 'object') throw new Error('pose needs parts: {<part name>: {rot?:[x,y,z] deg, at?:[dx,dy,dz] px, scale?}} (offsets from the rest pose; base?:<pose> starts from another pose)');
+      let parts = a.parts;
+      if (a.base !== undefined) { const b = poses[a.base]; if (!b) throw new Error(`base: unknown pose "${a.base}"`); parts = { ...b.parts, ...a.parts }; }
+      resolveOffsets(def, info, { parts });
+      poses[a.pose] = { parts };
+    }
+    const next = { ...def, poses };
+    if (!Object.keys(poses).length) delete next.poses;
+    saveModel(this, next, source, `pose ${a.pose}`);
+    return { model: def.name, pose: a.pose, poses: Object.keys(poses), nodes: info.nodes.map((n) => n.name), next: `art_model preview {name:"${def.name}", pose:"${a.pose}"} (view:"fp" = first-person camera)` };
+  },
+  /** Store an animation clip: keys [{pose|parts, t (s), ease?}], loop?, events?:[{t, name}], duration?. keys:null deletes it. */
+  model_animate(a, source) {
+    const def = getModel(this, a.name);
+    if (!/^[\w.-]{1,64}$/.test(a.clip || '')) throw new Error('animate needs a "clip" name (e.g. "reload_empty")');
+    const clips = { ...(def.clips || {}) };
+    let r = null;
+    if (a.keys === null || a.delete) delete clips[a.clip];
+    else {
+      const clip = { keys: a.keys };
+      for (const k of ['loop', 'events', 'duration', 'ease']) if (a[k] !== undefined && a[k] !== null) clip[k] = a[k];
+      const info = rigOf(def, build(this, def), true);
+      const ck = clipKeys(def, info, clip);
+      r = { duration: ck.duration, keys: ck.keys.length, loop: ck.loop, nodes: [...new Set(ck.keys.flatMap((k) => [...k.off.keys()]))], events: clip.events || [] };
+      clips[a.clip] = clip;
+    }
+    const next = { ...def, clips };
+    if (!Object.keys(clips).length) delete next.clips;
+    saveModel(this, next, source, `clip ${a.clip}`);
+    return { model: def.name, clip: a.clip, ...(r || { deleted: true }), clips: Object.keys(clips), next: `art_model preview {name:"${def.name}", clip:"${a.clip}", frames:6, view:"side"|"fp"} to check it; export writes it as a glTF animation; render {name, clip, canvas} makes sprite frames` };
+  },
+  /**
+   * Render pose / clip / angle frames into a canvas as crisp pixel art (nearest texels, no AA,
+   * transparent background), optional palette quantize + ordered dither + 1 px outline, with
+   * per-frame socket anchors in meta.anchors[animation] (spritesheet json frames[].anchors).
+   */
+  model_render(a, source) {
+    const def = getModel(this, a.name);
+    const built = build(this, def);
+    const info = rigOf(def, built, true);
+    const size = a.size === undefined ? [64, 64] : typeof a.size === 'number' ? [a.size, a.size] : a.size;
+    const [FW, FH] = size.map((v) => Math.round(Number(v)));
+    if (!(FW >= 4 && FH >= 4 && FW <= 1024 && FH <= 1024)) throw new Error('size must be [w, h] px, 4..1024');
+    for (const k of ['only', 'hide']) if (a[k] !== undefined && !Array.isArray(a[k])) throw new Error(`${k} must be a list of part (node) names`);
+    if (a.only) subtree(info, a.only);
+    if (a.hide) subtree(info, a.hide);
+    // poses: clip samples | one pose | rest
+    let samples, ms = a.duration ?? 100, loop = a.loop;
+    if (a.clip !== undefined) {
+      const cs = clipSamples(def, info, a.clip, a.frames, a.fps);
+      samples = cs.samples; ms = a.duration ?? cs.ms; loop = loop ?? cs.loop;
+    } else samples = [{ time: 0, pose: resolveOffsets(def, info, { pose: a.pose, parts: a.parts }) }];
+    // angles: sweep grid (row-major: pitch rows x yaw columns) | list | front
+    let angles = [{ yaw: 0, pitch: 0, roll: 0 }], grid = null;
+    if (a.sweep) {
+      const yaws = range(a.sweep.yaw, 'yaw'), pitches = range(a.sweep.pitch, 'pitch'), rolls = range(a.sweep.roll, 'roll');
+      angles = [];
+      for (const roll of rolls) for (const pitch of pitches) for (const yaw of yaws) angles.push({ yaw, pitch, roll });
+      grid = { columns: yaws.length, rows: pitches.length * rolls.length, yaw: yaws, pitch: pitches, ...(rolls.length > 1 ? { roll: rolls } : {}) };
+    } else if (a.angles) {
+      if (!Array.isArray(a.angles) || !a.angles.length) throw new Error('angles must be [{yaw?, pitch?, roll?}, ...] degrees');
+      angles = a.angles.map((x) => ({ yaw: Number(x.yaw ?? 0), pitch: Number(x.pitch ?? 0), roll: Number(x.roll ?? 0) }));
+    }
+    const pivot = a.pivot ? a.pivot.map(Number) : [0, 0, 0];
+    const frames = [];
+    for (const ang of angles) for (const s of samples) frames.push({ ang, s });
+    if (frames.length > 400) throw new Error(`${frames.length} frames: max 400 per render (fewer frames or angles)`);
+    const filter = { only: a.only, hide: a.hide };
+    const posed = frames.map(({ ang, s }) => {
+      const pre = ang.yaw || ang.pitch || ang.roll ? angleMatrix(ang, pivot) : null;
+      const full = posedWorld(info, s.pose, { pre });
+      const shown = a.only || a.hide ? posedWorld(info, s.pose, { pre, ...filter }) : full;
+      return { full, shown };
+    });
+    // one camera for every frame (fitted to the FULL model, so layers rendered with only/hide line up)
+    const fit = [];
+    for (const p of posed) { const b = p.full.mesh.bounds(); for (const x of [b.min[0], b.max[0]]) for (const y of [b.min[1], b.max[1]]) for (const z of [b.min[2], b.max[2]]) fit.push([x, y, z]); }
+    const camSpec = a.camera ?? 'fp';
+    const cam = makeCamera(camSpec, FW, FH, fit, { fov: a.fov, zoom: a.zoom, margin: a.margin });
+    const L = a.light || {};
+    const lopts = { bg: null };
+    if (L.dir) { const d = L.dir.map(Number), l = Math.hypot(...d) || 1; lopts.light = d.map((v) => v / l); }
+    if (L.ambient !== undefined) lopts.ambient = Math.max(0, Math.min(1, Number(L.ambient)));
+    if (L.color) { const c = parseColor(L.color); lopts.color = [c[0] / 255, c[1] / 255, c[2] / 255]; }
+    const imgs = posed.map((p) => renderCamera(groupsOf(p.shown.mesh), cam, FW, FH, lopts).data);
+    let colors;
+    if (a.quantize) {
+      const q = a.quantize === true ? { colors: 16 } : a.quantize;
+      let pal;
+      if (q.palette === 'project' || q.palette === 'canvas') {
+        const proj = def.project && this.projects?.get(def.project);
+        const outDoc = this.docs.get(a.canvas || '');
+        const src = q.palette === 'project' ? proj?.palette || outDoc?.fullPalette : outDoc?.fullPalette;
+        pal = Object.values(src || {}).map((c) => parseColor(c)).filter((c) => (c[3] ?? 255) > 0);
+        if (!pal.length) throw new Error(`quantize palette:"${q.palette}": no palette (set the model's project, or give colors:[..] / colors:<n>)`);
+      } else if (Array.isArray(q.colors)) pal = q.colors.map((c) => parseColor(c));
+      else pal = medianCut(imgs, Math.max(2, Math.min(256, Math.round(Number(q.colors ?? 16)))));
+      if (pal.length) quantizeFrames(imgs, FW, pal, q.dither === true || q.dither === 'bayer', Number(q.strength ?? 1));
+      colors = pal.length;
+    }
+    if (a.outline) { const c = parseColor(a.outline); for (const d of imgs) outlineFrame(d, FW, FH, c); }
+    // per-frame socket anchors: frame pixel [x, y] (0.1 px) + screen rotation of the socket's forward (-Z) axis
+    const anchors = posed.map((p) => {
+      const out = {};
+      for (const [name, s] of p.full.sockets) {
+        const P = cam.project(s.pos), Q = cam.project([s.pos[0] + s.forward[0] * 4, s.pos[1] + s.forward[1] * 4, s.pos[2] + s.forward[2] * 4]);
+        const dx = Q[0] - P[0], dy = Q[1] - P[1];
+        const rot = Math.hypot(dx, dy) > 1e-3 ? Math.round((Math.atan2(dy, dx) * 180) / Math.PI * 10) / 10 : 0;
+        out[name] = [Math.round((P[0] - 0.5) * 10) / 10, Math.round((P[1] - 0.5) * 10) / 10, rot];
+      }
+      return out;
+    });
+    const tag = a.animation ?? (a.clip !== undefined ? a.clip : a.sweep || a.angles ? 'angles' : a.pose ?? 'rest');
+    if (!/^[\w.-]{1,64}$/.test(tag)) throw new Error('animation (tag) must be 1-64 chars of letters, digits, _ - .');
+    const outName = a.canvas || `${def.name}_${tag}`;
+    if (!NAME_RE.test(outName)) throw new Error('canvas name must be 1-64 chars of letters, digits, _ - .');
+    const renderMeta = { model: def.name, camera: typeof camSpec === 'string' ? camSpec : { ...camSpec }, size: [FW, FH], clip: a.clip, pose: a.pose, only: a.only, hide: a.hide, ...(grid ? { grid } : {}) };
+    const { out, start } = placeFrames(this, outName, FW, FH, tag, imgs, {
+      durations: imgs.map(() => Math.max(10, Math.round(ms))), loop: loop !== false, project: def.project, label: `model ${def.name}: render ${tag} (${imgs.length} frames)`, source,
+      meta: { anchors: { [tag]: anchors }, renders: { ...(this.docs.get(outName)?.meta?.renders || {}), [tag]: renderMeta } },
+    });
+    // contact sheet for the agent (frames scaled up to >= 96 px)
+    const k = Math.max(1, Math.min(8, Math.ceil(96 / Math.max(FW, FH))));
+    const shown = imgs.slice(0, 24).map((d, i) => {
+      const W = FW * k, H = FH * k, big = new Uint8ClampedArray(W * H * 4);
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const s = (Math.floor(y / k) * FW + Math.floor(x / k)) * 4; big.set(d.subarray(s, s + 4), (y * W + x) * 4); }
+      return { img: { width: W, height: H, data: big }, label: String(start + i) };
+    });
+    const sheet = packImages(shown, { labels: true, checker: true, columns: grid ? Math.min(grid.columns, 8) : Math.min(shown.length, 6) });
+    return {
+      canvas: out.name, animation: tag, frames: [start, start + imgs.length - 1], count: imgs.length, size: `${FW}x${FH}`, camera: cam.label, ...(grid ? { grid } : {}),
+      ...(colors ? { colors } : {}), anchors: info.sockets.map((s) => s.name), image: encodePNG(sheet.width, sheet.height, sheet.data),
+      next: `art_animation export {canvas:"${out.name}", format:"spritesheet"} (json frames[].anchors = socket positions per frame; json:false = png only). Arms: art_rig animate {..., ik_from:{canvas:"${out.name}", animation:"${tag}", map:{hand_f:"socket_grip_r"}}}`,
+    };
   },
   model_list() {
     return { models: [...models(this).values()].sort((x, y) => (y.updated || 0) - (x.updated || 0)).map((m) => ({ name: m.name, parts: m.parts.length, types: [...new Set(m.parts.map((p) => p.type))], project: m.project, updated: m.updated })), part_types: Object.keys(PART_DOCS) };
@@ -283,19 +609,35 @@ export const MODEL_OPS = {
       for (const c of probe.tex.used) if (!this.docs.has(`${c}_n`) && !/_n$/.test(c)) this.run('normal_map', { canvas: c }, 'agent');
     }
     const built = build(this, def, { normal, instances: !!a.instances });
-    const meshes = [], nodes = [];
-    if (built.mesh.triangles) { meshes.push({ name: def.name, groups: built.mesh.groups.values() }); nodes.push({ name: def.name, mesh: 0 }); }
-    const meshOf = new Map();
-    for (const [k, it] of built.instances.entries()) {
-      if (!meshOf.has(it.model)) { meshes.push({ name: it.model, groups: it.mesh.groups.values() }); meshOf.set(it.model, meshes.length - 1); }
-      nodes.push({ name: `${it.model}_${k}`, mesh: meshOf.get(it.model), matrix: it.matrix });
+    const info = rigOf(def, built);
+    let meshes = [], nodes = [], animations, rigClips;
+    if (info) {
+      // rig: one node (own mesh, local TRS) per named part, sockets as empty nodes, clips as animations
+      const rs = rigScene(def, info);
+      ({ meshes, nodes, animations } = rs);
+      rigClips = rs.clips;
+      const meshOf = new Map();
+      for (const [k, it] of built.instances.entries()) {
+        if (!meshOf.has(it.model)) { meshes.push({ name: it.model, groups: it.mesh.groups.values() }); meshOf.set(it.model, meshes.length - 1); }
+        nodes.push({ name: `${it.model}_${k}`, mesh: meshOf.get(it.model), matrix: it.matrix, instance: { model: it.model } });
+        nodes[0].children.push(nodes.length - 1);
+      }
+      if (!meshes.length) throw new Error('model has no triangles to export');
+    } else {
+      if (built.mesh.triangles) { meshes.push({ name: def.name, groups: built.mesh.groups.values() }); nodes.push({ name: def.name, mesh: 0 }); }
+      const meshOf = new Map();
+      for (const [k, it] of built.instances.entries()) {
+        if (!meshOf.has(it.model)) { meshes.push({ name: it.model, groups: it.mesh.groups.values() }); meshOf.set(it.model, meshes.length - 1); }
+        nodes.push({ name: `${it.model}_${k}`, mesh: meshOf.get(it.model), matrix: it.matrix });
+      }
+      if (!nodes.length) throw new Error('model has no triangles to export');
+      if (a.instances) for (const n of nodes.slice(built.mesh.triangles ? 1 : 0)) n.instance = { model: n.name.replace(/_\d+$/, '') };
     }
-    if (!nodes.length) throw new Error('model has no triangles to export');
-    if (a.instances) for (const n of nodes.slice(built.mesh.triangles ? 1 : 0)) n.instance = { model: n.name.replace(/_\d+$/, '') };
     const ctm = ctmUsed(built);
     const ctmNames = Object.keys(ctm);
-    const extras = ctmNames.length ? { ctm: { file: path.basename(file).replace(/\.glb$/i, '.ctm.json'), tilesets: ctmNames } } : undefined;
-    const { glb, stats } = writeGLB({ meshes, nodes }, { scale, up: a.up, atlas: !!a.atlas, name: def.name, extras });
+    let extras = ctmNames.length ? { ctm: { file: path.basename(file).replace(/\.glb$/i, '.ctm.json'), tilesets: ctmNames } } : undefined;
+    if (info) extras = { ...(extras || {}), rig: { nodes: info.nodes.length, sockets: info.sockets.map((s) => s.name), clips: Object.keys(rigClips) } };
+    const { glb, stats } = writeGLB({ meshes, nodes, animations }, { scale, up: a.up, atlas: !!a.atlas, name: def.name, extras });
     fs.writeFileSync(file, glb);
     let ctmFile;
     if (ctmNames.length) {
@@ -310,10 +652,11 @@ export const MODEL_OPS = {
       units: { px_per_unit: scale, up: a.up === 'z' ? 'Z (root node rotated +90deg about X)' : 'Y (glTF standard)', front: a.up === 'z' ? '-Y' : '+Z', note: 'Z-up engines (Three.js with camera.up = Z): object.rotation.x = Math.PI / 2 maps glTF +Y up to +Z up, or export with up:"z"' },
       origin: built.origin, grid_px: Number(def.grid ?? 32), ...stats, instances: a.instances ? built.instances.length : undefined,
       parts: built.parts, baked: built.baked || undefined, ctm: ctmFile ? path.basename(ctmFile) : undefined,
+      ...(info ? { rig: { ...rigMeta(info, scale), clips: rigClips } } : {}),
       materials_note: 'NEAREST filters + REPEAT wrap; alphaMode MASK (cutoff 0.5) where the texture has transparency; BLEND (baseColorFactor alpha = opacity, extras.depthWrite false) for parts with opacity < 1 or glass, doubleSided for glass / double_sided; emissive from layer "emissive" / <canvas>_emissive; overlay materials (name overlay_*) sample TEXCOORD_1, strength = COLOR_0 alpha',
     };
     const metaFile = file.replace(/\.glb$/i, '.meta.json');
     fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2));
-    return { file, meta: metaFile, ...(ctmFile ? { ctm: ctmFile } : {}), bytes: glb.length, triangles: stats.triangles, vertices: stats.vertices, materials: stats.materials, nodes: stats.nodes, bounds_units: stats.bounds, atlased: stats.atlased };
+    return { file, meta: metaFile, ...(ctmFile ? { ctm: ctmFile } : {}), bytes: glb.length, triangles: stats.triangles, vertices: stats.vertices, materials: stats.materials, nodes: stats.nodes, bounds_units: stats.bounds, atlased: stats.atlased, ...(info ? { animations: Object.keys(rigClips), sockets: info.sockets.map((s) => s.name) } : {}) };
   },
 };

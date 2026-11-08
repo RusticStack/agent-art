@@ -107,6 +107,35 @@ Turn pixel art into low-poly game assets in the HD-2D style (pixel textures on l
 
 `art_help {topic:"3d"}` has every option plus recipes for a gothic arch kit, a gargoyle relief, chains, lathed candles, CTM marble floors, wall trims, moss and a spaceship. Skills: `3d-kit`, `ship-model`.
 
+#### Rigid-part rigs, animation clips and pre-rendered sprites
+
+For first-person weapons and arms (or anything with moving parts) a model can be a rig of rigid parts, PSX / Half-Life 1 style (no skinning). The same rig exports as glTF animations or renders to pixel-art sprite layers.
+
+```jsonc
+// starter rigs in view space (origin = eye, -Z forward, 32 px = 1 m): fp_rifle, fp_pistol, fp_arms
+{ "action": "create", "name": "ar", "template": "fp_rifle", "textures": { "metal": "gun_metal" }, "set": { "magazine": { "h": 5 } } }
+// or by hand: name = its own node, parent = nesting, pivot = the joint
+{ "action": "create", "name": "door", "parts": [
+  { "type": "box", "name": "frame", "w": 20, "h": 34, "d": 2 },
+  { "type": "box", "name": "leaf", "parent": "frame", "w": 16, "h": 32, "d": 1, "at": [0, 1, 0], "pivot": [-8, 0, 0] } ],
+  "sockets": { "handle": { "part": "leaf", "at": [6, 16, 1], "look": [0, 0, 1] } } }
+{ "action": "pose", "name": "door", "pose": "open", "parts": { "leaf": { "rot": [0, -80, 0] } } }
+{ "action": "animate", "name": "door", "clip": "swing", "keys": [ { "t": 0, "pose": "rest" }, { "t": 0.8, "pose": "open", "ease": "smooth" } ],
+  "events": [ { "t": 0, "name": "creak" } ] }
+{ "action": "preview", "name": "ar", "clip": "reload_empty", "frames": 8, "view": "side" }   // or view:"fp"
+{ "action": "export", "name": "ar" }   // nodes per part + socket_* nodes + one glTF animation per clip
+{ "action": "render", "name": "ar", "canvas": "ar_reload", "clip": "reload_empty", "fps": 12, "size": [160, 120],
+  "camera": "fp", "hide": ["magazine"], "quantize": { "colors": 16, "dither": true }, "outline": "#14141a" }
+```
+
+- **Nodes:** a part with `name` becomes its own glTF node with its own mesh; `parent` nests it under another named part, and its transform is local to the parent (translation = joint offset, rotation, scale). `pivot:[x,y,z]` is the joint. Unnamed parts merge into the root mesh or into their named parent's mesh; `rig:{merge:false}` makes every part a node. `create` and `info` report the node tree. Models without names export exactly as before.
+- **Poses and clips:** `pose` stores per-node offsets from the rest pose (`rot` degrees, `at` px in the parent's frame, `scale`). `animate` stores a clip of keys in seconds (`ease`: `linear`, `smooth` or `step`, applied to the motion into the key), with `loop`, `duration` and `events:[{t, name}]`. Export writes one glTF animation per clip, with translation, rotation (quaternion) and scale channels per moved node. All-linear clips use LINEAR samplers at the key times, all-step clips use STEP, and anything else is baked at 30 fps. Events go in the animation's `extras`.
+- **Sockets:** `sockets:{muzzle:{part, at, look?}, sight, grip_r, grip_l, mag_well}` export as empty child nodes `socket_<name>`, for aligning ADS, spawning muzzle flashes and placing hands. `meta.json` lists each node's parent-space transform, so a Roblox import maps it to Motor6D joints (C0 = translation and rotation).
+- **Sprite renders (`render`):** each clip sample, pose, `angles` entry or `sweep:{yaw:[a,b,step], pitch:[..]}` grid cell becomes one frame of a canvas animation. Frames use nearest texels with no anti-aliasing and a transparent background, plus an optional `light`, `quantize` (median-cut `colors:n`, a colour list or `palette:"project"`, with ordered `dither`) and a 1 px `outline`. The camera is `fp` (eye at the origin looking down -Z, 60°), `side`, `front`, `iso`, `top`, `game` or `{pos, look, fov}`. `only` and `hide` render layers (for example the gun without its magazine) with the same fitted camera, so the layers stack.
+- **Anchors:** every rendered frame stores each socket's screen position and rotation in `meta.anchors`, and spritesheet export writes them to `frames[].anchors`. A 2D arm rig follows them with `art_rig animate {..., ik_from:{canvas, animation, map:{hand_f:"socket_grip_r", hand_b:"socket_grip_l"}}}`, which uses the same frame count and timing with the hands solved onto the grips in every frame.
+
+The full pipeline (model, clips, gun and magazine layers, angle sweep, arms with `ik_from`, export strips) is in `art_help {topic:"3d"}` under "Pre-rendered sprites". Skill: `fp-weapon`.
+
 #### Ships and vehicles
 
 ```jsonc
@@ -300,7 +329,7 @@ Every command takes `layer`, `frame`, `mask` (opaque / transparent / a colour / 
 The recipes behind `art_help {skill}` are also served as MCP prompts and can be installed as agent skills:
 
 ```sh
-npx @rusticstack/agent-art skills --out ~/.claude/skills   # tileable-texture, sprite, rig, rig-hd, walk-cycle, iso-scene, hd2d-scene, 3d-kit, ship-model, ui-icons, minecraft-pack, sfx-pack, music-track
+npx @rusticstack/agent-art skills --out ~/.claude/skills   # tileable-texture, sprite, rig, rig-hd, walk-cycle, iso-scene, hd2d-scene, 3d-kit, ship-model, fp-weapon, ui-icons, minecraft-pack, sfx-pack, music-track
 ```
 
 ## CLI (no MCP needed)

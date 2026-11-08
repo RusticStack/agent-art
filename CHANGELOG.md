@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### 3D rigs, clips and pre-rendered sprites (`art_model`)
+
+- Rigid-part rigs: a part with `name` becomes its own glTF node and mesh. `parent` nests it under another named part, and its transform is local to that parent (translation = joint offset, rotation, scale). `pivot` is the joint. Unnamed parts merge into the root mesh or into their named parent's mesh, and `rig:{merge:false}` makes every part a node. `create` and `info` report the node tree. Models without named parts, sockets or clips export byte-for-byte as before.
+- `pose {name, pose, parts:{<part>:{rot, at, scale}}, base?}` stores per-node offsets from the rest pose. `animate {name, clip, keys:[{pose|parts, t, ease?}], loop?, duration?, events?}` stores a clip. Export writes a glTF animation per clip. All-linear clips use LINEAR samplers at the key times, all-step clips use STEP, and smooth or mixed clips are baked at 30 fps. Events go in the animation `extras`.
+- `sockets:{muzzle:{part, at, look?}, ...}` export as empty child nodes `socket_<name>`. `meta.json` gets a `rig` table with parent-space node transforms (Roblox Motor6D C0).
+- `preview {name, pose}` renders a pose. `preview {name, clip, frames, view}` renders a contact sheet of the clip. The new `fp` view is a first-person camera at the model origin looking down -Z with a 60° fov.
+- New templates in view space (32 px = 1 m): `fp_arms` (clavicle > upper arm > forearm > hand > fingers + thumb per side; poses `rest`, `grip_rifle`, `grip_pistol`; clip `idle_breathe`), `fp_rifle` (receiver, barrel, handguard, stock, magazine, bolt, charging handle, optic, trigger; five sockets; clips `fire`, `reload_tactical`, `reload_empty`) and `fp_pistol` (frame, slide, barrel, magazine, trigger; clips `fire`, `reload`). Override them with `textures`, `set` by part name, `add`, `remove`, `poses`, `clips` and `sockets`.
+- `update` `set` and `remove` accept part names as well as indices.
+- `render {name, canvas, pose|clip, frames|fps, angles|sweep, camera, size, light, outline, quantize, only|hide}` renders pixel-art frames into a canvas animation: nearest texels, no anti-aliasing, transparent background, optional median-cut or palette quantize with ordered dither, and a 1 px outline. Every frame stores socket anchors (screen x, y and rotation) in `meta.anchors`, which spritesheet JSON exports as `frames[].anchors`. `sweep:{yaw, pitch, roll}` renders a row-major angle grid tagged `angles`. `only` and `hide` render aligned layers.
+- Skill `fp-weapon`. `art_help {topic:"3d"}` has new "Rigs & clips" and "Pre-rendered sprites" sections, each with a first-person weapon example.
+
+### Rigs (`art_rig`)
+
+- `animate {..., ik_from:{canvas, animation?, map:{hand_f:"socket_grip_r" | {anchor, bend?, rot?, at?}}, offset?}}` takes per-frame IK targets from another canvas's anchors and copies its frame count, timing and loop, so 2D arms follow a pre-rendered gun clip.
+
 ## 0.5.1
 
 ### Docs
