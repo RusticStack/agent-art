@@ -8,6 +8,7 @@ import { ASSEMBLY_DOCS } from './assemblies.js';
 import './kitrooms.js';
 import { AUDIO_TOPICS } from './audio/docs.js';
 import { PLANET_TOPICS } from './space/docs.js';
+import { FX_TOPICS } from './fx/docs.js';
 
 /** op -> [signature, short purpose]. Field names are exact; "?" = optional. */
 export const SIGS = {
@@ -353,7 +354,7 @@ EXPORT (art_model export):
 Every v2 export runs the in-repo structural glTF validator (result materials_v2.valid).
 RECIPES: painted hull panel = box {texture:"hull" (height/metal/rough layers), material:"painted_hull"}; brushed part = material:"brushed_metal"; canopy = material:"glass_canopy"; seat = material:"cloth"; neon sign = canvas with an emissive layer + material:{preset:"neon", emissive:{color:"#ff40a0", strength:8, animate:"flicker"}}; lit corridor = light parts + export {profile:"three", lightmap:{sun:false}, probes:true, bake_ao:true}.`;
 
-Object.assign(TOPICS, AUDIO_TOPICS, PLANET_TOPICS);
+Object.assign(TOPICS, AUDIO_TOPICS, PLANET_TOPICS, FX_TOPICS);
 
 TOPICS.fp = `FIRST-PERSON VIEWMODELS (art_fp, the fp v2 runtime contract)
 Nothing is baked: arms are animated once per handling class; guns, magazines, attachments and items are sprite sweeps the game turns and snaps at runtime.
