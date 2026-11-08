@@ -896,7 +896,7 @@ export function assembleGLB(engine, def, { normal = false, instances = false, sc
       if (!meshOf.has(it.model)) { meshes.push({ name: it.model, groups: it.mesh.groups.values() }); meshOf.set(it.model, meshes.length - 1); }
       nodes.push({ name: `${it.model}_${k}`, mesh: meshOf.get(it.model), matrix: it.matrix });
     }
-    if (!nodes.length) throw new Error('model has no triangles to export');
+    if (!nodes.length && !built.gpu) throw new Error('model has no triangles to export'); // GPU-instanced greebles become nodes in exportExtras
     if (instances) for (const n of nodes.slice(built.mesh.triangles ? 1 : 0)) n.instance = { model: n.name.replace(/_\d+$/, '') };
   }
   const ctm = ctmUsed(built);
