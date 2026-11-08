@@ -78,3 +78,10 @@ export function blendChannel(mode, d, s) {
     default: return s;
   }
 }
+
+/** Names that become path segments (files under the asset root / library / canvas store): 1-64 letters, digits, _ - ., never "." or "..". */
+const SAFE_NAME = /^[A-Za-z0-9_\-.]{1,64}$/;
+export function checkName(n, what) {
+  if (typeof n !== 'string' || !SAFE_NAME.test(n) || /^\.+$/.test(n)) throw new Error(`${what} ${JSON.stringify(n)} must be 1-64 letters, digits, _ - . (it names files under the asset root)`);
+  return n;
+}

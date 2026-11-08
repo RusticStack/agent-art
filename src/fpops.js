@@ -17,6 +17,7 @@ import { packImages } from './sheet.js';
 import { modelDefs } from './modelops.js';
 import { conform } from './handling.js';
 import { Doc } from './doc.js';
+import { checkName } from './util.js';
 import { sources2d, sourceKey, sweep2d, autoZones, MASKS } from './fp2d.js';
 import { skin2dOf, renderArms2d, POSE_FALLBACK, handPose } from './fp2darms.js';
 
@@ -388,12 +389,8 @@ export function bakeClip(cls, clipName, { skin = 'mec', variant = null, engine =
 }
 
 // ---------- files ----------
-/** Names that become path segments under the asset root (gun / magazine / skin / state): 1-64 letters, digits, _ - ., never "." or "..". */
-const FP_NAME = /^[A-Za-z0-9_\-.]{1,64}$/;
-export function checkFpName(n, what) {
-  if (typeof n !== 'string' || !FP_NAME.test(n) || /^\.+$/.test(n)) throw new Error(`${what} ${JSON.stringify(n)} must be 1-64 letters, digits, _ - . (it names files under the asset root)`);
-  return n;
-}
+/** Names that become path segments under the asset root (gun / magazine / skin / state): see util.js checkName. */
+export const checkFpName = checkName;
 /** root + rel, refusing anything that resolves outside root (defence in depth for every file the fp ops write). */
 export function insideRoot(root, rel) {
   const base = path.resolve(root), f = path.resolve(base, rel), r = path.relative(base, f);
