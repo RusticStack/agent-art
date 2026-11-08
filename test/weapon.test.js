@@ -292,6 +292,7 @@ test('complaint 6: art_critique colour budget scales with size (<= 32 low-res, 4
   const dz = critiqueImage(sprite(128, 192, 8, true), 128, 192);
   assert.ok(!dz.issues.some((i) => i.id === 'noisy' || i.id === 'orphan_pixels'), `dither not noise: ${dz.issues.map((i) => i.id)}`);
   assert.ok(dz.stats.dithered > 20);
+  assert.equal(critiqueImage(sprite(128, 192, 4), 128, 192).stats.dithered, 0, 'flat bands are not dither');
 });
 
 test('carry states, muzzle discipline and animate constraints refuse / fix / warn', () => {

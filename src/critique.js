@@ -88,8 +88,9 @@ export function critiqueImage(data, w, h, { kind = 'auto', tileable, maxColors, 
     for (const [dx, dy] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) if (kAt(x + dx, y + dy) === me) diag++;
     for (const [dx, dy] of [[2, 0], [-2, 0], [0, 2], [0, -2]]) if (kAt(x + dx, y + dy) === me) lat++;
     if (diag < 3 && lat < 3) return false;
-    for (const [dx, dy] of nb4) { const k = kAt(x + dx, y + dy); if (k !== null && k !== me && dist(c, at((x + dx + w) % w, (y + dy + h) % h)) > 110) return false; }
-    return true;
+    let other = 0; // a flat fill also has same-colour diagonals: dither needs differing 4-neighbours
+    for (const [dx, dy] of nb4) { const k = kAt(x + dx, y + dy); if (k !== null && k !== me) { if (dist(c, at((x + dx + w) % w, (y + dy + h) % h)) > 110) return false; other++; } }
+    return other >= 2;
   };
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     if (!op(x, y)) continue;
