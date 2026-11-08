@@ -100,7 +100,7 @@ export function normalizeClip(c, rig, sk, getClip) {
   if (!LIB_NAME.test(c.name || '')) throw new Error('clip needs a "name" (letters, digits, _ - .)');
   if (!c.keys && !c.layers) throw new Error(`clip "${c.name}" needs keys:[{pose|parts, t?, ease?, carry?, z?}] and/or layers:[{clip, mask?, weight?, additive?}]`);
   const out = { name: c.name, skeleton: sk.name };
-  for (const k of ['keys', 'frames', 'fps', 'loop', 'events', 'plant', 'secondary', 'carry', 'mask', 'additive', 'ref', 'layers', 'duration', 'notes']) if (c[k] !== undefined) out[k] = structuredClone(c[k]);
+  for (const k of ['keys', 'frames', 'fps', 'loop', 'events', 'plant', 'secondary', 'carry', 'mask', 'additive', 'ref', 'layers', 'duration', 'notes', 'melee']) if (c[k] !== undefined) out[k] = structuredClone(c[k]);
   if (out.keys) animatePoses(rig, { keys: out.keys, frames: out.frames ?? out.keys.length, loop: out.loop !== false }); // throws on bad keys
   if (out.mask !== undefined) maskOf(out.mask, rig, sk);
   for (const [i, l] of (out.layers || []).entries()) {

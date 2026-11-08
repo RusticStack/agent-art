@@ -15,6 +15,8 @@ import { encodePNG } from './png.js';
 import { writeSkinGLB } from './gltfskin.js';
 import { compactCells } from './compact.js';
 import { registerAssetType } from './assettypes.js';
+import { meleeBatchAnim } from './meleeops.js';
+import { meleeMeta, normalizeMelee } from './melee.js';
 
 const RIG_OPTS = ['sampling', 'secondary', 'feet', 'scale_children', 'weapon', 'variant_sets', 'depth', 'skin', 'constrain', 'limits'];
 const libDir = (e, ...p) => path.join(e.home, 'library', ...p);
@@ -71,7 +73,7 @@ function skinClip(e, skin, clipName, view) {
   const ev = evalClip(rig, clip, getClip, sk);
   const a = { animation: `${clipName}_${view}`, view, _poses: ev.poses, frames: ev.poses.length, loop: ev.loop, fps: ev.fps, events: ev.events.length ? ev.events : undefined, ...(clip.plant !== undefined ? { plant: clip.plant } : {}), ...(clip.secondary !== undefined ? { secondary: clip.secondary } : {}), ...(clip.carry !== undefined ? { carry: clip.carry } : {}) };
   const fp = framePoses(e, rig, def, a);
-  return { sk, d, rig, def, clip, fp };
+  return { sk, d, rig, def, clip, fp, getClip };
 }
 
 /** Loadout -> render options: equipment set variant + parts of unequipped items hidden. */
@@ -176,6 +178,7 @@ export const LIB_OPS = {
       if (!pr) throw new Error(`rig "${a.from_rig}" has no preset "${a.preset ?? name}"`);
       c = { ...pr, ...Object.fromEntries(Object.entries(a).filter(([k, v]) => v !== undefined && !['from_rig', 'preset', 'skeleton'].includes(k))) };
     }
+    if (c.melee) c = { ...c, melee: normalizeMelee(meleeMeta(c.melee), rig) };
     const clip = normalizeClip({ ...c, name }, rig, sk, (n) => loadClip(this, sk.name, n));
     writeJSON(clipFile(this, sk.name, name), clip);
     const ev = evalClip(rig, clip, (n) => loadClip(this, sk.name, n), sk);
@@ -307,10 +310,10 @@ export const LIB_OPS = {
           for (const clip of clips) for (const view of views) {
             const ck = `${clip}|${view}`;
             if (!clipPoses.has(ck)) {
-              const { fp } = skinClip(this, skin, clip, view);
-              clipPoses.set(ck, { fp, rots: a.stable === false ? null : stableRotations(rig, fp.poses, view, typeof a.stable === 'object' ? a.stable : {}) });
+              const { fp, clip: mc, getClip } = skinClip(this, skin, clip, view);
+              clipPoses.set(ck, { fp, rots: a.stable === false ? null : stableRotations(rig, fp.poses, view, typeof a.stable === 'object' ? a.stable : {}), ...(mc.melee ? { melee: { clip: mc, getClip } } : {}) });
             }
-            const { fp, rots } = clipPoses.get(ck);
+            const { fp, rots, melee } = clipPoses.get(ck);
             const frames = [], fronts = [], orders = [], sockets = [];
             fp.poses.forEach((P, i) => {
               const base = { ...(lopt.variant ? { variant: lopt.variant } : {}), pad: G, ...(rots ? { rot: rots[i] } : {}) };
@@ -334,7 +337,7 @@ export const LIB_OPS = {
                 fronts.push(renderPose(rig, d, P, view, cache, { ...base, only: front.filter((n) => !(lopt.hide || []).includes(n)) }));
               } else { frames.push(full); fronts.push(null); }
             });
-            rendered.push({ clip, view, frames, fronts, orders, fp, sockets });
+            rendered.push({ clip, view, frames, fronts, orders, fp, sockets, melee });
           }
           if (!auto || !ub || attempt >= 4) break;
           const edge = [ub[0] <= 0, ub[1] <= 0, ub[2] >= GW - 1, ub[3] >= GH - 1];
@@ -379,6 +382,7 @@ export const LIB_OPS = {
           }
           if (r.fp.events.length) anim.events = r.fp.events;
           if (a.order !== false) anim.order = orderRuns(r.orders);
+          if (r.melee) anim.melee = meleeBatchAnim(this, { sk, rig, clip: r.melee.clip, view: r.view, poses: r.fp.poses, pad, getClip: r.melee.getClip });
           entry.anims[key] = anim;
         }
         manifest[group][set] = entry;

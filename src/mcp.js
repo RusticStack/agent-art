@@ -27,7 +27,7 @@ Audio (SFX, music, mixing; you cannot hear, so read analyze/critique reports): a
 The user leaves review notes on assets in the web UI: art_review list (replies say when the asset you touch has open notes).
 Retire superseded art with art_cleanup (plan -> apply; soft delete to a trash, restore undoes it).
 Orient yourself with art_graph (summary / query: what is part of what, a few hundred chars) instead of art_info on everything; record relations with art_graph link / group / tag / note.
-Details on demand: art_help {topic: workflow|textures|characters|animation|rig|library|skin2d|scenes|hires|minecraft|3d|materials|audio|music|mixing|perception|graph|planets|cleanup} or {op:"<draw command>"}.`;
+Details on demand: art_help {topic: workflow|textures|characters|animation|rig|library|melee|skin2d|scenes|hires|minecraft|3d|materials|audio|music|mixing|perception|graph|planets|cleanup} or {op:"<draw command>"}.`;
 
 const S = {
   canvas: { type: 'string' },
@@ -270,12 +270,12 @@ export const TOOLS = [
   },
   {
     name: 'art_anim',
-    description: 'Animation library: author motion once per skeleton, render many skins. skeleton {name, template:"humanoid_hd", frame, weapon?, proportions?} (+ standard clips); clip {skeleton, name, keys?|layers?:[{clip, mask?, weight?, additive?}], frames, fps, events?}; skin {name, skeleton, proportions?, equipment?, loadouts?} (creates the rig to draw); retarget {clip, from, to}; render {skin, clip, view}; batch {skins, clips?, views?, out, pad?:"auto", front?:"auto", weapon?:"runtime"} = game strips + manifest (runtime: gun-free + sockets); gltf {skin}; list; info. Guns: weapon {name, class, skin}, conform, weapon_sheet {weapon, out}, composite {skin, weapon, clip, view}, weapon_check {skin}. art_help {topic:"library"}.',
+    description: 'Animation library: author motion once per skeleton, render many skins. skeleton {name, template:"humanoid_hd", frame, weapon?, proportions?} (+ standard clips); clip {skeleton, name, keys?|layers?:[{clip, mask?, weight?, additive?}], frames, fps, events?}; skin {name, skeleton, proportions?, equipment?, loadouts?} (creates the rig to draw); retarget {clip, from, to}; render {skin, clip, view}; batch {skins, clips?, views?, out, pad?:"auto", front?:"auto", weapon?:"runtime"} = game strips + manifest (runtime: gun-free + sockets); gltf {skin}; list; info. Guns: weapon {name, class, skin}, conform, weapon_sheet {weapon, out}, composite {skin, weapon, clip, view}, weapon_check {skin}. Melee: melee {skeleton, weapon?:"combat_knife"|.., shield?} = strikes/blocks/reactions/paired takedowns + hit events/volumes; melee_check; melee_sheet {weapons?, out}; paired {skin, victim_skin?, pair, view?} (art_help melee). art_help {topic:"library"}.',
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['skeleton', 'clip', 'skin', 'retarget', 'render', 'batch', 'gltf', 'list', 'info', 'weapon', 'conform', 'weapon_sheet', 'composite', 'weapon_check'] }, name: { type: 'string' },
-        skeleton: { type: 'string' }, template: { type: 'string' }, frame: { type: 'array', items: { type: 'integer' } }, weapon: { type: ['object', 'boolean', 'string'] },
+        action: { type: 'string', enum: ['skeleton', 'clip', 'skin', 'retarget', 'render', 'batch', 'gltf', 'list', 'info', 'weapon', 'conform', 'weapon_sheet', 'composite', 'weapon_check', 'melee', 'melee_check', 'melee_sheet', 'paired'] }, name: { type: 'string' },
+        skeleton: { type: 'string' }, template: { type: 'string' }, frame: { type: 'array', items: { type: 'integer' } }, weapon: { type: ['object', 'boolean', 'string'] }, shield: { type: 'boolean' }, pair: { type: 'string' }, victim_skin: { type: 'string' }, tolerance: { type: 'number' },
         class: { type: 'string' }, weapons: { type: 'array', items: { type: 'string' } }, from_skin: { type: 'string' }, attachments: { type: 'object' }, points: { type: 'object' }, fix: { type: 'boolean' },
         pitch: { type: 'array', items: { type: 'number' } }, attach: { type: ['array', 'string'] }, select: { type: 'array', items: { type: 'integer' } }, max_size: { type: 'integer' }, from_rig: { type: 'string' }, preset: { type: 'string' },
         proportions: { type: ['object', 'string'] }, masks: { type: 'object' }, depth: { type: ['boolean', 'object'] }, clips: { type: ['array', 'string', 'boolean'] },
@@ -300,7 +300,7 @@ export const TOOLS = [
         weapon: { type: ['object', 'boolean'] }, arms: { type: 'object' }, hold: { type: 'object', description: '{weapon|arms, carry?, attach?, clip?, both?, fix?}' }, carries: { type: 'array', items: { type: 'string' } },
         parts: { type: ['array', 'object'], items: MODEL_PART },
         add: { type: 'array', items: { type: 'object' } }, set: { type: 'object' }, remove: { type: 'array', items: { type: ['integer', 'string'] } },
-        template: { type: 'string', enum: ['fp_arms', 'fp_rifle', 'fp_pistol', 'gunship', 'fighter', 'dropship', 'hauler', 'capital_ring'] }, textures: { type: ['object', 'string'] },
+        template: { type: 'string', enum: ['fp_arms', 'fp_rifle', 'fp_pistol', 'gunship', 'fighter', 'dropship', 'hauler', 'capital_ring', 'melee_combat_knife', 'melee_machete', 'melee_baton', 'melee_stun_baton', 'melee_vibro_blade', 'melee_breach_axe', 'melee_breach_hammer', 'melee_riot_shield'] }, textures: { type: ['object', 'string'] },
         rig: { type: 'object' }, sockets: { type: 'object' }, poses: { type: 'object' }, clips: { type: ['object', 'array'], description: 'create / update: {<clip>: {keys, loop?, duration?}}; hold_check: clip names' },
         pose: { type: 'string' }, base: { type: 'string' }, clip: { type: 'string' }, keys: { type: ['array', 'null'] }, loop: { type: 'boolean' }, events: { type: 'array' }, duration: { type: 'number' }, ease: { enum: ['linear', 'smooth', 'step'] }, delete: { type: 'boolean' },
         canvas: { type: 'string' }, animation: { type: 'string' }, frames: { type: 'integer' }, fps: { type: 'number' }, view: { type: ['string', 'object'] }, camera: { type: ['string', 'object'] }, fov: { type: 'number' }, zoom: { type: 'number' },

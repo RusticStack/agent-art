@@ -3,6 +3,8 @@
 // 1 m), the Half-Life 1 / PSX viewmodel convention. Every part, texture slot, pose and clip is a
 // starting point: create {template, textures?, set?:{<part name>:{..}}, add?, remove?, poses?, clips?, sockets?}.
 
+import { MELEE_TEMPLATES } from './meleekit.js';
+
 // ---------- shared layout (the arms' grip poses are solved onto these weapon sockets) ----------
 // The part numbers below are authored around y = -6; OFFSET_* lifts each weapon into view
 // (about 15° below the centre of a 60° first-person camera).
@@ -264,4 +266,5 @@ export const MODEL_TEMPLATES = {
   fp_arms: fpArms,
   fp_rifle: (o) => placed(withWeapon(fpRifle(o), o, 'long', o.weapon ? rifleAttachments(o.textures || {}) : {}), OFFSET_RIFLE),
   fp_pistol: (o) => placed(withWeapon(fpPistol(o), o, 'pistol'), OFFSET_PISTOL),
+  ...MELEE_TEMPLATES,
 };

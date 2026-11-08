@@ -427,7 +427,7 @@ function placeFrames(engine, outName, FW, FH, tag, imgs, { durations, loop, proj
 }
 
 /** Model-level options kept on create/update (besides name and parts). */
-export const MODEL_KEYS = ['grid', 'scale', 'origin', 'notes', 'project', 'overlays', 'uv_origin', 'rig', 'sockets', 'poses', 'clips', 'weapon', 'arms', 'merge', 'morphs', 'cull', 'greeble_kind', 'fp', 'skeleton', 'skin', 'materials'];
+export const MODEL_KEYS = ['grid', 'scale', 'origin', 'notes', 'project', 'overlays', 'uv_origin', 'rig', 'sockets', 'poses', 'clips', 'weapon', 'arms', 'merge', 'morphs', 'cull', 'greeble_kind', 'fp', 'skeleton', 'skin', 'materials', 'melee'];
 
 /** Part index from a number or a part name. */
 function partIndex(parts, k, what) {
@@ -460,7 +460,7 @@ function fromTemplate(a) {
   if (!make) throw new Error(`unknown template "${a.template}" (templates: ${Object.keys(MODEL_TEMPLATES).join(', ')})`);
   if (a.parts !== undefined) throw new Error('template: change the template parts with set:{<part name>:{..}}, add:[..] and remove:[names] (parts replaces nothing here)');
   const t = make(a);
-  const base = { name: a.name, parts: t.parts, sockets: t.sockets, poses: t.poses, clips: t.clips, notes: t.notes, ...(t.weapon ? { weapon: t.weapon } : {}) };
+  const base = { name: a.name, parts: t.parts, sockets: t.sockets, poses: t.poses, clips: t.clips, notes: t.notes, ...(t.weapon ? { weapon: t.weapon } : {}), ...(t.melee ? { melee: t.melee, scale: t.scale, grid: t.grid } : {}) };
   const merged = applyPatch(base, { set: a.set, add: a.add, remove: a.remove });
   for (const k of ['sockets', 'poses', 'clips']) if (a[k] !== undefined && a[k] !== null) {
     merged[k] = { ...(merged[k] || {}) };
@@ -519,8 +519,8 @@ export const MODEL_OPS = {
     if (!NAME_RE.test(a.name || '')) throw new Error('model "name" must be 1-64 chars of letters, digits, _ - .');
     if (models(this).has(a.name) && !a.overwrite) throw new Error(`Model "${a.name}" exists (overwrite:true replaces it; art_model update changes it)`);
     const tpl = a.template !== undefined ? fromTemplate(a) : null;
-    const def = { name: a.name, parts: tpl ? tpl.parts : a.parts, grid: a.grid ?? 32, scale: a.scale ?? 32, origin: a.origin ?? 'auto' };
-    if (tpl) { for (const k of ['sockets', 'poses', 'clips', 'weapon']) if (tpl[k]) def[k] = tpl[k]; if (a.notes === undefined) def.notes = tpl.notes; def.template = a.template; }
+    const def = { name: a.name, parts: tpl ? tpl.parts : a.parts, grid: a.grid ?? tpl?.grid ?? 32, scale: a.scale ?? tpl?.scale ?? 32, origin: a.origin ?? 'auto' };
+    if (tpl) { for (const k of ['sockets', 'poses', 'clips', 'weapon', 'melee']) if (tpl[k]) def[k] = tpl[k]; if (a.notes === undefined) def.notes = tpl.notes; def.template = a.template; }
     for (const k of MODEL_KEYS) if (a[k] !== undefined && a[k] !== null && def[k] === undefined) def[k] = a[k];
     def.created = Date.now();
     const s = summary(def, build(this, def));
