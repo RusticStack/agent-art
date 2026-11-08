@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.0
 
 ### Weapon handling (`art_rig`, `art_model`)
 
@@ -67,11 +67,15 @@
 ### Compatibility
 
 - Models and exports that use none of the new options are byte-for-byte the same as before hard-surface detail (md5 of `.glb`, `meta.json`, `ctm.json`, preview and render PNGs). `assembleGLB` (export and the 3D viewer) builds both, so the viewer's .glb carries the PBR materials, greebles and morphs too.
+- The npm package grows from 362 kB to 770 kB packed (2.6 MB unpacked) because the web UI vendors three.js r170 (MIT) in `public/vendor/three`.
 - The tool-list size limit in `test/quality.test.js` goes from 27400 to 28380 (28133 measured) for the new `art_model` options.
 
 ### Docs
 
 - `art_help {topic:"3d"}`: new "Hard-surface detail" and "Render cost" sections, plus recipes for hull greebling, a corridor with one trim sheet, a pipe run, and LOD + impostor for a city block. README section with renders (`docs/surface/`, rebuilt by `node docs/surface/build-demos.mjs`). New skill `hard-surface`.
+- README for 0.7: the feature list covers weapon handling, the web UI (timeline, asset browser, viewers, graph, review notes) and hard-surface detail + render cost; an "Upgrading to 0.7" note lists the behaviour changes; the tools table lists `art_rig` `weapon` / `check` / `layers` / `explain`, `art_model` `hold`, `art_review add` and the `graph` help topic; `weapon-handling` is in the skills list; a tested `art_graph` / `art_review` example. The outdated 0.5 behaviour note is gone.
+- Skills `rig`, `rig-hd` and `fp-weapon` explain the compact cells reply (`[x, rows[view], w, h]`) and the `<preset>_<view>` tags (`walk_side`); `rig` critiques the tag it made.
+- `art_help {topic:"3d"}`: first-person guns name their grips under `weapon.grips` (with the default sockets) and `weapon.frames`; `art_help {topic:"rig"}`: `weapon.layer.pin` is keyed by view or `all`. The `art_help` tool description lists the `graph` topic. `docs/rig-hd-guide.md` critiques `walk_side`, not `walk`.
 
 ## 0.6.0
 
