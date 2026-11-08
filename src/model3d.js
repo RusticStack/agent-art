@@ -1742,6 +1742,7 @@ export function buildModel(def, ctx) {
   if (shift.some((v) => v)) { mesh.transform(mT(...shift)); for (const it of instances) it.matrix = matMul(mT(...shift), it.matrix); }
   const gpuList = [...gpu.values()];
   if (shift.some((v) => v)) for (const it of gpuList) it.mats = it.mats.map((M) => matMul(mT(...shift), M));
+  if (shift.some((v) => v)) for (const b of partBounds) if (b) { b.min = b.min.map((v, k) => v + shift[k]); b.max = b.max.map((v, k) => v + shift[k]); }
   const out = { mesh, parts, origin: mode, instances, grid, baked, shift, layout, partBounds };
   if (gpuList.length) out.gpu = gpuList;
   if (merged) out.merged = merged;
