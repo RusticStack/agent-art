@@ -1,0 +1,255 @@
+{
+ "system": {
+  "star": {
+   "name": "Irugau Dra",
+   "class": "red"
+  },
+  "bodies": [
+   {
+    "name": "Ishae",
+    "preset": "lava",
+    "kind": "planet",
+    "seed": 736822,
+    "hue": 6
+   },
+   {
+    "name": "Zenri",
+    "preset": "toxic",
+    "kind": "planet",
+    "seed": 267361,
+    "hue": 11
+   },
+   {
+    "name": "Dululor",
+    "preset": "desert",
+    "kind": "planet",
+    "seed": 677038,
+    "hue": -6
+   },
+   {
+    "name": "Phalo",
+    "preset": "bloom",
+    "kind": "planet",
+    "seed": 222633,
+    "hue": 2
+   },
+   {
+    "name": "Vesveliru",
+    "preset": "gas",
+    "kind": "planet",
+    "seed": 420848,
+    "hue": -5
+   },
+   {
+    "name": "Dradulqui",
+    "preset": "ice",
+    "kind": "planet",
+    "seed": 728473,
+    "hue": 10
+   }
+  ],
+  "ms": 702
+ },
+ "planet": {
+  "name": "phalo",
+  "lods": [
+   {
+    "level": 0,
+    "triangles": 27648,
+    "distance": 0
+   },
+   {
+    "level": 1,
+    "triangles": 6912,
+    "distance": 95.499006
+   },
+   {
+    "level": 2,
+    "triangles": 1728,
+    "distance": 376.826586
+   },
+   {
+    "level": 3,
+    "triangles": 432,
+    "distance": 1363.249087
+   }
+  ],
+  "tiles": {
+   "file": "phalo.tiles.json",
+   "count": 126,
+   "max_level": 2,
+   "segments": 16,
+   "tile_px": 64,
+   "triangles_per_tile": 640
+  },
+  "textures": 47,
+  "ms": 5320,
+  "max_texture_px": 1024,
+  "files": 178,
+  "bytes": 7095202,
+  "meta_timings": {
+   "equirect": 773,
+   "clouds_rings": 264,
+   "write_equirect": 625,
+   "cube_faces": 1321,
+   "lod_meshes": 129,
+   "glb": 560,
+   "impostor": 114,
+   "tiles": 1473,
+   "preview": 60,
+   "total": 5319
+  }
+ },
+ "terrain": {
+  "biome": "dunes",
+  "base_elevation_m": 574.4975,
+  "height_range_m": [
+   -9.9554,
+   32.4184
+  ],
+  "chunks": 16,
+  "triangles_lod0": 36864,
+  "lod_triangles_per_chunk": [
+   2304,
+   640,
+   192
+  ],
+  "props": {
+   "instances": 230,
+   "triangles": 38166,
+   "rocks": "140/140",
+   "crystals": "0/0",
+   "grass": "90/90"
+  },
+  "anchors": [
+   {
+    "kind": "landing_pad",
+    "p": [
+     0,
+     -5.8647,
+     0
+    ],
+    "radius": 40.96,
+    "slope": 0.0214
+   },
+   {
+    "kind": "mesa_top",
+    "p": [
+     -179.2574,
+     13.0157,
+     51.4213
+    ],
+    "radius": 37.5232
+   },
+   {
+    "kind": "mesa_top",
+    "p": [
+     117.6966,
+     32.4184,
+     160.0706
+    ],
+    "radius": 49.4847
+   },
+   {
+    "kind": "arch",
+    "p": [
+     -58.1505,
+     23.7131,
+     132.5117
+    ],
+    "span": 50.3864,
+    "yaw": 245.4462
+   }
+  ],
+  "chunk_texture_px": 256,
+  "ms": 1003,
+  "textures": 19,
+  "max_texture_px": 512,
+  "files": 41,
+  "bytes": 2268191,
+  "timings": {
+   "heights_splat_chunks": 149,
+   "chunk_glbs": 643,
+   "splat_heightfield": 9,
+   "scatter": 49,
+   "preview": 153,
+   "total": 1003
+  }
+ },
+ "skybox": {
+  "face_px": 512,
+  "stars": 9437,
+  "ms": 3569,
+  "textures": 7,
+  "max_texture_px": 1024,
+  "files": 9,
+  "bytes": 1100701
+ },
+ "asteroids": {
+  "instances": 1200,
+  "variants": [
+   {
+    "kind": "potato",
+    "triangles": [
+     320,
+     128,
+     48
+    ]
+   },
+   {
+    "kind": "binary",
+    "triangles": [
+     320,
+     128,
+     48
+    ]
+   },
+   {
+    "kind": "shard",
+    "triangles": [
+     320,
+     128,
+     48
+    ]
+   },
+   {
+    "kind": "cratered",
+    "triangles": [
+     320,
+     128,
+     48
+    ]
+   },
+   {
+    "kind": "rock",
+    "triangles": [
+     320,
+     128,
+     48
+    ]
+   },
+   {
+    "kind": "boulder",
+    "triangles": [
+     320,
+     128,
+     48
+    ]
+   }
+  ],
+  "field_triangles_lod0": 384000,
+  "glb_bytes": 452096,
+  "ms": 364,
+  "textures": 1,
+  "max_texture_px": 32,
+  "files": 5,
+  "bytes": 1128728
+ },
+ "fx": {
+  "ms": 295,
+  "textures": 5,
+  "max_texture_px": 1024,
+  "files": 6,
+  "bytes": 48970
+ }
+}
