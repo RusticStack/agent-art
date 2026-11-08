@@ -8,6 +8,9 @@
 // offset), then projected into every drawn view. Hands are solved in each view onto the projected
 // grips with the bone foreshortening of the 3D arm solution, so contact holds in all 8 directions.
 import { worldOf, applyIK, partIn, poseOf, ikChain, viewPose } from './rig.js';
+import { HANDLING_CLASSES, CARRY, DEFAULT_POINTS, DEFAULT_SOCKETS, ATTACHMENT_TYPES } from './handling.js';
+
+export { ATTACHMENT_TYPES };
 
 const D2R = Math.PI / 180;
 const R2D = 180 / Math.PI;
@@ -23,62 +26,29 @@ const norm3 = (a) => { const l = len3(a) || 1; return mul(a, 1 / l); };
 const rot2 = (deg, x, y) => { const r = deg * D2R, c = Math.cos(r), s = Math.sin(r); return [x * c - y * s, x * s + y * c]; };
 const r2 = (v) => Math.round(v * 100) / 100;
 
-/** Weapon classes -> kind (long gun / pistol). */
-export const WEAPON_CLASSES = { rifle: 'long', carbine: 'long', smg: 'long', shotgun: 'long', dmr: 'long', sniper: 'long', lmg: 'long', pistol: 'pistol', handgun: 'pistol', revolver: 'pistol' };
+/** Weapon classes -> kind (long gun / pistol): every gun member of the shared handling classes. */
+export const WEAPON_CLASSES = Object.fromEntries(Object.values(HANDLING_CLASSES).filter((c) => c.kind === 'long' || c.kind === 'pistol').flatMap((c) => c.members.map((m) => [m, c.kind])));
 /** View yaw (deg) of the character relative to the base side view: screen x = x cos - z sin (z + = near side). */
 export const VIEW_YAW = { side: 0, front_side: 45, front: 90, back_side: -45, back: -90 };
 
-/**
- * Built-in carry states. at = [forward, down] of the reference point from the reference shoulder,
- * in arm lengths, in the chest frame ("pocket" = the shoulder pocket); angle = muzzle angle in deg
- * (+ = down); lateral = weapon plane offset as a fraction of the reference shoulder's lateral
- * offset; lock = hands held on their grips; fire = a firing position (no muzzle-down rule);
- * follow = how much the chest's rotation turns the weapon.
- */
-const LONG_STATES = {
-  aim: { point: 'stock', at: 'pocket', angle: 0, lock: ['main', 'support'], fire: true, weld: true, follow: 1 },
-  ready_low: { point: 'stock', at: 'pocket', angle: 36, lock: ['main', 'support'], follow: 0.35 },
-  ready_high: { point: 'grip_main', at: [0.32, 0.5], angle: -42, lateral: 0.55, lock: ['main', 'support'], follow: 0.6 },
-  hip: { point: 'grip_main', at: [0.36, 0.74], angle: 2, lateral: 0.85, lock: ['main', 'support'], fire: true, follow: 0.5 },
-  sprint: { point: 'grip_main', at: [0.3, 0.66], angle: 52, lateral: 0.4, lock: ['main', 'support'], follow: 0.5 },
-  // reload: the gun comes up to the chest, muzzle high, mag well turned to the support hand (reads
-  // differently from ready_low's muzzle-down carry); reload_charge: the support hand works the
-  // charging handle
-  reload: { point: 'grip_main', at: [0.34, 0.46], angle: -24, lateral: 1, lock: ['main'], follow: 0.5 },
-  reload_charge: { point: 'grip_main', at: [0.3, 0.42], angle: -30, lateral: 0.9, lock: ['main'], follow: 0.5 },
-  slung: { point: 'grip_main', at: [0.3, 1.02], angle: 74, lateral: 0.25, lock: [], follow: 1 },
-  one_hand_low: { point: 'grip_support', ref: 'support', at: [0.12, 0.97], angle: 66, lateral: 1.15, lock: ['support'], follow: 0.6 },
-  drop: { point: 'ground', at: [0.45, 0], angle: 0, lateral: 1.5, lock: [], exempt: true, follow: 0 },
-  holster: { hidden: true, point: 'stock', at: 'pocket', angle: 70, lock: [], exempt: true, follow: 1 },
-};
-const PISTOL_STATES = {
-  aim: { point: 'grip_main', at: [0.9, 0], angle: 0, lateral: 0, lock: ['main', 'support'], cup: true, fire: true, eye: true, follow: 0.6 },
-  compressed: { point: 'grip_main', at: [0.42, 0.36], angle: 4, lateral: 0.25, lock: ['main', 'support'], cup: true, fire: true, follow: 0.6 },
-  low: { point: 'grip_main', at: [0.62, 0.68], angle: 42, lateral: 0.15, lock: ['main', 'support'], cup: true, follow: 0.6 },
-  reload: { point: 'grip_main', at: [0.5, 0.44], angle: 20, lateral: 0.3, lock: ['main'], follow: 0.6 },
-  reload_charge: { point: 'grip_main', at: [0.46, 0.4], angle: 24, lateral: 0.3, lock: ['main'], follow: 0.6 },
-  one_hand_low: { point: 'grip_main', ref: 'support', at: [0.1, 0.97], angle: 70, lateral: 1.15, lock: ['support'], hold: 'support', follow: 0.6 },
-  drop: LONG_STATES.drop,
-  holster: { hidden: true, point: 'grip_main', at: [0.05, 1.05], angle: 80, lateral: 1.3, lock: [], exempt: true, follow: 1 },
-};
+// Built-in carry states (shared handling data, handling.js CARRY)
+const LONG_STATES = CARRY.long;
+const PISTOL_STATES = CARRY.pistol;
 export const CARRY_STATES = { long: Object.keys(LONG_STATES), pistol: Object.keys(PISTOL_STATES) };
 const STATE_KEYS = ['point', 'ref', 'at', 'angle', 'lateral', 'lock', 'fire', 'weld', 'eye', 'cup', 'hidden', 'exempt', 'follow', 'hold', 'base'];
 
 // default points as fractions of the weapon cell (drawn pointing RIGHT in the base view)
-const LONG_POINTS = { stock: [0, 0.42], grip_main: { at: [0.3, 0.78], angle: 16 }, grip_support: { at: [0.64, 0.56], angle: -100, slide: true }, muzzle: [1, 0.3], optic: [0.38, 0.05], mag: [0.44, 0.92], charge: [0.27, 0.14] };
-const LONG_SOCKETS = { underbarrel: [0.66, 0.66], top: [0.4, 0], muzzle: [1, 0.3] };
-const PISTOL_POINTS = { stock: [0, 0.3], grip_main: { at: [0.24, 0.8], angle: 18 }, muzzle: [1, 0.22], optic: [0.62, 0], mag: [0.24, 1], charge: [0.1, 0.12] };
-const PISTOL_SOCKETS = { underbarrel: [0.7, 0.55], top: [0.55, 0], muzzle: [1, 0.22] };
-/** Attachment types: default socket and the grip / muzzle / optic they take over (fractions of the attachment cell). */
-export const ATTACHMENT_TYPES = {
-  vertical_grip: { socket: 'underbarrel', grip_support: { at: [0.5, 0.72], angle: 6 } },
-  angled_grip: { socket: 'underbarrel', grip_support: { at: [0.42, 0.55], angle: -38 } },
-  bipod: { socket: 'underbarrel', grip_support: { at: [0.5, 0.45], angle: -4 } },
-  suppressor: { socket: 'muzzle', muzzle: [1, 0.5] },
-  optic: { socket: 'top', optic: [0.5, 0.1] },
-  light: { socket: 'underbarrel' },
-};
+const LONG_POINTS = DEFAULT_POINTS.long, PISTOL_POINTS = DEFAULT_POINTS.pistol;
+const LONG_SOCKETS = DEFAULT_SOCKETS.long, PISTOL_SOCKETS = DEFAULT_SOCKETS.pistol;
 const POINT_NAMES = ['stock', 'grip_main', 'grip_support', 'muzzle', 'optic', 'mag', 'charge'];
+
+/** Default points and sockets of a weapon cell [w, h] (cell px): {points:{name:{x, y, angle, slide}}, sockets:{name:[x, y]}}. */
+export function weaponDefaults(kind, [w, h]) {
+  const P = kind === 'pistol' ? PISTOL_POINTS : LONG_POINTS, S = kind === 'pistol' ? PISTOL_SOCKETS : LONG_SOCKETS;
+  const points = {};
+  for (const [k, v] of Object.entries(P)) { const p = pointSpec(v, k, [w, h]); if (p.angle === null) p.angle = 0; p.slide = k === 'grip_support'; points[k] = p; }
+  return { points, sockets: Object.fromEntries(Object.entries(S).map(([k, f]) => [k, [f[0] * w, f[1] * h]])) };
+}
 
 function pointSpec(v, where, frac = null) {
   if (v === undefined || v === null) return null;
@@ -670,39 +640,8 @@ export function solveHeld(rig, P, src) {
   const anc3 = at3(s.O, s.f, anc);
   const pa = proj(sub(anc3, s.S3(shA)));
   const ancScr = [Wv[shA].x + pa[0], Wv[shA].y + pa[1]];
-  let Mu = proj(s.f.u);
-  let L = Math.hypot(Mu[0], Mu[1]);
-  const fs = W.foreshorten ? { floor: tune?.floor ?? W.foreshorten.floor, cant: tune?.cant ?? W.foreshorten.cant } : null;
-  let canted = false;
-  if (fs && L < fs.floor - 1e-9 && src !== W.base) {
-    // barrel toward / away from the camera: carried, yaw it outward a little and keep a readable
-    // length; aimed (firing states), keep it short and canted INWARD so the muzzle sits near the
-    // centre line and the gun reads as pointing at the viewer (blended by the firing weight)
-    const out = Math.sign(s.S3(s.chains.main[0])[2]) || 1;
-    const f = tune?.cant !== undefined ? 0 : clamp(Number(s.pl.aimF ?? 0), 0, 1);
-    const cdeg = lerp(fs.cant, -W.foreshorten.aim_cant, f), floor = lerp(fs.floor, W.foreshorten.aim_floor, f), c = cdeg * D2R;
-    const uc = [s.f.u[0] * Math.cos(c), s.f.u[1], Math.hypot(s.f.u[0], s.f.u[2]) * Math.sin(c) * out];
-    Mu = proj(uc);
-    L = Math.hypot(Mu[0], Mu[1]);
-    if (L < 1e-6) { Mu = [(f >= 0.5 ? 1 : -1) * ax.z * out || 1, 0]; L = 1; }
-    if (L < floor) { Mu = [Mu[0] * floor / L, Mu[1] * floor / L]; L = floor; }
-    canted = f >= 0.5 ? 'inward' : true;
-  }
-  // back-facing views: the gun is in front of the body, away from the camera; keep the muzzle
-  // angled out past the silhouette on the weapon side so it still reads
-  if (fs && ax.yaw < 0 && Math.abs(ax.x) < 0.8) {
-    const side = Math.abs(s.O[2]) > 2 ? Math.sign(s.O[2]) : Math.sign(s.S3(s.chains.main[0])[2]) || 1;
-    const outS = Math.sign(-ax.z * side) || 1;
-    const minX = Math.sin(Number(W.cfg.foreshorten?.back_cant ?? 45) * D2R);
-    const dx = Mu[0] / L, dy = Mu[1] / L;
-    if (dx * outS < minX) {
-      // shouldered aim: long enough to clear a broad torso (back_floor; the grips stay in reach)
-      const wb = clamp(s.pl.weld / 0.25, 0, 1);
-      const Lb = Math.max(L, lerp(L, Number(W.cfg.foreshorten?.back_floor ?? 0.55), wb));
-      Mu = [outS * minX * Lb, (Math.sign(dy) || 1) * Math.sqrt(1 - minX * minX) * Lb]; L = Lb; canted = true;
-    }
-  }
-  if (L < 0.05) { Mu = [Mu[0] / (L || 1) * 0.05, Mu[1] / (L || 1) * 0.05]; L = 0.05; }
+  const side = Math.abs(s.O[2]) > 2 ? Math.sign(s.O[2]) : Math.sign(s.S3(s.chains.main[0])[2]) || 1;
+  let { Mu, L, canted } = projectWeapon(W, s.f.u, src, { aimF: tune?.cant !== undefined ? 0 : s.pl.aimF ?? 0, weld: s.pl.weld, out: Math.sign(s.S3(s.chains.main[0])[2]) || 1, side, tune });
   const viewCell = W.cells === 'view' && src !== W.base;
   const flipW = !viewCell && Mu[0] < 0;
   const phi = flipW ? Math.atan2(-Mu[1], -Mu[0]) * R2D : Math.atan2(Mu[1], Mu[0]) * R2D;
@@ -851,6 +790,50 @@ export function solveHeld(rig, P, src) {
   delete out.ik;
   if (Object.keys(ik).length) out.ik = ik;
   return { VP: out, report: { s, view: src, grips, hands: handOut, canted, L, weld, phi, flip: flipW, scr, layer } };
+}
+
+/**
+ * Screen direction of the weapon axis u (3D proxy, x forward, y down, z near side) in a drawn view,
+ * with the readability rules: barrel toward the camera -> outward cant + length floor when carried,
+ * inward cant + short floor when aimed (aimF), back-facing views -> muzzle angled out past the
+ * silhouette (longer when shouldered, weld). Shared by the solver and the weapon world sheets so a
+ * sheet cell and a frame agree. -> {Mu:[dx, dy] (length = foreshortening), L, canted}
+ */
+export function projectWeapon(W, u, view, { aimF = 0, weld = 0, out = 1, side = 1, tune = null } = {}) {
+  const ax = viewAxes(W, view);
+  const proj = (d) => [ax.x * d[0] - ax.z * d[2], d[1]];
+  let Mu = proj(u);
+  let L = Math.hypot(Mu[0], Mu[1]);
+  const fs = W.foreshorten ? { floor: tune?.floor ?? W.foreshorten.floor, cant: tune?.cant ?? W.foreshorten.cant } : null;
+  let canted = false;
+  if (fs && L < fs.floor - 1e-9 && view !== W.base) {
+    // barrel toward / away from the camera: carried, yaw it outward a little and keep a readable
+    // length; aimed (firing states), keep it short and canted INWARD so the muzzle sits near the
+    // centre line and the gun reads as pointing at the viewer (blended by the firing weight)
+    const f = clamp(Number(aimF), 0, 1);
+    const cdeg = lerp(fs.cant, -W.foreshorten.aim_cant, f), floor = lerp(fs.floor, W.foreshorten.aim_floor, f), c = cdeg * D2R;
+    const uc = [u[0] * Math.cos(c), u[1], Math.hypot(u[0], u[2]) * Math.sin(c) * out];
+    Mu = proj(uc);
+    L = Math.hypot(Mu[0], Mu[1]);
+    if (L < 1e-6) { Mu = [(f >= 0.5 ? 1 : -1) * ax.z * out || 1, 0]; L = 1; }
+    if (L < floor) { Mu = [Mu[0] * floor / L, Mu[1] * floor / L]; L = floor; }
+    canted = f >= 0.5 ? 'inward' : true;
+  }
+  // back-facing views: the gun is in front of the body, away from the camera; keep the muzzle
+  // angled out past the silhouette on the weapon side so it still reads
+  if (fs && ax.yaw < 0 && Math.abs(ax.x) < 0.8) {
+    const outS = Math.sign(-ax.z * side) || 1;
+    const minX = Math.sin(Number(W.cfg.foreshorten?.back_cant ?? 45) * D2R);
+    const dx = Mu[0] / L, dy = Mu[1] / L;
+    if (dx * outS < minX) {
+      // shouldered aim: long enough to clear a broad torso (back_floor; the grips stay in reach)
+      const wb = clamp(weld / 0.25, 0, 1);
+      const Lb = Math.max(L, lerp(L, Number(W.cfg.foreshorten?.back_floor ?? 0.55), wb));
+      Mu = [outS * minX * Lb, (Math.sign(dy) || 1) * Math.sqrt(1 - minX * minX) * Lb]; L = Lb; canted = true;
+    }
+  }
+  if (L < 0.05) { Mu = [Mu[0] / (L || 1) * 0.05, Mu[1] / (L || 1) * 0.05]; L = 0.05; }
+  return { Mu, L, canted };
 }
 
 /** Depth toward the camera of a 3D proxy point in a view. */

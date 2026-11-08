@@ -36,6 +36,25 @@
 - `art_help {topic:"planets"}` and the `planets-space` skill, with three.js snippets for the atmosphere, night lights, quadtree streaming, far-planet impostors and terrain loading. Demo renders are in `docs/planets/`.
 - Existing `art_model` exports are unchanged byte for byte (tested).
 
+### Runtime weapon layers (`art_anim`)
+
+- Handling classes (pistol, smg, rifle, lmg, sniper, launcher, none) with a standard grip geometry and tolerance per class, scaled to the character frame.
+- New actions:
+  - `weapon`: a standalone gun asset (rig plus `library/weapons/<name>.json`) with its grips at the class geometry, or copied from a skin's gun.
+  - `conform`: checks the gun against its class geometry; `fix` moves the points onto it.
+  - `weapon_sheet`: a 5-view × pitch world sheet plus attachment overlays, each at most 1024 px, merged into `manifest/weapons_world.json`.
+  - `composite`: the baked frame next to the engine-identical runtime frame.
+  - `weapon_check`: hands on the grips across every gun of a class.
+- `batch {weapon: "runtime"}`: exports gun-free body and `__front` strips with per-frame sockets `{x, y, rot, pitch, order, hidden?}`. The sockets are mirrored for mirror views, and the auto `pad`, `frame` and `anchor` are kept.
+- New shared module `src/handling.js`, with no view or frame assumptions. It holds:
+  - the class table: pistol, smg, rifle, dmr, shotgun, lmg, sniper and launcher, plus knife, grenade, med, tablet, unarmed and none;
+  - grip geometry and tolerance in body units, and `scaleGeometry`;
+  - the carry positions, the default points and sockets, and the attachment types;
+  - `conform`, which works in 2D or 3D and in any units.
+
+  `dmr` and `shotgun` keep the rifle grips and map to the third-person `rifle` set. `weapon.js` now imports its carry and point data from this module.
+- Weapon projection is shared between frames and sheet cells (`projectWeapon`). Template weapon defaults are exported as `weaponDefaults`.
+
 ## 0.7.0
 
 ### Weapon handling (`art_rig`, `art_model`)

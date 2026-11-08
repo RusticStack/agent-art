@@ -3,9 +3,12 @@
 // manifest, and glTF skin export. Assets are JSON files under <home>/library/.
 import fs from 'node:fs';
 import path from 'node:path';
-import { normalizeRig, renderPose, stableRotations } from './rig.js';
+import { normalizeRig, renderPose, stableRotations, solvePose, cellOf, partIn } from './rig.js';
+import { packImages } from './sheet.js';
+import { handlingOf, DEFAULT_PITCH, SHEET_VIEWS, classGeometry, weaponAssetDef, conformAsset, renderWeaponCells, sheetImage, socketOf, compositeFrame, pitchCol, HANDLING } from './weaponassets.js';
+import { decodePNG } from './png.js';
 import { rigTemplate, mergeTemplate } from './rigtemplates.js';
-import { getRig, framePoses, feetGround } from './rigops.js';
+import { getRig, framePoses, feetGround, artComposite } from './rigops.js';
 import { applyProportions, normalizeProportions, defaultMasks, normalizeClip, evalClip, retargetClip, LIB_NAME } from './animlib.js';
 import { orderOf } from './depth.js';
 import { encodePNG } from './png.js';
@@ -288,6 +291,13 @@ export const LIB_OPS = {
         let G = auto ? [Math.ceil(W / 2), Math.ceil(H / 4), Math.ceil(W / 2), Math.ceil(H / 8)] : fixed;
         let GW, GH, rendered, ub;
         const cache = new Map(), clipPoses = new Map();
+        // weapon:"runtime": the game draws the gun from its world sheet at per-frame sockets
+        const runtime = a.weapon === 'runtime';
+        if (runtime && !rig.weapon) throw new Error(`batch weapon:"runtime": skin "${sname}" has no weapon (skeleton weapon:{class})`);
+        const RW = rig.weapon;
+        const gunParts = runtime ? [RW.part, ...Object.values(RW.attachments).map((x) => x.part), ...(RW.mag ? [RW.mag.part] : [])] : [];
+        const handling = runtime ? handlingOf(RW.class) : null;
+        const pitch = a.pitch ?? DEFAULT_PITCH;
         // auto: a frame that reaches the edge of the render margin would be cut, so render again with
         // twice the margin on that side (a death fall, a long barrel) until every frame fits
         for (let attempt = 0; ; attempt++) {
@@ -300,21 +310,30 @@ export const LIB_OPS = {
               clipPoses.set(ck, { fp, rots: a.stable === false ? null : stableRotations(rig, fp.poses, view, typeof a.stable === 'object' ? a.stable : {}) });
             }
             const { fp, rots } = clipPoses.get(ck);
-            const frames = [], fronts = [], orders = [];
+            const frames = [], fronts = [], orders = [], sockets = [];
             fp.poses.forEach((P, i) => {
               const base = { ...(lopt.variant ? { variant: lopt.variant } : {}), pad: G, ...(rots ? { rot: rots[i] } : {}) };
               const trace = {};
               const full = renderPose(rig, d, P, view, cache, { ...base, ...(lopt.hide ? { hide: lopt.hide } : {}), trace });
               orders.push(orderOf(trace));
+              const b = bboxOf(full, GW, GH);
+              if (b) ub = ub ? [Math.min(ub[0], b[0]), Math.min(ub[1], b[1]), Math.max(ub[2], b[2]), Math.max(ub[3], b[3])] : b;
+              if (runtime) {
+                // gun-free: body without the weapon, __front = what is drawn over the weapon, + the socket
+                const front = frontParts(rig, trace, 'auto');
+                frames.push(renderPose(rig, d, P, view, cache, { ...base, hide: [...(lopt.hide || []), ...gunParts, ...front] }));
+                const only = front.filter((n) => !(lopt.hide || []).includes(n));
+                fronts.push(only.length ? renderPose(rig, d, P, view, cache, { ...base, only }) : null);
+                sockets.push(socketOf(rig, solvePose(rig, P, view), trace, { pad: G, pitch, view }));
+                return;
+              }
               const front = a.front ? frontParts(rig, trace, a.front) : [];
               if (front.length) {
                 frames.push(renderPose(rig, d, P, view, cache, { ...base, hide: [...(lopt.hide || []), ...front] }));
                 fronts.push(renderPose(rig, d, P, view, cache, { ...base, only: front.filter((n) => !(lopt.hide || []).includes(n)) }));
               } else { frames.push(full); fronts.push(null); }
-              const b = bboxOf(full, GW, GH);
-              if (b) ub = ub ? [Math.min(ub[0], b[0]), Math.min(ub[1], b[1]), Math.max(ub[2], b[2]), Math.max(ub[3], b[3])] : b;
             });
-            rendered.push({ clip, view, frames, fronts, orders, fp });
+            rendered.push({ clip, view, frames, fronts, orders, fp, sockets });
           }
           if (!auto || !ub || attempt >= 4) break;
           const edge = [ub[0] <= 0, ub[1] <= 0, ub[2] >= GW - 1, ub[3] >= GH - 1];
@@ -336,7 +355,7 @@ export const LIB_OPS = {
         const dir = path.join(out, 'characters', set);
         fs.mkdirSync(dir, { recursive: true });
         const ground = feetGround(rig, rig.views[0]) ?? rig.root[1];
-        const entry = { frame: [FW, FH], anchor: [rig.root[0] + pad[0], ground + pad[1]], pad, skeleton: sk.name, skin: sname, ...(lo ? { loadout: lo } : {}), class: sk.class, anims: {} };
+        const entry = { frame: [FW, FH], anchor: [rig.root[0] + pad[0], ground + pad[1]], pad, skeleton: sk.name, skin: sname, ...(lo ? { loadout: lo } : {}), class: runtime ? handling : sk.class, ...(runtime ? { weapon: 'runtime', weapon_pitch: pitch } : {}), anims: {} };
         for (const r of rendered) {
           const key = `${r.clip}_${r.view}`;
           const cropF = (f) => crop(f, GW, GH, cx, cy, FW, FH);
@@ -351,6 +370,11 @@ export const LIB_OPS = {
             anim.front = `characters/${set}/${key}__front.png`;
             fs.writeFileSync(path.join(out, anim.front), encodePNG(fs2.W, fs2.H, fs2.data));
             report.files++;
+          }
+          if (runtime) {
+            anim.class = handling;
+            // sockets were computed in the generous frame: move them into the set's frame
+            anim.weapon = r.sockets.map((s) => ({ ...s, x: Math.round((s.x - cx) * 10) / 10, y: Math.round((s.y - cy) * 10) / 10 }));
           }
           if (r.fp.events.length) anim.events = r.fp.events;
           if (a.order !== false) anim.order = orderRuns(r.orders);
@@ -396,6 +420,245 @@ export const LIB_OPS = {
     return { file, bytes: r.glb.length, joints: r.joints, animations: clips.map((c) => c.name), ...this.pathNote(a.path, file) };
   },
 };
+
+// ---------- runtime weapon layers: weapon assets, world sheets, composite, class check ----------
+function loadWeapon(e, name) {
+  const f = libDir(e, 'weapons', `${checkName(name, 'weapon')}.json`);
+  if (!fs.existsSync(f)) throw new Error(`no weapon asset "${name}" (art_anim weapon {name, class} first; list: ${listNames(e, 'weapons').join(', ') || 'none'})`);
+  return readJSON(f);
+}
+const saveWeapon = (e, w) => writeJSON(libDir(e, 'weapons', `${w.name}.json`), w);
+
+/** A weapon asset built from a character rig's weapon (cells, points, attachments copied). */
+function weaponFromRig(rig, d, name) {
+  const W = rig.weapon;
+  const P = rig.parts[W.part], pv = partIn(rig, W.part, W.base).pivot;
+  const g = [Math.round(W.points.grip_main.x), Math.round(W.points.grip_main.y)];
+  const parts = { weapon: { w: P.w, h: P.h, pivot: g } };
+  const atts = {};
+  for (const [n, a] of Object.entries(W.attachments)) {
+    const c = rig.parts[a.part];
+    parts[a.part] = { w: c.w, h: c.h, pivot: a.pivot, parent: 'weapon', at: [a.mount[0] + pv[0] - g[0], a.mount[1] + pv[1] - g[1]], z: 0.1 };
+    atts[n] = { type: a.type, part: a.part, socket: a.socket };
+  }
+  if (W.mag) { const c = rig.parts[W.mag.part]; parts.mag = { w: c.w, h: c.h, pivot: partIn(rig, W.mag.part, W.base).pivot, parent: 'weapon', at: [W.mag.mount[0] + pv[0] - g[0], W.mag.mount[1] + pv[1] - g[1]], z: -0.1 }; }
+  const S = 2 * Math.ceil(Math.hypot(P.w, P.h)) + 8;
+  const asset = {
+    name, class: W.class, handling: handlingOf(W.class), kind: W.kind, frame: rig.frame, cell: [P.w, P.h],
+    points: Object.fromEntries(Object.entries(W.points).map(([k, p]) => [k, { at: [Math.round(p.x * 10) / 10, Math.round(p.y * 10) / 10], angle: p.angle }])),
+    sockets: W.sockets, attachments: atts,
+  };
+  const copy = [['weapon', W.part], ...Object.values(W.attachments).map((a) => [a.part, a.part]), ...(W.mag ? [['mag', W.mag.part]] : [])];
+  return { rig: { frame: [S, S], views: ['side'], root: [S / 2, S / 2], parts, sampling: 'rotsprite' }, asset, copy };
+}
+
+/** Engine-shaped frames of a clip on a skin: body (gun-free), __front, socket per frame (rig frame, no padding). */
+function runtimeFrames(e, skin, clip, view, lopt = {}) {
+  const { d, rig } = getRig(e, skin.rig);
+  if (!rig.weapon) throw new Error(`skin "${skin.name}" has no weapon (skeleton weapon:{class})`);
+  const { fp } = skinClip(e, skin, clip, view);
+  const W = rig.weapon, cache = new Map();
+  const gunParts = [W.part, ...Object.values(W.attachments).map((x) => x.part), ...(W.mag ? [W.mag.part] : [])];
+  const v = lopt.variant ? { variant: lopt.variant } : {};
+  return {
+    rig, d, fp, frames: fp.poses.map((P) => {
+      const trace = {};
+      const full = renderPose(rig, d, P, view, cache, { ...v, ...(lopt.hide ? { hide: lopt.hide } : {}), trace });
+      const front = frontParts(rig, trace, 'auto');
+      const body = renderPose(rig, d, P, view, cache, { ...v, hide: [...(lopt.hide || []), ...gunParts, ...front] });
+      const only = front.filter((n) => !(lopt.hide || []).includes(n));
+      const fr = only.length ? renderPose(rig, d, P, view, cache, { ...v, only }) : null;
+      const solved = solvePose(rig, P, view);
+      return { full, body, front: fr, solved, sock: socketOf(rig, solved, trace, { view }) };
+    }),
+  };
+}
+
+/** Where a gun's support grip lands in a frame (cell grip on the socket, rotated) vs the baked support hand. */
+function supportError(f, cells, vi, pitch) {
+  const R = f.solved.weapon, h = R.hands?.support;
+  if (!h || h.weight < 0.999 || R.s.pl.cup || f.sock.hidden) return null;
+  const c = cells.pts[vi][pitchCol(pitch, f.sock.pitch)];
+  if (!c.support) return null;
+  const [dx, dy] = rotDeg(f.sock.rot, c.support[0] - cells.grip[0], c.support[1] - cells.grip[1]);
+  return Math.hypot(f.sock.x + dx - h.grip[0], f.sock.y + dy - h.grip[1]);
+}
+const rotDeg = (deg, x, y) => { const r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r); return [x * c - y * s, x * s + y * c]; };
+
+Object.assign(LIB_OPS, {
+  /** A standalone weapon asset (one side cell + attachments + magazine) of a handling class; from_skin copies a character's gun. */
+  anim_weapon(a, source) {
+    const name = checkName(a.name, 'weapon');
+    const f = libDir(this, 'weapons', `${name}.json`);
+    if (fs.existsSync(f) && !a.overwrite && !a.points) throw new Error(`weapon "${name}" exists (overwrite:true replaces it; points:{...} updates its points)`);
+    if (fs.existsSync(f) && a.points && !a.overwrite) {
+      const w = loadWeapon(this, name);
+      for (const [k, p] of Object.entries(a.points)) { if (!w.points[k] && !['grip_support', 'stock', 'muzzle', 'optic', 'mag', 'charge'].includes(k)) throw new Error(`points.${k}: unknown point`); w.points[k] = { ...(w.points[k] || {}), at: (Array.isArray(p) ? p : p.at).map(Number), ...(p.angle !== undefined ? { angle: Number(p.angle) } : {}) }; }
+      saveWeapon(this, w);
+      const { def } = getRig(this, w.rig);
+      return { weapon: name, points: w.points, conform: conformAsset(w, normalizeRig(def)) };
+    }
+    let built, copy = null, srcRig = null;
+    if (a.from_skin || a.from_rig) {
+      const rn = a.from_rig ?? loadSkin(this, a.from_skin).rig;
+      srcRig = getRig(this, rn);
+      if (!srcRig.rig.weapon) throw new Error(`rig "${rn}" has no weapon`);
+      const r = weaponFromRig(srcRig.rig, srcRig.d, name);
+      built = { rig: r.rig, asset: r.asset }; copy = r.copy;
+    } else {
+      if (!a.class) throw new Error('weapon needs class (a handling class or member: rifle, carbine, dmr, shotgun, smg, lmg, sniper, pistol, launcher) or from_skin');
+      // sized for a character frame: frame:[w, h], or the frame of skin:"<name>"
+      const frame = a.frame ?? (a.skin ? getRig(this, loadSkin(this, a.skin).rig).rig.frame : null);
+      if (!frame) throw new Error('weapon needs frame:[w, h] (the character frame it is drawn for) or skin:"<name>"');
+      built = weaponAssetDef(name, a.class, frame, a.attachments || {});
+    }
+    const rigName = a.rig ?? `weapon_${name}`;
+    this.run('rig_create', { name: rigName, ...built.rig, overwrite: !!a.overwrite }, source);
+    if (copy) {
+      // copy the character's side cells into the asset (all layers of the parts canvas)
+      const { rig: dst, d: dd } = getRig(this, rigName), { rig: sr, d: sd } = srcRig;
+      const L = dd.layers.find((l) => l.name === 'parts') || dd.layers[0];
+      const comp = artComposite(sd);
+      for (const [to, from] of copy) {
+        const A = cellOf(sr, from, sr.weapon.base), B = cellOf(dst, to, 'side');
+        for (let y = 0; y < Math.min(A.h, B.h); y++) for (let x = 0; x < Math.min(A.w, B.w); x++) L.data.set(comp.subarray(((A.y + y) * sd.width + A.x + x) * 4, ((A.y + y) * sd.width + A.x + x) * 4 + 4), ((B.y + y) * dd.width + B.x + x) * 4);
+      }
+      dd.touch?.();
+      this.changed(dd, { op: 'rig', source, label: `weapon ${name}: cells copied from the character rig`, structural: true });
+    }
+    const w = { ...built.asset, rig: rigName };
+    if (a.points) for (const [k, p] of Object.entries(a.points)) w.points[k] = { ...(w.points[k] || {}), at: (Array.isArray(p) ? p : p.at).map(Number) };
+    saveWeapon(this, w);
+    const { rig } = getRig(this, rigName);
+    const cells = Object.fromEntries(rig.order.map((n) => { const c = cellOf(rig, n, 'side'); return [n, [c.x, c.y, c.w, c.h]]; }));
+    return { weapon: name, rig: rigName, class: w.class, handling: w.handling, cell: w.cell, cells, points: Object.fromEntries(Object.entries(w.points).map(([k, p]) => [k, p.at])), geometry: classGeometry(w.handling, w.frame), conform: conformAsset(w, rig), next: copy ? `art_anim weapon_sheet {weapon:"${name}", out}` : `draw the gun in "${rigName}_parts" pointing RIGHT (grip_main on the red pivot), attachments and magazine in their cells; then art_anim conform / weapon_sheet` };
+  },
+
+  /** conform: a weapon asset's grips against its handling class geometry (fix:true moves the points to it). */
+  anim_conform(a) {
+    const w = loadWeapon(this, a.weapon);
+    const { def } = getRig(this, w.rig);
+    const r = conformAsset(w, normalizeRig(def), { fix: !!a.fix });
+    if (r.fixed) { w.points = r.fixed.points; saveWeapon(this, w); }
+    return { weapon: w.name, ...r, summary: r.pass ? `${w.name} conforms to the ${w.handling} class geometry` : `${w.name} is off the ${w.handling} class geometry: ${r.checks.filter((c) => !c.ok).map((c) => c.issue || `${c.point} ${c.along} along / ${c.across} across (tolerance ${c.tolerance.join('/')})`).join('; ')}` };
+  },
+
+  /**
+   * Weapon world sheet (contract weapons_world): rows = views, columns = pitch, grip / muzzle per
+   * cell, one overlay sheet per attachment (same grid), every sheet <= 1024 px; merged into
+   * manifest/weapons_world.json.
+   */
+  anim_weapon_sheet(a) {
+    const w = loadWeapon(this, a.weapon);
+    const { d, def } = getRig(this, w.rig);
+    const views = a.views ? [].concat(a.views) : SHEET_VIEWS;
+    const proj = a.skin ? getRig(this, loadSkin(this, a.skin).rig).rig.weapon : null;
+    const atts = a.attach !== undefined ? [].concat(a.attach) : Object.keys(w.attachments);
+    for (const n of atts) if (!w.attachments[n]) throw new Error(`attach: weapon "${w.name}" has no attachment "${n}"`);
+    const max = Number(a.max_size ?? 1024);
+    // pitch steps: given, or the default 15 deg steps, fewer when a long gun would pass max_size
+    const tries = a.pitch ? [a.pitch] : [DEFAULT_PITCH, [-40, -20, 0, 20, 40], [-30, 0, 30]];
+    let C, base, pitch;
+    for (const p of tries) {
+      pitch = p;
+      C = renderWeaponCells(w, def, d, { views, pitch, W: proj, layers: atts });
+      base = sheetImage(C.cells.base, C.frame);
+      if (base.W <= max && base.H <= max) break;
+    }
+    if (base.W > max || base.H > max) throw new Error(`weapon sheet ${base.W}x${base.H} is over ${max} px (frame ${C.frame.join('x')}, ${views.length} views x ${pitch.length} pitch): use fewer pitch steps or views`);
+    const out = this.resolvePath(a.out ?? 'assets', this.exportDir);
+    fs.mkdirSync(path.join(out, 'weapons_world'), { recursive: true });
+    const file = `weapons_world/${w.name}.png`;
+    fs.writeFileSync(path.join(out, file), encodePNG(base.W, base.H, base.data));
+    const attach = {};
+    for (const n of atts) { const s = sheetImage(C.cells[n], C.frame); attach[n] = `weapons_world/${w.name}_att_${n}.png`; fs.writeFileSync(path.join(out, attach[n]), encodePNG(s.W, s.H, s.data)); }
+    const entry = { class: w.handling, views, pitch, file, frame: C.frame, grip: C.pts.flat().map(() => C.grip), muzzle: C.pts.flat().map((c) => c.muzzle), ...(atts.length ? { attach } : {}) };
+    const mf = path.isAbsolute(a.manifest ?? '') ? a.manifest : path.join(out, a.manifest ?? 'manifest/weapons_world.json');
+    const man = fs.existsSync(mf) ? readJSON(mf) : {};
+    man.weapons_world = { ...(man.weapons_world || {}), [w.name]: entry };
+    writeJSON(mf, man);
+    const note = pitch !== DEFAULT_PITCH && !a.pitch ? `the default pitch steps would pass ${max} px: this sheet uses pitch ${JSON.stringify(pitch)}; export the characters with the same anim_batch pitch so socket rot matches the cells` : undefined;
+    return { weapon: w.name, file: path.join(out, file), size: [base.W, base.H], frame: C.frame, pitch, ...(note ? { note } : {}), cells: views.length * pitch.length, attach: Object.keys(attach), manifest: mf, ...this.pathNote(a.out, out) };
+  },
+
+  /**
+   * Composite preview, engine-identical: per frame the gun-free body strip, the gun cell (view,
+   * nearest pitch) rotated about its grip onto the socket, the __front strip; next to the baked
+   * frame. -> image + support-grip error per frame.
+   */
+  anim_composite(a) {
+    const skin = loadSkin(this, a.skin), w = loadWeapon(this, a.weapon);
+    const view = a.view || 'side';
+    const R = runtimeFrames(this, skin, a.clip, view, loadoutOpts(skin, a.loadout));
+    const { d: wd, def: wdef } = getRig(this, w.rig);
+    const src = R.rig.mirror[view] || view, pitch = a.pitch ?? DEFAULT_PITCH;
+    const C = renderWeaponCells(w, wdef, wd, { views: [src], pitch, W: R.rig.weapon, attach: a.attach !== undefined ? [].concat(a.attach) : Object.keys(w.attachments) });
+    const [FW, FH] = R.rig.frame;
+    const pick = a.select ? [].concat(a.select) : [...Array(R.frames.length).keys()];
+    const items = [], errors = [];
+    for (const i of pick) {
+      const f = R.frames[i];
+      if (!f) continue;
+      const col = pitchCol(pitch, f.sock.pitch);
+      const comp = compositeFrame(f.body, f.front, C.cells.base[0][col], C.frame, C.grip, f.sock, [FW, FH]);
+      const err = supportError(f, C, 0, pitch);
+      errors.push(err === null ? null : Math.round(err * 10) / 10);
+      items.push({ img: { width: FW, height: FH, data: f.full }, label: `baked ${i}` }, { img: { width: FW, height: FH, data: comp }, label: `runtime ${i}${err !== null ? ` ${err.toFixed(1)}px` : ''}` });
+    }
+    const sheet = packImages(items, { columns: Math.min(8, items.length), labels: true });
+    const worst = Math.max(0, ...errors.filter((x) => x !== null));
+    return { skin: a.skin, weapon: w.name, clip: a.clip, view, frames: pick.length, sockets: pick.map((i) => R.frames[i]?.sock), support_error: errors, worst_support_error: worst, image: encodePNG(sheet.width, sheet.height, sheet.data) };
+  },
+
+  /**
+   * Hands on the grips of every gun of a class: each weapon asset conforms to the class geometry and,
+   * drawn at the skin's sockets, puts its support grip under the baked support hand in every frame.
+   */
+  anim_weapon_check(a) {
+    const skin = loadSkin(this, a.skin);
+    const { rig } = getRig(this, skin.rig);
+    if (!rig.weapon) throw new Error(`skin "${skin.name}" has no weapon`);
+    const handling = a.class ? handlingOf(a.class) : handlingOf(rig.weapon.class);
+    const names = a.weapons ? [].concat(a.weapons) : listNames(this, 'weapons').filter((n) => loadWeapon(this, n).handling === handling);
+    if (!names.length) throw new Error(`no weapon assets of class ${handling} (art_anim weapon {name, class:"${handling}"})`);
+    const sk = loadSkeleton(this, skin.skeleton);
+    const clips = a.clips ? [].concat(a.clips) : listNames(this, 'clips', sk.name).filter((c) => !/death|throw/.test(c));
+    const views = a.views ? [].concat(a.views) : rig.views;
+    const pitch = a.pitch ?? DEFAULT_PITCH;
+    const G = classGeometry(handling, rig.frame);
+    const tol = (G?.tolerance.support[0] ?? 2) + 1.5;
+    const runs = [];
+    for (const c of clips) for (const v of views) runs.push({ key: `${c}_${v}`, view: v, R: runtimeFrames(this, skin, c, v, loadoutOpts(skin, a.loadout)) });
+    const report = {};
+    let pass = true;
+    for (const n of names) {
+      const w = loadWeapon(this, n);
+      const { d: wd, def: wdef } = getRig(this, w.rig);
+      const conform = conformAsset(w, normalizeRig(wdef));
+      if (Math.abs(w.frame[0] - rig.frame[0]) > 1 || Math.abs(w.frame[1] - rig.frame[1]) > 1) {
+        conform.pass = false;
+        conform.checks.push({ point: 'frame', ok: false, issue: `drawn for a ${w.frame.join('x')} character, the skin is ${rig.frame.join('x')} (art_anim weapon {skin} sizes it)` });
+      }
+      const C = renderWeaponCells(w, wdef, wd, { views, pitch, W: rig.weapon, attach: Object.keys(w.attachments) });
+      let worst = 0, checked = 0;
+      const bad = [];
+      for (const { key, view, R } of runs) {
+        const vi = C.views.indexOf(R.rig.mirror[view] || view);
+        R.frames.forEach((f, i) => {
+          const e = supportError(f, C, vi, pitch);
+          if (e === null) return;
+          checked++;
+          worst = Math.max(worst, e);
+          if (e > tol && bad.length < 6) bad.push(`${key}[${i}] ${e.toFixed(1)}px`);
+        });
+      }
+      const ok = conform.pass && worst <= tol;
+      pass &&= ok;
+      report[n] = { pass: ok, conform: conform.pass ? 'ok' : conform.checks.filter((c) => !c.ok).map((c) => c.issue || `${c.point} ${c.along}/${c.across}`), frames_checked: checked, worst_support_error: Math.round(worst * 10) / 10, ...(bad.length ? { off: bad } : {}) };
+    }
+    return { skin: a.skin, handling, tolerance_px: tol, pass, weapons: report, summary: pass ? `PASS: ${names.length} ${handling} weapons keep the baked hands on their grips (${clips.length} clips x ${views.length} views)` : `FAIL: ${Object.entries(report).filter(([, r]) => !r.pass).map(([k]) => k).join(', ')} off the ${handling} grips` };
+  },
+});
 
 /** Parts of the __front strip: a list, or "auto" = everything drawn over the weapon (else the near arm). */
 function frontParts(rig, trace, spec) {

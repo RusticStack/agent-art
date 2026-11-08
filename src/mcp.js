@@ -268,12 +268,14 @@ export const TOOLS = [
   },
   {
     name: 'art_anim',
-    description: 'Animation library: author motion once per skeleton, render many skins. skeleton {name, template:"humanoid_hd", frame, weapon?, proportions?} (+ standard clips); clip {skeleton, name, keys?|layers?:[{clip, mask?, weight?, additive?}], frames, fps, events?}; skin {name, skeleton, proportions?, equipment?, loadouts?} (creates the rig to draw); retarget {clip, from, to}; render {skin, clip, view}; batch {skins, clips?, views?, out, pad?:"auto", front?:"auto"} = game strips + manifest; gltf {skin}; list; info. art_help {topic:"library"}.',
+    description: 'Animation library: author motion once per skeleton, render many skins. skeleton {name, template:"humanoid_hd", frame, weapon?, proportions?} (+ standard clips); clip {skeleton, name, keys?|layers?:[{clip, mask?, weight?, additive?}], frames, fps, events?}; skin {name, skeleton, proportions?, equipment?, loadouts?} (creates the rig to draw); retarget {clip, from, to}; render {skin, clip, view}; batch {skins, clips?, views?, out, pad?:"auto", front?:"auto", weapon?:"runtime"} = game strips + manifest (runtime: gun-free + sockets); gltf {skin}; list; info. Guns: weapon {name, class, skin}, conform, weapon_sheet {weapon, out}, composite {skin, weapon, clip, view}, weapon_check {skin}. art_help {topic:"library"}.',
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['skeleton', 'clip', 'skin', 'retarget', 'render', 'batch', 'gltf', 'list', 'info'] }, name: { type: 'string' },
-        skeleton: { type: 'string' }, template: { type: 'string' }, frame: { type: 'array', items: { type: 'integer' } }, weapon: { type: ['object', 'boolean'] }, from_rig: { type: 'string' }, preset: { type: 'string' },
+        action: { type: 'string', enum: ['skeleton', 'clip', 'skin', 'retarget', 'render', 'batch', 'gltf', 'list', 'info', 'weapon', 'conform', 'weapon_sheet', 'composite', 'weapon_check'] }, name: { type: 'string' },
+        skeleton: { type: 'string' }, template: { type: 'string' }, frame: { type: 'array', items: { type: 'integer' } }, weapon: { type: ['object', 'boolean', 'string'] },
+        class: { type: 'string' }, weapons: { type: 'array', items: { type: 'string' } }, from_skin: { type: 'string' }, attachments: { type: 'object' }, points: { type: 'object' }, fix: { type: 'boolean' },
+        pitch: { type: 'array', items: { type: 'number' } }, attach: { type: ['array', 'string'] }, select: { type: 'array', items: { type: 'integer' } }, max_size: { type: 'integer' }, from_rig: { type: 'string' }, preset: { type: 'string' },
         proportions: { type: ['object', 'string'] }, masks: { type: 'object' }, depth: { type: ['boolean', 'object'] }, clips: { type: ['array', 'string', 'boolean'] },
         keys: { type: 'array', items: { type: 'object' } }, frames: { type: 'integer' }, fps: { type: 'number' }, loop: { type: 'boolean' }, events: { type: 'array', items: { type: 'object' } },
         layers: { type: 'array', items: { type: 'object' } }, mask: { type: ['string', 'array', 'object'] }, additive: { type: 'boolean' }, ref: { type: 'object' }, plant: { type: ['boolean', 'array'] }, secondary: { type: ['boolean', 'object'] }, carry: { type: ['string', 'object'] }, delete: { type: 'boolean' },

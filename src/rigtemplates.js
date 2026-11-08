@@ -131,8 +131,8 @@ export function projectPose(parts, pose, view) {
 }
 
 // weapon cell sizes per class (body units at the 98-unit figure height) and attachment cells
-const WEAPON_CELL = { pistol: [14, 9], revolver: [15, 9], handgun: [14, 9], smg: [26, 10], dmr: [42, 11], sniper: [46, 11], lmg: [42, 13] };
-const ATT_CELL = { vertical_grip: [5, 8, 'top'], angled_grip: [8, 6, 'top'], bipod: [5, 10, 'top'], suppressor: [11, 4, 'left'], optic: [10, 5, 'bottom'], light: [7, 4, 'top'] };
+export const WEAPON_CELL = { pistol: [14, 9], revolver: [15, 9], handgun: [14, 9], smg: [26, 10], dmr: [42, 11], sniper: [46, 11], lmg: [42, 13] };
+export const ATT_CELL = { vertical_grip: [5, 8, 'top'], angled_grip: [8, 6, 'top'], bipod: [5, 10, 'top'], suppressor: [11, 4, 'left'], optic: [10, 5, 'bottom'], light: [7, 4, 'top'] };
 const LONG_MAP = {
   run_contact: 'sprint', run_down: 'sprint', run_pass: 'sprint', aim: 'aim', recoil: 'aim', reload_low: 'reload', reload_hip: 'reload', reload_insert: 'reload', reload_slap: 'reload',
   reload_grab: 'reload', reload_strip: 'reload', reload_pouch: 'reload', reload_seat: 'reload', reload_in: 'reload', reload_charge: 'reload_charge', reload_pull: 'reload_charge',
