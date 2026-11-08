@@ -66,6 +66,7 @@ test('fp: animate {hold} bakes an arms clip that holds the gun through its reloa
   // the baked clips, played back without the solver, keep the hands on the grips (contact within 0.5 px)
   const c = e.run('model_check', { name: 'arms', hold: { weapon: 'gun', carry: 'reload', clip: 'reload_empty' }, frames: 6 });
   assert.equal(c.pass, true, c.summary);
+  assert.equal(e.run('model_render', { name: 'arms', canvas: 'held_reload', size: [32, 24], camera: 'fp', frames: 3, hold: { weapon: 'gun', carry: 'reload', clip: 'reload_empty' } }).animation, 'reload_empty', 'hold.clip names the tag');
   const dir = tmp();
   const x = e.run('model_export', { name: 'arms', path: path.join(dir, 'arms.glb') });
   assert.ok(x.animations.includes('reload_empty'));

@@ -587,7 +587,8 @@ export const MODEL_OPS = {
       }
       return out;
     });
-    const tag = a.animation ?? (a.clip !== undefined ? a.clip : a.sweep || a.angles ? 'angles' : a.pose ?? 'rest');
+    const clipName = a.clip ?? (hold ? hold.clip ?? undefined : undefined); // hold:{clip} renders that gun clip
+    const tag = a.animation ?? (clipName !== undefined ? clipName : a.sweep || a.angles ? 'angles' : a.pose ?? 'rest');
     if (!/^[\w.-]{1,64}$/.test(tag)) throw new Error('animation (tag) must be 1-64 chars of letters, digits, _ - .');
     const outName = a.canvas || `${def.name}_${tag}`;
     if (!NAME_RE.test(outName)) throw new Error('canvas name must be 1-64 chars of letters, digits, _ - .');
