@@ -461,7 +461,7 @@ export const MODEL_OPS = {
     else {
       if (!a.parts || typeof a.parts !== 'object') throw new Error('pose needs parts: {<part name>: {rot?:[x,y,z] deg, at?:[dx,dy,dz] px, scale?}} (offsets from the rest pose; base?:<pose> starts from another pose)');
       let parts = a.parts;
-      if (a.base !== undefined) { const b = poses[a.base]; if (!b) throw new Error(`base: unknown pose "${a.base}"`); parts = { ...b.parts, ...a.parts }; }
+      if (a.base !== undefined) { const b = a.base === 'rest' && !poses.rest ? { parts: {} } : poses[a.base]; if (!b) throw new Error(`base: unknown pose "${a.base}"`); parts = { ...b.parts, ...a.parts }; }
       resolveOffsets(def, info, { parts });
       poses[a.pose] = { parts };
     }
