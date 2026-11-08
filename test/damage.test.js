@@ -380,3 +380,13 @@ test('fracture: total work budget with a clear error; unchanged groups come from
   assert.equal(a3.groups[0].chunks, 7, 'changed options re-run');
 });
 
+test('damage / fracture reject skinned models', () => {
+  const e = new Engine({ home: tmp() });
+  e.run('model_create', { name: 'snake', parts: [{ type: 'tube', path: [[0, 32, 0], [0, 20, 0], [0, 8, 0], [0, 2, 0]], r: 2, sides: 6, texture: '#c84', segments: 3 }] });
+  e.run('model_skeleton', { name: 'snake', skeleton: { template: 'chain', count: 3, from: [0, 32, 0], to: [0, 2, 0] } });
+  e.run('model_skin', { name: 'snake', skin: { method: 'heat' } });
+  assert.throws(() => e.run('model_damage', { name: 'snake', states: ['scuffed'] }), /skinned/);
+  assert.throws(() => e.run('model_fracture', { name: 'snake', groups: [{ part: 0 }] }), /skinned/);
+  assert.throws(() => e.run('model_export', { name: 'snake', path: path.join(tmp(), 'snake.glb'), damage: true }), /skinned/);
+  assert.ok(e.run('model_export', { name: 'snake', path: path.join(tmp(), 'snake.glb') }).file, 'plain skinned export still works');
+});

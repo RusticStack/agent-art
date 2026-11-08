@@ -17,6 +17,7 @@ import { exportV2, finishV2 } from './matops.js';
 import { ROBUST_THRESHOLD } from './csg.js';
 import { simplifyMesh, switchDistance } from './lod.js';
 import { normLods, normLodScreen } from './modelexport.js';
+import { isSkinned } from './skinops.js';
 
 const f6 = (v) => +(+v).toFixed(6);
 const groupsOf = (mesh) => [...mesh.groups.values()].filter((g) => g.idx.length);
@@ -24,6 +25,9 @@ const DAMAGE_KEYS = ['states', 'kind', 'seed', 'rigid', 'roles', 'inner', 'frame
 const ROBLOX_TRIS = 20000;
 /** Fracture work budget: sum over groups of (pieces + 3 x debris) booleans x part input triangles (~30 us each). */
 export const FRACTURE_BUDGET = 250000;
+const noSkin = (def, what) => {
+  if (isSkinned(def)) throw new Error(`${what}: model "${def.name}" is skinned (skeleton + skin); damage states and fracture are static rigid meshes and would drop the skin: use them on a rigid copy of the model (export damage:false skips them here)`);
+};
 
 /** Shared camera over several meshes -> labelled contact sheet PNG. */
 function sheet(items, view = 'game', size = 192, columns) {
@@ -163,6 +167,7 @@ export function damageOps({ getModel, build, saveModel }) {
         saveModel(this, next, source, 'damage removed');
         return { model: def.name, damage: null };
       }
+      noSkin(def, 'damage');
       const input = { ...(def.damage || {}) };
       for (const k of DAMAGE_KEYS) if (a[k] !== undefined) { if (a[k] === null) delete input[k]; else input[k] = a[k]; }
       const spec = normDamage(input);
@@ -188,6 +193,7 @@ export function damageOps({ getModel, build, saveModel }) {
         saveModel(this, next, source, 'fracture removed');
         return { model: def.name, fracture: null };
       }
+      noSkin(def, 'fracture');
       const input = a.groups ?? (a.parts !== undefined ? a.parts : def.fracture?.groups);
       if (!input) throw new Error('fracture needs parts:[{part:<name|index>, pieces?:8, method?:"voronoi"|"slice", seed?, inside?, debris?, density?, group?, parent?}]');
       const xdef = expandDef(def);
@@ -235,6 +241,7 @@ export function wantsDamage(def, a) {
  * -> {files, result, manifest}
  */
 export function damageExport(engine, def, built, a, { file, scale }) {
+  noSkin(def, 'damage export');
   const o = a.damage && typeof a.damage === 'object' ? a.damage : {};
   const texel = o.texel === undefined ? undefined : Number(o.texel);
   if (texel !== undefined && !(Number.isFinite(texel) && texel >= 0.05 && texel <= 64)) throw new Error('damage.texel must be a number 0.05..64 (model px per mask texel, default 1)');
