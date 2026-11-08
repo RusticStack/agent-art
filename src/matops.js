@@ -34,7 +34,7 @@ function strippedTex(t, profile, cache) {
  * The v2 export stage (assembleGLB): mutates the scene's groups as the options ask, returns the
  * writer hooks. -> null (0.7 export) | {meshes, v2, meta, result, side: [[file, Buffer]], validate}
  */
-export function exportV2(def, built, args, { meshes, nodes, ext, scale, file, info }) {
+export function exportV2(def, built, args, { meshes, nodes, ext, scale, file, info, skinned = false }) {
   const groups = groupsOfMeshes(meshes.map((m) => ({ groups: [...m.groups] })));
   if (!wantsV2(args, groups)) return null;
   const prof = normProfile(args);
@@ -71,6 +71,8 @@ export function exportV2(def, built, args, { meshes, nodes, ext, scale, file, in
     meshes = meshes.map((m) => {
       const tris = m.groups.reduce((s, g) => s + g.idx.length / 3, 0);
       if (tris < ROBLOX_TRIS) { meshParts.push({ mesh: m.name, triangles: tris }); return m; }
+      // skinned: simplifying would drop the joints / weights; the skin report warns about the limit instead
+      if (skinned) { meshParts.push({ mesh: m.name, triangles: tris }); drop(`triangles over ${ROBLOX_TRIS} in skinned mesh ${m.name}`, 'kept (a skinned mesh is not simplified): lower the source detail or decimate before skinning'); return m; }
       const mm = new Mesh();
       for (const g of m.groups) mm.groups.set(g.overlay ? `ov:${g.tex.key}` : g.tex.key, g);
       const r = simplifyMesh(mm, { ratio: (ROBLOX_TRIS - 500) / tris, level: 1 });

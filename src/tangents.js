@@ -102,6 +102,8 @@ export function computeTangents(prim, extra = {}) {
   for (const [k, size] of Object.entries(extra)) if (prim[k]) out[k] = dup(prim[k], size);
   if (prim.vattr) out.vattr = Object.fromEntries(Object.entries(prim.vattr).map(([k, a]) => [k, { size: a.size, data: dup(a.data, a.size) }]));
   if (prim.morphs) out.morphs = prim.morphs.map((m) => ({ name: m.name, pos: dup(m.pos, 3), nrm: dup(m.nrm, 3) }));
+  // skinned vertices: JOINTS_0 / WEIGHTS_0 must stay as long as POSITION (4 per vertex)
+  if (prim.skin) out.skin = { j: dup(prim.skin.j, 4), w: dup(prim.skin.w, 4) };
   return { tangent, prim: out, split };
 }
 

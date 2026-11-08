@@ -519,3 +519,45 @@ test('skin smooth / paint iterations are bounded; chain template count / height 
   for (const bad of [-1, 'lots', Infinity, true]) assert.throws(() => e.run('model_skin', { name: 'c', skin: { method: 'distance', smooth: bad } }), /skin\.smooth must be a number of smoothing passes 0\.\.32/, String(bad));
   assert.throws(() => e.run('model_skin', { name: 'c', skin: { method: 'distance', paint: [{ bone: 'chain_0', mode: 'smooth', region: { all: true }, iterations: 'x' }] } }), /paint\[0\]\.iterations/);
 });
+
+test('skinned export runs materials v2: glass extensions, vertex colours, profiles three / minimal / roblox, tangents keep skin data', async () => {
+  const { computeTangents } = await import('../src/tangents.js');
+  const { validateGLB: checkGLB } = await import('../src/gltfcheck.js');
+  // tangent split on a skinned primitive: JOINTS / WEIGHTS grow with POSITION
+  const prim = { pos: Float32Array.from([0, 0, 0, 1, 0, 0, 1, 1, 0, -1, 0, 0, -1, 1, 0]), nrm: Float32Array.from(Array(15).fill(0).map((_, i) => (i % 3 === 2 ? 1 : 0))), uv: Float32Array.from([0, 1, 1, 1, 1, 0, 1, 1, 1, 0]), idx: Uint32Array.from([0, 1, 2, 0, 4, 3]),
+    skin: { j: Uint16Array.from(Array(20).fill(0).map((_, i) => (i % 4 === 0 ? Math.floor(i / 4) : 0))), w: Float32Array.from(Array(20).fill(0).map((_, i) => (i % 4 === 0 ? 1 : 0))) } };
+  const sp = computeTangents(prim);
+  assert.ok(sp.split >= 1);
+  const n = sp.prim.pos.length / 3;
+  assert.equal(sp.prim.skin.j.length, n * 4);
+  assert.equal(sp.prim.skin.w.length, n * 4);
+  for (let v = 5; v < n; v++) assert.equal(sp.prim.skin.w[v * 4], 1, 'split vertex keeps its weights');
+  // export
+  const e = new Engine({ home: tmp() });
+  e.run('model_create', { name: 's', parts: [{ type: 'tube', path: [[0, 32, 0], [0, 16, 0], [0, 2, 0]], r: 3, sides: 6, texture: '#c84', segments: 3 }, { type: 'box', w: 8, h: 4, d: 8, at: [0, 32, 0], color: '#9fd8ff', material: 'glass_canopy' }] });
+  e.run('model_skeleton', { name: 's', skeleton: { template: 'chain', count: 3, from: [0, 32, 0], to: [0, 2, 0] } });
+  e.run('model_skin', { name: 's', skin: { method: 'heat' } });
+  const ex = (a) => { const r = e.run('model_export', { name: 's', ...a }), buf = fs.readFileSync(r.file); const { json } = parseGLB(buf); return { r, buf, json, prims: json.meshes.flatMap((m) => m.primitives) }; };
+  const vc = ex({ vertex_colors: true });
+  assert.ok(vc.json.extensionsUsed.includes('KHR_materials_transmission'), 'glass on a skinned mesh');
+  assert.ok(vc.prims.some((p) => p.attributes.COLOR_0 !== undefined && p.attributes.COLOR_1 !== undefined), 'COLOR_0/1 on a skinned mesh');
+  assert.ok(vc.json.skins.length === 1 && vc.prims.every((p) => p.attributes.JOINTS_0 !== undefined));
+  assert.ok(vc.r.materials_v2.valid && vc.r.skin.validation === 'ok');
+  for (const prof of ['three', 'minimal', 'roblox']) {
+    const x = ex({ profile: prof });
+    assert.ok(validateGLB(x.buf).ok && checkGLB(x.buf).ok, prof);
+    for (const p of x.prims) { const c = x.json.accessors[p.attributes.POSITION].count; for (const k of Object.keys(p.attributes)) assert.equal(x.json.accessors[p.attributes[k]].count, c, `${prof} ${k}`); }
+    assert.equal(!!x.json.extensionsUsed?.includes('KHR_materials_transmission'), prof === 'three', prof);
+  }
+  assert.ok(ex({ profile: 'roblox' }).r.skin.roblox, 'roblox keeps its skinning constraints');
+  assert.throws(() => e.run('model_export', { name: 's', profile: 'unity' }), /profile must be one of three, roblox, minimal/);
+  assert.throws(() => e.run('model_export', { name: 's', lightmap: true }), /lightmap: not available on skinned models/);
+  // normal maps + tangents on a skinned mesh: TANGENT, JOINTS_0 and WEIGHTS_0 all match POSITION
+  e.run('create', { name: 'hull', width: 16 });
+  e.run('draw', { canvas: 'hull', commands: [{ op: 'rect', x: 0, y: 0, w: 16, h: 8, color: '#778' }, { op: 'rect', x: 0, y: 8, w: 16, h: 8, color: '#556' }, { op: 'rect', x: 3, y: 3, w: 4, h: 4, color: '#aab' }] });
+  e.run('model_update', { name: 's', parts: [{ type: 'tube', path: [[0, 32, 0], [0, 16, 0], [0, 2, 0]], r: 3, sides: 6, texture: 'hull', segments: 3 }] });
+  e.run('model_skin', { name: 's', skin: { method: 'heat' } });
+  const nm = ex({ normal_maps: true, tangents: true });
+  assert.ok(nm.r.materials_v2.tangents >= 1 && validateGLB(nm.buf).ok && checkGLB(nm.buf).ok);
+  for (const p of nm.prims) { const c = nm.json.accessors[p.attributes.POSITION].count; for (const k of ['TANGENT', 'JOINTS_0', 'WEIGHTS_0']) assert.equal(nm.json.accessors[p.attributes[k]].count, c, k); }
+});

@@ -12,6 +12,7 @@ import { evalClip } from './animlib.js';
 import { expandSkeleton, resolveSkeleton, bonesFromRig, bonesFromLibrary, retargetFrom2D, skelClipKeys, sampleSkelClip, poseState, solvePoseState, boneOffsets, SKELETON_TEMPLATE_NAMES } from './skeleton3d.js';
 import { skinMesh, deformMesh, skelSockets, skinScene, robloxProfile, ROBLOX_MAX_BONES } from './skin3d.js';
 import { validateGLB } from './gltfvalidate.js';
+import { exportV2, finishV2 } from './matops.js';
 import { renderViews } from './raster3d.js';
 import { encodePNG } from './png.js';
 
@@ -138,12 +139,20 @@ export function assembleSkinned(ctx, def, built, { scale, up, file, args = {} })
   const fps = Number(args.fps ?? 30);
   if (!(fps >= 1 && fps <= 120)) throw new Error('fps must be 1..120');
   const scene = skinScene(def.name, S, sk, { fps });
+  // baked light needs a static mesh: a deforming skinned mesh cannot carry a lightmap / thickness bake
+  const noBake = ['lightmap', 'thickness'].filter((k) => args[k]);
+  if (noBake.length) throw new Error(`${noBake.join(', ')}: not available on skinned models (baked light does not follow the bones); export without it, or bake a static pose with a rigid rig`);
+  if (args.profile !== undefined && args.profile !== null && !['three', 'roblox', 'minimal'].includes(args.profile)) throw new Error('profile must be one of three, roblox, minimal (three = everything, roblox = SurfaceAppearance maps + skinned MeshPart limits, minimal = geometry + base colour)');
   let roblox = null;
   if (args.profile === 'roblox') roblox = robloxProfile(scene, S, { maxBones: Math.round(Number(args.max_bones ?? ROBLOX_MAX_BONES)), r15: !!args.r15 });
-  else if (args.profile !== undefined && args.profile !== null) throw new Error('profile must be "roblox"');
-  const { glb, stats } = ctx.writeGLB(scene, { scale, up, name: def.name, extras: { skin: { bones: S.bones.length, clips: Object.keys(scene.clips), shapes: sk.morphNames, ...(roblox ? { profile: 'roblox' } : {}) } } });
+  // materials v2 (extensions, packing, tangents, vertex colours, profiles) on the skinned scene, as on static exports
+  scene.meshes = scene.meshes.map((m) => ({ ...m, groups: [...m.groups] }));
+  const v2 = exportV2(def, built, args, { meshes: scene.meshes, nodes: scene.nodes, ext: null, scale, file, info: null, skinned: true });
+  if (v2) scene.meshes = v2.meshes;
+  const { glb, stats } = ctx.writeGLB(scene, { scale, up, name: def.name, extras: { skin: { bones: S.bones.length, clips: Object.keys(scene.clips), shapes: sk.morphNames, ...(roblox ? { profile: 'roblox' } : {}) } }, ...(v2 ? { ...v2.glbOpts, v2: v2.v2 } : {}) });
   const v = validateGLB(glb);
   if (!v.ok) throw new Error(`skinned glb failed validation: ${v.errors.slice(0, 4).join('; ')}`);
+  if (v2) finishV2(v2, glb, stats);
   const f6 = (x) => +(+x).toFixed(6);
   const meta = {
     skin: {
@@ -155,9 +164,8 @@ export function assembleSkinned(ctx, def, built, { scale, up, file, args = {} })
       note: 'glTF skin: mesh node <name>_mesh (skin 0) at the scene root, joints = bone nodes under the armature node <name>; inverseBindMatrices = inverse rest world (units). three.js: GLTFLoader -> SkinnedMesh; AnimationMixer plays the clips (IK, plants, constraints and corrective-shape drivers are baked per frame). Shapes = morph targets on the skinned primitives (mesh.extras.targetNames); morph first, then skin.',
     },
   };
-  void file;
   return {
-    glb, stats, built, info: null, rigClips: scene.clips, ctm: {}, ctmNames: [],
+    glb, stats, built, info: null, rigClips: scene.clips, ctm: {}, ctmNames: [], v2,
     ext: { after() {}, meta, result: { skin: { bones: S.bones.length, joints_per_mesh: scene.skins.map((s) => s.joints.length), clips: Object.keys(scene.clips), shapes: sk.morphNames, validation: v.ok ? 'ok' : v.errors, ...(roblox ? { roblox: { meshes: roblox.meshes, warnings: roblox.warnings, renamed: roblox.renamed } } : {}) } } },
   };
 }
