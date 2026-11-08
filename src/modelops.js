@@ -258,7 +258,16 @@ function previewImage(engine, def, a) {
   def = expandDef(def);
   const t0 = performance.now();
   const built = build(engine, def, a.bump !== undefined ? { bump: a.bump } : {});
-  if (a.channel !== undefined) return channelPreview(def, built, a);
+  if (a.channel !== undefined) {
+    const posing = a.pose !== undefined || a.bones || a.morph || a.parts;
+    if (a.clip !== undefined) throw new Error('channel previews one pose: pass pose / bones (skinned) instead of clip, or drop channel for the clip contact sheet');
+    if (posing && !isSkinned(def)) throw new Error('channel with pose / parts / morph is available on skinned models only: preview the channel at rest, or drop channel for the posed preview');
+    if (!posing) return channelPreview(def, built, a);
+    // skinned: the channel on the deformed (posed) mesh
+    const { S, sk } = skinnedOf(skinCtx(BASE, engine, built), def, built);
+    const ss = skinSamples(S, sk, { ...a, frames: 1 });
+    return { ...channelPreview(def, { ...built, mesh: skinPosed(S, sk, ss.samples[0].state).mesh }, a), pose: a.pose ?? null, skinned: true };
+  }
   if (isSkinned(def) && (a.clip !== undefined || a.pose !== undefined || a.bones || a.morph)) {
     // skinned: deformed mesh (LBS) for a pose, or a contact sheet of a skeleton clip
     const { S, sk } = skinnedOf(skinCtx(BASE, engine, built), def, built);

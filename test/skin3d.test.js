@@ -561,3 +561,15 @@ test('skinned export runs materials v2: glass extensions, vertex colours, profil
   assert.ok(nm.r.materials_v2.tangents >= 1 && validateGLB(nm.buf).ok && checkGLB(nm.buf).ok);
   for (const p of nm.prims) { const c = nm.json.accessors[p.attributes.POSITION].count; for (const k of ['TANGENT', 'JOINTS_0', 'WEIGHTS_0']) assert.equal(nm.json.accessors[p.attributes[k]].count, c, k); }
 });
+
+test('preview channel on a skinned model renders the posed mesh; channel + clip (or a rigid pose) is rejected', () => {
+  const e = new Engine({ home: tmp() });
+  snake(e);
+  const rest = e.run('model_preview', { name: 'snake', channel: 'albedo', views: ['front'] });
+  const posed = e.run('model_preview', { name: 'snake', channel: 'albedo', views: ['front'], bones: { chain_0: { rot: [0, 0, 60] } } });
+  assert.equal(posed.skinned, true);
+  assert.notEqual(Buffer.from(posed.image).toString('base64'), Buffer.from(rest.image).toString('base64'), 'pose changes the channel render');
+  assert.throws(() => e.run('model_preview', { name: 'snake', channel: 'albedo', clip: 'sway' }), /channel previews one pose/);
+  e.run('model_create', { name: 'box', parts: [{ type: 'box', name: 'a', w: 8, h: 8, d: 8, texture: '#888' }] });
+  assert.throws(() => e.run('model_preview', { name: 'box', channel: 'albedo', parts: { a: { rot: [0, 45, 0] } } }), /skinned models only/);
+});
