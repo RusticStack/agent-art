@@ -688,7 +688,10 @@ export function renderPose(rig, partsDoc, pose, view, cache = new Map(), opts = 
     const z = v.z ?? p.z;
     if (p.bone) return;
     if (skin && skin.replaced.has(name)) {
-      for (const b of skin.meshes) if (b.host === name) entries.push({ name, i, p, v, z: b.z ?? z, rows: null, skin: b });
+      // a mesh without its own z draws at the highest z of its host and absorbed parts this frame,
+      // so a hand it absorbs keeps the z a pose / weapon lock gives it (over the weapon)
+      const zOf = (n) => { if (!rig.parts[n]) return -Infinity; const q = partIn(rig, n, src), w = poseOf(rig, VP, n); return q.hidden || w.hide ? -Infinity : Number(w.z ?? q.z); };
+      for (const b of skin.meshes) if (b.host === name) entries.push({ name, i, p, v, z: b.z ?? Math.max(z, ...b.absorb.map(zOf)), rows: null, skin: b });
       return;
     }
     // split part: the rows from the pivot to the cut and the rest get their own z (one piece in

@@ -191,3 +191,15 @@ test('composite = engine draw order; weapon_check: hands on the grips of every g
   e.run('anim_weapon', { name: 'big', class: 'rifle', frame: [128, 192] });
   assert.equal(e.run('anim_weapon_check', { skin: 'mec', weapons: ['big'], clips: ['aim'], views: ['side'] }).weapons.big.pass, false);
 });
+
+test('a skin mesh that absorbs the weapon-locked hand draws over the gun (z of its absorbed parts) and keeps a __front strip', () => {
+  const e = setup();
+  e.run('rig_skin', { name: 'mec', skin: { arm: { part: 'upper_arm_f', absorb: ['forearm_f', 'hand_f'] } } });
+  const out = tmp();
+  e.run('anim_batch', { skins: ['mec'], clips: ['aim'], views: ['side'], out, weapon: 'runtime' });
+  const A = JSON.parse(fs.readFileSync(path.join(out, 'manifest', 'characters.json'), 'utf8')).sprites.mec.anims.aim_side;
+  assert.ok(A.front, 'the mesh with the trigger hand is in front of the weapon');
+  const d = decodePNG(fs.readFileSync(path.join(out, A.front))).data;
+  let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i]) n++;
+  assert.ok(n > 20, `__front strip has the arm (${n} px)`);
+});
