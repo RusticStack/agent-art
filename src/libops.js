@@ -285,30 +285,44 @@ export const LIB_OPS = {
         const auto = a.pad === undefined || a.pad === 'auto';
         const fixed = auto ? null : typeof a.pad === 'number' ? [a.pad, a.pad, a.pad, a.pad] : Array.isArray(a.pad) ? a.pad.map(Number) : null;
         if (!auto && !(fixed && fixed.length === 4 && fixed.every((n) => Number.isInteger(n) && n >= 0))) throw new Error('batch: pad must be "auto", a whole number of pixels >= 0, or [left, top, right, bottom]');
-        const G = auto ? [Math.ceil(W / 2), Math.ceil(H / 4), Math.ceil(W / 2), Math.ceil(H / 8)] : fixed;
-        const GW = W + G[0] + G[2], GH = H + G[1] + G[3];
-        const rendered = [];
-        let ub = null;
-        const cache = new Map();
-        for (const clip of clips) for (const view of views) {
-          const { fp } = skinClip(this, skin, clip, view);
-          const rots = a.stable === false ? null : stableRotations(rig, fp.poses, view, typeof a.stable === 'object' ? a.stable : {});
-          const frames = [], fronts = [], orders = [];
-          fp.poses.forEach((P, i) => {
-            const base = { ...(lopt.variant ? { variant: lopt.variant } : {}), pad: G, ...(rots ? { rot: rots[i] } : {}) };
-            const trace = {};
-            const full = renderPose(rig, d, P, view, cache, { ...base, ...(lopt.hide ? { hide: lopt.hide } : {}), trace });
-            orders.push(orderOf(trace));
-            const front = a.front ? frontParts(rig, trace, a.front) : [];
-            if (front.length) {
-              frames.push(renderPose(rig, d, P, view, cache, { ...base, hide: [...(lopt.hide || []), ...front] }));
-              fronts.push(renderPose(rig, d, P, view, cache, { ...base, only: front.filter((n) => !(lopt.hide || []).includes(n)) }));
-            } else { frames.push(full); fronts.push(null); }
-            const b = bboxOf(full, GW, GH);
-            if (b) ub = ub ? [Math.min(ub[0], b[0]), Math.min(ub[1], b[1]), Math.max(ub[2], b[2]), Math.max(ub[3], b[3])] : b;
-          });
-          rendered.push({ clip, view, frames, fronts, orders, fp });
+        let G = auto ? [Math.ceil(W / 2), Math.ceil(H / 4), Math.ceil(W / 2), Math.ceil(H / 8)] : fixed;
+        let GW, GH, rendered, ub;
+        const cache = new Map(), clipPoses = new Map();
+        // auto: a frame that reaches the edge of the render margin would be cut, so render again with
+        // twice the margin on that side (a death fall, a long barrel) until every frame fits
+        for (let attempt = 0; ; attempt++) {
+          GW = W + G[0] + G[2]; GH = H + G[1] + G[3];
+          rendered = []; ub = null;
+          for (const clip of clips) for (const view of views) {
+            const ck = `${clip}|${view}`;
+            if (!clipPoses.has(ck)) {
+              const { fp } = skinClip(this, skin, clip, view);
+              clipPoses.set(ck, { fp, rots: a.stable === false ? null : stableRotations(rig, fp.poses, view, typeof a.stable === 'object' ? a.stable : {}) });
+            }
+            const { fp, rots } = clipPoses.get(ck);
+            const frames = [], fronts = [], orders = [];
+            fp.poses.forEach((P, i) => {
+              const base = { ...(lopt.variant ? { variant: lopt.variant } : {}), pad: G, ...(rots ? { rot: rots[i] } : {}) };
+              const trace = {};
+              const full = renderPose(rig, d, P, view, cache, { ...base, ...(lopt.hide ? { hide: lopt.hide } : {}), trace });
+              orders.push(orderOf(trace));
+              const front = a.front ? frontParts(rig, trace, a.front) : [];
+              if (front.length) {
+                frames.push(renderPose(rig, d, P, view, cache, { ...base, hide: [...(lopt.hide || []), ...front] }));
+                fronts.push(renderPose(rig, d, P, view, cache, { ...base, only: front.filter((n) => !(lopt.hide || []).includes(n)) }));
+              } else { frames.push(full); fronts.push(null); }
+              const b = bboxOf(full, GW, GH);
+              if (b) ub = ub ? [Math.min(ub[0], b[0]), Math.min(ub[1], b[1]), Math.max(ub[2], b[2]), Math.max(ub[3], b[3])] : b;
+            });
+            rendered.push({ clip, view, frames, fronts, orders, fp });
+          }
+          if (!auto || !ub || attempt >= 4) break;
+          const edge = [ub[0] <= 0, ub[1] <= 0, ub[2] >= GW - 1, ub[3] >= GH - 1];
+          if (!edge.some(Boolean)) break;
+          // left and right grow together (mirrored views flip the side that overruns)
+          G = G.map((g, i) => (edge[i] || edge[i ^ 2] && i % 2 === 0 ? g * 2 : g));
         }
+        if (auto && ub && (ub[0] <= 0 || ub[1] <= 0 || ub[2] >= GW - 1 || ub[3] >= GH - 1)) warnings.push(`${set}: some frames still reach the edge of the render margin and may be cut`);
         // the set's padding: symmetric left/right (mirrored views stay on the anchor), even
         let pad = fixed || [0, 0, 0, 0];
         if (auto && ub) {

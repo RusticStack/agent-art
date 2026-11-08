@@ -156,6 +156,9 @@ test('batch: skins x loadouts x clips x views -> strips + manifest (auto padding
   // a bad pad or view is refused before anything is rendered (a negative pad sheared the strips)
   for (const pad of [-4, 2.5, [1, 2], 'big']) assert.throws(() => e.run('anim_batch', { skins: ['sev'], clips: ['idle'], views: ['side'], out, pad }), /pad must be/);
   assert.throws(() => e.run('anim_batch', { skins: ['sev'], clips: ['idle'], views: ['../x'], out }), /unknown view/);
+  // pad "auto" keeps every pixel of a clip that falls past the first render margin (death)
+  const opaque = (dir, pad) => { e.run('anim_batch', { skins: ['sev'], clips: ['death'], views: ['side'], out: dir, ...(pad ? { pad } : {}) }); const m = JSON.parse(fs.readFileSync(path.join(dir, 'manifest', 'characters.json'), 'utf8')); const p = decodePNG(fs.readFileSync(path.join(dir, m.sprites.sev.anims.death_side.file))); let n = 0; for (let i = 3; i < p.data.length; i += 4) if (p.data[i]) n++; return n; };
+  assert.equal(opaque(tmp()), opaque(tmp(), 120), 'auto pad cuts nothing off the death clip');
 });
 
 test('glTF skin export: one joint per part, skinned quads, clips as animations with events', () => {
