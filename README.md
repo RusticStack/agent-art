@@ -6,7 +6,7 @@
 - **The same asset in every view and frame.** Rigs draw each part once per view (side/front/back plus mirrored views) and generate frames by tweening poses, at any frame rate. `humanoid_hd` adds detailed 8-direction characters with per-view poses, two-bone IK, foot planting, follow-through and RotSprite sampling.
 - **Low-res to high-res.** 8×8 icons up to 2048² scenes. Shading and cells are geometry-based, so they scale. Scale2x/EPX upscaling and RotSprite rotation keep edges clean.
 - **You can watch and paint along.** The web UI updates live as the agent draws. Your edits go through the same API, so the agent sees them.
-- **3D and audio too.** `art_model` turns pixel textures into low-poly `.glb` map kits, props, ships and vehicles. `art_audio` makes SFX (including firearms and sci-fi), music and mixes, and reports what they sound like.
+- **3D and audio too.** `art_model` turns pixel textures into low-poly `.glb` map kits, props, ships and vehicles. Rigid-part rigs (first-person rifle, pistol and arms templates, doors, turrets) get poses, animation clips and sockets in the `.glb`, or render to pixel sprite frames that 2D arms follow with IK. `art_audio` makes SFX (including firearms and sci-fi), music and mixes, and reports what they sound like.
 - **Zero dependencies.** Plain Node.js 20+, no native modules.
 
 > Example: [Sanctum Burn](https://sanctum-burn.vercel.app), a co-op 2.5D survivor game. All of its art was made by an agent with Agent Art.
@@ -74,6 +74,7 @@ For detailed sprites in the style of late-90s pre-rendered games or *Replaced* (
 - **Secondary motion:** rig `secondary: {cape: {stiffness, damping, gravity?}}` plus `animate {secondary: true}` adds lag and follow-through to capes, straps and pouches. Loops are simulated until they repeat, so they stay seamless.
 - **`scale_children`:** a part's `sx`/`sy` also moves its children's joints (foreshortening, breathing); humanoid_hd has it on.
 - **Rotation sampling:** rig `sampling: "rotsprite"` (the humanoid_hd default) supersamples the Scale2x image, keeps only the part's own colours and cleans up holes and stray pixels, so thin limbs keep their thickness from frame to frame. `"smooth"` does the same on the 1x cell, and `"nearest8"` is the old behaviour, still the default for existing rigs.
+- **Follow another animation (`ik_from`):** `animate {ik_from:{canvas, animation, map:{hand_r:"socket_grip_r", hand_l:{anchor:"socket_grip_l", bend:-1}}, offset?}}` takes per-frame IK targets from another canvas's anchors, for example an `art_model render` of a gun clip, and copies its frame count, timing and loop. A map value is an anchor name or `{anchor, bend?, rot?, at?, weight?}`. Give the rig the render's frame size (or an `offset`). See [the end-to-end example](#rigid-part-rigs-animation-clips-and-pre-rendered-sprites).
 - `art_animation export {format: "spritesheet", json: false}` skips the sidecar JSON.
 
 See [docs/rig-hd-guide.md](docs/rig-hd-guide.md) for a step-by-step guide. Skill: `rig-hd`.
@@ -109,12 +110,10 @@ Turn pixel art into low-poly game assets in the HD-2D style (pixel textures on l
 
 #### Rigid-part rigs, animation clips and pre-rendered sprites
 
-For first-person weapons and arms (or anything with moving parts) a model can be a rig of rigid parts, PSX / Half-Life 1 style (no skinning). The same rig exports as glTF animations or renders to pixel-art sprite layers.
+For first-person weapons and arms, or any prop with moving parts (doors, chests, turrets), a model can be a rig of rigid parts, PSX / Half-Life 1 style (no skinning). The same rig exports as glTF nodes and animations or renders to pixel-art sprite layers.
 
 ```jsonc
-// starter rigs in view space (origin = eye, -Z forward, 32 px = 1 m): fp_rifle, fp_pistol, fp_arms
-{ "action": "create", "name": "ar", "template": "fp_rifle", "textures": { "metal": "gun_metal" }, "set": { "magazine": { "h": 5 } } }
-// or by hand: name = its own node, parent = nesting, pivot = the joint
+// by hand: name = its own node, parent = nesting, pivot = the joint
 { "action": "create", "name": "door", "parts": [
   { "type": "box", "name": "frame", "w": 20, "h": 34, "d": 2 },
   { "type": "box", "name": "leaf", "parent": "frame", "w": 16, "h": 32, "d": 1, "at": [0, 1, 0], "pivot": [-8, 0, 0] } ],
@@ -122,19 +121,51 @@ For first-person weapons and arms (or anything with moving parts) a model can be
 { "action": "pose", "name": "door", "pose": "open", "parts": { "leaf": { "rot": [0, -80, 0] } } }
 { "action": "animate", "name": "door", "clip": "swing", "keys": [ { "t": 0, "pose": "rest" }, { "t": 0.8, "pose": "open", "ease": "smooth" } ],
   "events": [ { "t": 0, "name": "creak" } ] }
-{ "action": "preview", "name": "ar", "clip": "reload_empty", "frames": 8, "view": "side" }   // or view:"fp"
-{ "action": "export", "name": "ar" }   // nodes per part + socket_* nodes + one glTF animation per clip
-{ "action": "render", "name": "ar", "canvas": "ar_reload", "clip": "reload_empty", "fps": 12, "size": [160, 120],
-  "camera": "fp", "hide": ["magazine"], "quantize": { "colors": 16, "dither": true }, "outline": "#14141a" }
+{ "action": "export", "name": "door" }   // a node per part + socket_handle + one glTF animation per clip
 ```
 
 - **Nodes:** a part with `name` becomes its own glTF node with its own mesh; `parent` nests it under another named part, and its transform is local to the parent (translation = joint offset, rotation, scale). `pivot:[x,y,z]` is the joint. Unnamed parts merge into the root mesh or into their named parent's mesh; `rig:{merge:false}` makes every part a node. `create` and `info` report the node tree. Models without names export exactly as before.
-- **Poses and clips:** `pose` stores per-node offsets from the rest pose (`rot` degrees, `at` px in the parent's frame, `scale`). `animate` stores a clip of keys in seconds (`ease`: `linear`, `smooth` or `step`, applied to the motion into the key), with `loop`, `duration` and `events:[{t, name}]`. Export writes one glTF animation per clip, with translation, rotation (quaternion) and scale channels per moved node. All-linear clips use LINEAR samplers at the key times, all-step clips use STEP, and anything else is baked at 30 fps. Events go in the animation's `extras`.
+- **Poses and clips:** `pose` stores per-node offsets from the rest pose (`rot` degrees, `at` px in the parent's frame, `scale`; `base` starts from another pose). `animate` stores a clip of keys in seconds (`ease`: `linear`, `smooth` or `step`, applied to the motion into the key), with `loop`, `duration` and `events:[{t, name}]`; `keys:null` deletes it. Export writes one glTF animation per clip, with translation, rotation (quaternion) and scale channels per moved node. All-linear clips use LINEAR samplers at the key times, all-step clips use STEP, and anything else is baked at 30 fps. Events go in the animation's `extras`. `preview {clip, frames, view}` shows a clip as a contact sheet.
 - **Sockets:** `sockets:{muzzle:{part, at, look?}, sight, grip_r, grip_l, mag_well}` export as empty child nodes `socket_<name>`, for aligning ADS, spawning muzzle flashes and placing hands. `meta.json` lists each node's parent-space transform, so a Roblox import maps it to Motor6D joints (C0 = translation and rotation).
-- **Sprite renders (`render`):** each clip sample, pose, `angles` entry or `sweep:{yaw:[a,b,step], pitch:[..]}` grid cell becomes one frame of a canvas animation. Frames use nearest texels with no anti-aliasing and a transparent background, plus an optional `light`, `quantize` (median-cut `colors:n`, a colour list or `palette:"project"`, with ordered `dither`) and a 1 px `outline`. The camera is `fp` (eye at the origin looking down -Z, 60°), `side`, `front`, `iso`, `top`, `game` or `{pos, look, fov}`. `only` and `hide` render layers (for example the gun without its magazine) with the same fitted camera, so the layers stack.
-- **Anchors:** every rendered frame stores each socket's screen position and rotation in `meta.anchors`, and spritesheet export writes them to `frames[].anchors`. A 2D arm rig follows them with `art_rig animate {..., ik_from:{canvas, animation, map:{hand_f:"socket_grip_r", hand_b:"socket_grip_l"}}}`, which uses the same frame count and timing with the hands solved onto the grips in every frame.
+- **Templates:** starter rigs in view space (origin = the eye, -Z forward, 32 px = 1 m): `fp_rifle` (receiver, barrel, handguard, stock, magazine, bolt, charging handle, optic, trigger; clips `fire`, `reload_tactical`, `reload_empty`), `fp_pistol` (frame, slide, barrel, magazine, trigger; clips `fire`, `reload`) and `fp_arms` (clavicle > upper arm > forearm > hand > fingers per side; poses `grip_rifle` and `grip_pistol` put the palms on the weapons' grip sockets). The weapons have the five sockets above. Override anything with `textures` (slots such as `metal`, `polymer`, `sleeve`, `glove`), `set` by part name, `add`, `remove`, `poses`, `clips` and `sockets`. The `fp` preview view is the matching camera (eye at the origin, 60°).
+- **Sprite renders (`render`):** each clip sample, pose, `angles` entry or `sweep:{yaw:[a,b,step], pitch:[..]}` grid cell becomes one frame of a canvas animation. Frames use nearest texels with no anti-aliasing and a transparent background, plus an optional `light`, `quantize` (median-cut `colors:n`, a colour list or `palette:"project"`, with ordered `dither`) and a 1 px `outline`. The camera is `fp` (the default), `side`, `front`, `iso`, `top`, `game` or `{pos, look, fov}`. `only` and `hide` render layers (for example the gun without its magazine) with the same fitted camera, so the layers stack.
+- **Anchors:** every rendered frame stores each socket's screen position and rotation in `meta.anchors`, and spritesheet export writes them to `frames[].anchors`. A 2D arm rig follows them with `art_rig animate {ik_from}` (see [`art_rig`](#characters-views-and-animations-art_rig)).
+- **Known limitation:** the `fp` camera drops triangles that cross its near plane instead of clipping them, so a part that reaches behind the eye (a long stock, a shoulder) can vanish in some frames. Shorten it, move the weapon forward, or render that layer with `camera:"side"`.
 
-The full pipeline (model, clips, gun and magazine layers, angle sweep, arms with `ik_from`, export strips) is in `art_help {topic:"3d"}` under "Pre-rendered sprites". Skill: `fp-weapon`.
+End to end, a first-person rifle from the template to 2D sprite layers with arms (texture canvases must exist before `create`):
+
+```jsonc
+// art_create_canvas: a texture (paint it with the tileable-texture skill)
+{ "name": "gun_metal", "width": 16, "height": 16, "background": "#2c2e33" }
+// art_model: the rig, a custom reload clip, the .glb
+{ "action": "create", "name": "ar", "template": "fp_rifle", "textures": { "metal": "gun_metal" }, "set": { "magazine": { "h": 5 } } }
+{ "action": "animate", "name": "ar", "clip": "reload_fast", "keys": [ { "t": 0, "pose": "rest" },
+  { "t": 0.25, "pose": "reload_tilt", "ease": "smooth" },
+  { "t": 0.5, "pose": "reload_tilt", "parts": { "magazine": { "at": [0, -9, 1.5] } }, "ease": "smooth" },
+  { "t": 0.9, "pose": "reload_tilt", "ease": "smooth" }, { "t": 1.2, "pose": "rest", "ease": "smooth" } ],
+  "events": [ { "t": 0.5, "name": "mag_out" }, { "t": 0.9, "name": "mag_in" } ] }
+{ "action": "preview", "name": "ar", "clip": "reload_fast", "frames": 6, "view": "side" }
+{ "action": "export", "name": "ar" }   // exports/ar.glb: nodes, socket_* nodes, animations fire, reload_*, reload_fast
+// art_model: pixel sprite frames (hide/only give stackable layers, sweep gives turn frames)
+{ "action": "render", "name": "ar", "canvas": "ar_reload", "clip": "reload_fast", "fps": 12, "size": [160, 120],
+  "camera": "fp", "quantize": { "colors": 16, "dither": true }, "outline": "#14141a" }
+// art_rig: 2D arms with the same frame size; draw the parts in the listed cells, then follow the grips
+{ "action": "create", "name": "arms2d", "frame": [160, 120], "views": ["side"], "root": [80, 119], "parts": {
+  "body": { "w": 2, "h": 2, "pivot": [1, 1] },
+  "upper_r": { "w": 8, "h": 32, "pivot": [4, 0], "parent": "body", "at": [68, 0] },
+  "fore_r": { "w": 7, "h": 30, "pivot": [3, 0], "parent": "upper_r", "at": [0, 30] },
+  "hand_r": { "w": 8, "h": 8, "pivot": [4, 0], "parent": "fore_r", "at": [0, 28] },
+  "upper_l": { "w": 8, "h": 32, "pivot": [4, 0], "parent": "body", "at": [-30, 0] },
+  "fore_l": { "w": 7, "h": 30, "pivot": [3, 0], "parent": "upper_l", "at": [0, 30] },
+  "hand_l": { "w": 8, "h": 8, "pivot": [4, 0], "parent": "fore_l", "at": [0, 28] } } }
+{ "action": "animate", "name": "arms2d", "animation": "reload_fast", "canvas": "arms_reload",
+  "ik_from": { "canvas": "ar_reload", "animation": "reload_fast",
+    "map": { "hand_r": { "anchor": "socket_grip_r", "bend": -1 }, "hand_l": "socket_grip_l" } } }
+// art_animation: one spritesheet per layer; json frames[].anchors line them up in-engine
+{ "canvas": "ar_reload", "action": "export", "format": "spritesheet" }
+```
+
+The full pipeline (gun and magazine layers, angle sweep, 3D arms) is in `art_help {topic:"3d"}` under "Rigs & clips" and "Pre-rendered sprites". Skills: `fp-weapon`, `prop-rig` (doors, chests, turrets).
 
 #### Ships and vehicles
 
@@ -308,8 +339,8 @@ Behaviour changes in 0.5: `crop` on a frame strip takes frame coordinates, `adju
 | `art_view` | The canvas as an image: zoom/region, pixel grid, `tile` seam check, `onion`, guides (`grid:16`, `iso:32`), tint preview. Large canvases get a token-cheap overview |
 | `art_critique` | Heuristic quality report and score for a frame, an animation or every frame |
 | `art_help` | Usage and examples for any command (`{op}`), guides (`{topic}`: workflow, textures, characters, animation, rig, scenes, hires, minecraft, 3d, audio, music, mixing, perception), and step-by-step recipes (`{skill}`) |
-| `art_rig` | Multi-view, multi-animation characters from parts and poses (templates incl. `humanoid_hd`, presets, tweening, IK, foot planting, secondary motion) |
-| `art_model` | 3D: modular HD-2D kit pieces, ruins, extruded/lathed props, ships and vehicles, and dioramas, previewed from the game camera, exported to `.glb` |
+| `art_rig` | Multi-view, multi-animation characters from parts and poses (templates incl. `humanoid_hd`, presets, tweening, IK, foot planting, secondary motion, `ik_from` to follow rendered anchors) |
+| `art_model` | 3D: modular HD-2D kit pieces, ruins, extruded/lathed props, ships and vehicles, and dioramas, previewed from the game camera, exported to `.glb`. Rigid-part rigs with `pose`, `animate` (glTF clips) and sockets, FP templates (`fp_rifle`, `fp_pistol`, `fp_arms`), `render` to pixel sprite frames |
 | `art_audio` | Sound effects, music, mixing and mastering; analysis images, listener reports and critiques; WAV/mp3/ogg/opus export |
 | `art_read` | Exact pixels as text rows plus a legend, in the format `grid` accepts |
 | `art_palette` | Named colors per canvas or project. `ramp` builds shading ramps |
@@ -329,7 +360,7 @@ Every command takes `layer`, `frame`, `mask` (opaque / transparent / a colour / 
 The recipes behind `art_help {skill}` are also served as MCP prompts and can be installed as agent skills:
 
 ```sh
-npx @rusticstack/agent-art skills --out ~/.claude/skills   # tileable-texture, sprite, rig, rig-hd, walk-cycle, iso-scene, hd2d-scene, 3d-kit, ship-model, fp-weapon, ui-icons, minecraft-pack, sfx-pack, music-track
+npx @rusticstack/agent-art skills --out ~/.claude/skills   # tileable-texture, sprite, rig, rig-hd, walk-cycle, iso-scene, hd2d-scene, 3d-kit, ship-model, fp-weapon, prop-rig, ui-icons, minecraft-pack, sfx-pack, music-track
 ```
 
 ## CLI (no MCP needed)
