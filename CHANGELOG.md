@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Materials v2: render data for `art_model` exports
+
+- TANGENT (MikkTSpace-compatible, handedness in w, mirrored seams split) wherever a normal map is present, with `tangents:true` or `profile:"three"`. The tangent frame shades the same as three.js's derivative frame (tested on a quad and on rotated and mirrored UV islands).
+- Lightmaps: `export {lightmap}` bakes the sun, a sky dome, light parts (`{type:"light", kind:"point"|"spot"|"area"}`), emissive surfaces (bounce) and diffuse interreflection into a coloured lightmap. It is quantised, Bayer-dithered and sRGB, on TEXCOORD_1 charts shared with `bake_ao` (configurable padding), and exported as `material.extras.lightMap`. `probes` gives SH9 light probes on a grid (three.js `SphericalHarmonics3` order). `bake_ao:{bent:true}` adds object-space bent normals, and `thickness:true` an SSS thickness map.
+- Displacement and parallax: part `displace` does adaptive, crack-free subdivision under a triangle budget, with locked seams. Material `height` gives `extras.heightTexture` (scale, bias, uv_per_unit). The docs have a pixel-snapped POM snippet.
+- Material extensions: `KHR_materials_emissive_strength` (the emissive layer as a mask with colour + strength, flicker / pulse / strobe / sputter in extras), `_clearcoat`, `_anisotropy` (+ streaked / radial direction map), `_transmission` + `_volume` + `_ior`, `_sheen`, `_diffuse_transmission`. New presets: `painted_hull`, `brushed_metal`, `glass_canopy`, `cloth`, `neon`, `skin`. The 0.7 presets are unchanged.
+- Channel packing: `packing:"gltf_orm"` (one ORM texture for occlusion + metallicRoughness; an `ao` canvas layer or a height cavity in red), `"unity_mask"`, `"roblox"`. Identical images are deduplicated across materials.
+- Detail maps: material `detail:{texture, normal?, scale, strength}` gives `extras.detail` (with `uv_scale`).
+- Vertex data: `vertex_colors` (paint / masks / AO / height sets from part `paint` and `wetness`), `uv2` / `uv3` (`world` / `box` / `lightmap` / `uv0`), always as consecutive glTF sets.
+- Export profiles: `three` (everything), `roblox` (SurfaceAppearance Color / Normal / Metalness / Roughness maps of at most 1024 px, nearest-upscaled, meshes under 20k triangles, a manifest and a report of what was dropped), `minimal`.
+- Material editor: `art_model material {name, material, preset|set|delete}` and model `materials`. A model material named like a canvas applies to that canvas's faces. `preview {channel: lit|albedo|normal|world_normal|tangent|orm|metal|rough|ao|emissive|height|lightmap|bent|thickness|uv1|detail|clearcoat|sheen|transmission|anisotropy|subsurface | [..] | "all", pom?}`.
+- The web UI 3D viewer has a channel dropdown. It reloads the model with `/api/model/<name>/glb?profile=three` (`&bake=1` for lightmap, AO, bent normals and lightmap UVs).
+- `src/gltfcheck.js` is an in-repo structural glTF validator (container, accessors, attribute semantics, unit normals and tangents, texCoord sets, each extension's schema, extensionsUsed, extras texture indices). Every v2 export reports its result.
+- `art_help {topic:"materials"}`; `docs/materials/` (demos, three.js hookups, Roblox import).
+- Exports that use none of this are byte-identical to 0.7, checked against recorded digests (`test/fixtures/golden-0.7.json`). The tool-list size limit rose from 32650 to 33400 chars (+~750 for the new `art_model` options).
+
 ### Animation library (`art_anim`) and 2D rotated-sprite tooling
 
 - New tool `art_anim`:

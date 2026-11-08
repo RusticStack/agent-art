@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseColor, toHex } from './color.js';
-import { buildModel, PART_DOCS, matMul, rigLayout } from './model3d.js';
+import { buildModel, PART_DOCS, matMul, rigLayout, detailOf } from './model3d.js';
 import { generateCTM, CTM_METHODS } from './ctm.js';
 import { Doc, MAX_SIZE } from './doc.js';
 import { writeGLB, trsMatrix } from './glb.js';
@@ -16,6 +16,8 @@ import { rigInfo, rigSummary, rigScene, rigMeta, resolveOffsets, clipKeys, sampl
 import { MODEL_TEMPLATES } from './modeltemplates.js';
 import { normPBR, normBump, bumpNormal, mrTexture, heightFromData } from './surface.js';
 import { exportExtras, previewExtras, wantsExtras, MODEL_EXTRA_OPS } from './modelexport.js';
+import { exportV2, finishV2, materialOp, describeMaterial, textureChannels, channelPreview } from './matops.js';
+import { V2_PRESETS } from './materials.js';
 
 const NAME_RE = /^[A-Za-z0-9_\-.]{1,64}$/;
 
@@ -90,8 +92,10 @@ export function texResolver(engine, { normal = false, bump = null } = {}) {
     // the emissive layer only feeds the emissive texture, never the colour (albedo) texture; the
     // surface data layers (height, metal, rough) never reach the colour either
     const has = (n) => (ref.layer === undefined || ref.layer === null) && d.layers.some((l) => l.name === n);
-    let data = grab(d, ref.layer, ['emissive', 'height', 'metal', 'rough']);
+    // an "ao" layer (materials v2: material occlusion, ORM red) is a data layer too, when present
+    let data = grab(d, ref.layer, has('ao') ? ['emissive', 'height', 'metal', 'rough', 'ao'] : ['emissive', 'height', 'metal', 'rough']);
     let heightData = has('height') ? grab(d, 'height') : null, metalData = has('metal') ? grab(d, 'metal') : null, roughData = has('rough') ? grab(d, 'rough') : null;
+    let aoData = has('ao') ? grab(d, 'ao') : null;
     let emissive = null, nmap = null;
     if ((ref.layer === undefined || ref.layer === null) && d.layers.some((l) => l.name === 'emissive')) emissive = grab(d, 'emissive');
     const ed = engine.docs.get(`${d.name}_emissive`);
@@ -120,6 +124,7 @@ export function texResolver(engine, { normal = false, bump = null } = {}) {
       if (heightData) heightData = crop(heightData, W, H, region).data;
       if (metalData) metalData = crop(metalData, W, H, region).data;
       if (roughData) roughData = crop(roughData, W, H, region).data;
+      if (aoData) aoData = crop(aoData, W, H, region).data;
       if (pivot) pivot = [pivot[0] - region[0], pivot[1] - region[1]];
     }
     if (ref.overlay) {
@@ -136,6 +141,7 @@ export function texResolver(engine, { normal = false, bump = null } = {}) {
     // CTM tileset (art_model ctm): faces using it get a tile per world cell from their neighbours
     const ctm = !region && d.meta?.ctm ? d.meta.ctm : null;
     const t = { key, canvas: d.name, name, width: w, height: h, data, emissive, normal: nmap, pivot, ctm };
+    if (aoData) t.aoData = aoData;
     surfaceOf(t, d, { heightData, metalData, roughData, region, f, bump });
     cache.set(key, t);
     return t;
@@ -156,7 +162,10 @@ export function texResolver(engine, { normal = false, bump = null } = {}) {
     };
     if (meta.material !== undefined) {
       const pbr = normPBR(meta.material);
-      if (pbr) { t.pbr = { metal: pbr.metal, rough: pbr.rough }; if (pbr.emissive && !t.emissive) t.emissive = t.data; }
+      if (pbr) {
+        t.pbr = { metal: pbr.metal, rough: pbr.rough }; if (pbr.emissive && !t.emissive) t.emissive = t.data;
+        if (pbr.v2) { t.v2 = pbr.v2; if (pbr.v2.detail && pbr.v2.detail.texture !== d.name) t.detail = detailOf(pbr.v2.detail, { tex: resolve }); }
+      }
     }
     if (metalData || roughData) { t.metalData = metalData; t.roughData = roughData; t.mr = mrTexture(t.width, t.height, metalData, roughData, t.pbr || { metal: 0, rough: 1 }); }
     // height layer: always a normal map; <canvas>_h / derived height only when a bump is asked for
@@ -170,7 +179,7 @@ export function texResolver(engine, { normal = false, bump = null } = {}) {
 const greebleKinds = (engine) => Object.fromEntries([...models(engine).values()].filter((m) => typeof m.greeble_kind === 'string').map((m) => [m.greeble_kind, m.name]));
 function build(engine, def, opts = {}) {
   const tex = opts.tex || texResolver(engine, opts);
-  const r = buildModel(def, { tex, getModel: (n) => getModel(engine, n), instances: opts.instances, greebleKinds: () => greebleKinds(engine) });
+  const r = buildModel(def, { tex, getModel: (n) => getModel(engine, n), instances: opts.instances, greebleKinds: () => greebleKinds(engine), ...(def.materials ? { materials: def.materials } : {}) });
   // GPU-instanced greebles stay separate only for export (EXT_mesh_gpu_instancing); previews,
   // renders and summaries see them merged
   if (r.gpu && !opts.keepGpu) { for (const it of r.gpu) for (const M of it.mats) r.mesh.add(it.mesh.clone().transform(M)); delete r.gpu; }
@@ -219,6 +228,7 @@ function checkRig(def, built) {
   }
 }
 const groupsOf = (mesh) => [...mesh.groups.values()].filter((g) => g.idx.length);
+const MATERIAL_PRESETS_LIST = Object.fromEntries(['painted_metal', 'bare_metal', 'rubber', 'plastic', 'glass', 'emissive_panel', 'fabric'].map((k) => [k, 1]));
 
 /** Poses of a clip at n evenly spaced times: [{time, pose: Map node -> local TRS}], frame ms. */
 function clipSamples(def, info, clipName, n, fps) {
@@ -235,6 +245,7 @@ function clipSamples(def, info, clipName, n, fps) {
 function previewImage(engine, def, a) {
   const t0 = performance.now();
   const built = build(engine, def, a.bump !== undefined ? { bump: a.bump } : {});
+  if (a.channel !== undefined) return channelPreview(def, built, a);
   const ex = previewExtras(def, built, a, { variantDef: variantOf(engine, def), buildDef: (d) => build(engine, d, { tex: built.tex }) });
   if (ex) return ex;
   if (a.clip !== undefined || a.pose !== undefined || a.parts) {
@@ -373,7 +384,7 @@ function placeFrames(engine, outName, FW, FH, tag, imgs, { durations, loop, proj
 }
 
 /** Model-level options kept on create/update (besides name and parts). */
-export const MODEL_KEYS = ['grid', 'scale', 'origin', 'notes', 'project', 'overlays', 'uv_origin', 'rig', 'sockets', 'poses', 'clips', 'weapon', 'arms', 'merge', 'morphs', 'cull', 'greeble_kind'];
+export const MODEL_KEYS = ['grid', 'scale', 'origin', 'notes', 'project', 'overlays', 'uv_origin', 'rig', 'sockets', 'poses', 'clips', 'weapon', 'arms', 'merge', 'morphs', 'cull', 'greeble_kind', 'materials'];
 
 /** Part index from a number or a part name. */
 function partIndex(parts, k, what) {
@@ -706,6 +717,31 @@ export const MODEL_OPS = {
     const def = getModel(this, a.name);
     return { model: def.name, ...previewImage(this, def, a) };
   },
+  /**
+   * Materials v2 editor: material {name} lists presets, model materials and the textures in use;
+   * material {name, material, preset?, set?:{..}, delete?} creates / edits / deletes a model
+   * material (parts use it by material:"<name>"; a material named like a canvas applies to its faces).
+   */
+  model_material(a, source) {
+    const def = getModel(this, a.name);
+    const r = materialOp(def, a);
+    if (r.list) {
+      const built = build(this, def);
+      const textures = {};
+      for (const g of built.mesh.groups.values()) if (!g.overlay) textures[g.tex.name || g.tex.key] = textureChannels(g.tex);
+      return {
+        model: def.name, materials: Object.fromEntries(Object.entries(r.mats).map(([k, v]) => [k, { spec: v, resolved: describeMaterial(v, r.mats) }])), textures,
+        presets: { '0.7': Object.keys(MATERIAL_PRESETS_LIST), v2: Object.keys(V2_PRESETS) },
+        next: `art_model material {name:"${def.name}", material:"hull", preset:"painted_hull", set:{clearcoat:{factor:1, rough:0.1}}}; preview {name:"${def.name}", channel:["lit","normal","orm","emissive"]}`,
+      };
+    }
+    const next = { ...def, materials: r.mats };
+    if (!Object.keys(r.mats).length) delete next.materials;
+    const s = summary(next, build(this, next));
+    saveModel(this, next, source, r.deleted ? `material ${r.name} deleted` : `material ${r.name}`);
+    const users = def.parts.map((p, i) => (p && (p.material === r.name || p.material?.preset === r.name) ? (p.name ?? p.id ?? i) : null)).filter((x) => x !== null);
+    return { model: def.name, material: r.name, ...(r.deleted ? { deleted: true } : { spec: r.spec, resolved: r.resolved }), used_by: { parts: users, canvas_faces: s.materials.filter((m) => m === r.name || m.startsWith(`${r.name}_`)).length }, next: `art_model preview {name:"${def.name}", channel:["lit","normal","orm","emissive"]} shows each channel; export {name:"${def.name}", profile:"three"} writes the extensions` };
+  },
   model_export(a) {
     const def = getModel(this, a.name);
     const scale = Number(a.scale ?? def.scale ?? 32);
@@ -719,9 +755,10 @@ export const MODEL_OPS = {
       const probe = build(this, def);
       for (const c of probe.tex.used) if (!this.docs.has(`${c}_n`) && !/_n$/.test(c)) this.run('normal_map', { canvas: c }, 'agent');
     }
-    const { glb, stats, built, info, rigClips, ctm, ctmNames, ext } = assembleGLB(this, def, { normal, instances: !!a.instances, scale, up: a.up, atlas: !!a.atlas, ctmFile: path.basename(file).replace(/\.glb$/i, '.ctm.json'), file, args: a, ...(a.bump !== undefined ? { bump: a.bump } : {}) });
+    const { glb, stats, built, info, rigClips, ctm, ctmNames, ext, v2 } = assembleGLB(this, def, { normal, instances: !!a.instances, scale, up: a.up, atlas: !!a.atlas, ctmFile: path.basename(file).replace(/\.glb$/i, '.ctm.json'), file, args: a, ...(a.bump !== undefined ? { bump: a.bump } : {}) });
     fs.writeFileSync(file, glb);
     if (ext) ext.after();
+    if (v2) for (const [f, buf] of v2.side) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, buf); }
     let ctmFile;
     if (ctmNames.length) {
       // runtime CTM: tilesets + rules (faces are already baked; this is for re-tiling in the engine)
@@ -738,10 +775,11 @@ export const MODEL_OPS = {
       ...(info ? { rig: { ...rigMeta(info, scale), clips: rigClips } } : {}),
       materials_note: 'NEAREST filters + REPEAT wrap; alphaMode MASK (cutoff 0.5) where the texture has transparency; BLEND (baseColorFactor alpha = opacity, extras.depthWrite false) for parts with opacity < 1 or glass, doubleSided for glass / double_sided; emissive from layer "emissive" / <canvas>_emissive; overlay materials (name overlay_*) sample TEXCOORD_1, strength = COLOR_0 alpha',
       ...(ext ? ext.meta : {}),
+      ...(v2 ? v2.meta : {}),
     };
     const metaFile = file.replace(/\.glb$/i, '.meta.json');
     fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2));
-    return { file, meta: metaFile, ...(ctmFile ? { ctm: ctmFile } : {}), bytes: glb.length, triangles: stats.triangles, vertices: stats.vertices, materials: stats.materials, nodes: stats.nodes, bounds_units: stats.bounds, atlased: stats.atlased, ...(info ? { animations: Object.keys(rigClips), sockets: info.sockets.map((s) => s.name) } : {}), ...(ext ? ext.result : {}) };
+    return { file, meta: metaFile, ...(ctmFile ? { ctm: ctmFile } : {}), bytes: glb.length, triangles: stats.triangles, vertices: stats.vertices, materials: stats.materials, nodes: stats.nodes, bounds_units: stats.bounds, atlased: stats.atlased, ...(info ? { animations: Object.keys(rigClips), sockets: info.sockets.map((s) => s.name) } : {}), ...(ext ? ext.result : {}), ...(v2 ? v2.result : {}) };
   },
   ...MODEL_EXTRA_OPS,
 };
@@ -873,7 +911,7 @@ export function modelThumbnail(engine, def, size = 128) {
  * Used by export and by the web UI's 3D viewer.
  */
 export function assembleGLB(engine, def, { normal = false, instances = false, scale = Number(def.scale ?? 32), up, atlas = false, ctmFile, bump, file = `${def.name}.glb`, args = {} } = {}) {
-  const keepGpu = !(rigLayout(def) || def.sockets || def.clips);
+  const keepGpu = !(rigLayout(def) || def.sockets || def.clips) && args.profile !== 'roblox' && args.profile !== 'minimal';
   const built = build(engine, def, { normal, instances, keepGpu, ...(bump !== undefined ? { bump } : {}) });
   const info = rigOf(def, built);
   let meshes = [], nodes = [], animations, rigClips;
@@ -906,6 +944,11 @@ export function assembleGLB(engine, def, { normal = false, instances = false, sc
   // surface / render-cost extras (only when asked for: plain exports are unchanged); side files are written by ext.after()
   const ext = wantsExtras(def, built, args) ? exportExtras(engine, def, built, args, { scale, file, info, meshes, nodes, writeGLB, variantDef: variantOf(engine, def), buildDef: (d) => build(engine, d, { tex: built.tex, normal, keepGpu }) }) : null;
   if (ext) ({ meshes, nodes } = ext);
-  const { glb, stats } = writeGLB({ meshes, nodes, animations }, { scale, up, atlas, name: def.name, extras, ...(ext ? ext.glbOpts : {}) });
-  return { glb, stats, built, info, rigClips, ctm, ctmNames, ext };
+  // materials v2 (profiles, packing, extensions, tangents, vertex data): only when something asks for it
+  meshes = meshes.map((m) => ({ ...m, groups: [...m.groups] })); // group iterators -> arrays (read twice below)
+  const v2 = exportV2(def, built, args, { meshes, nodes, ext, scale, file, info });
+  if (v2) meshes = v2.meshes;
+  const { glb, stats } = writeGLB({ meshes, nodes, animations }, { scale, up, atlas, name: def.name, extras, ...(v2 ? { ...v2.glbOpts, v2: v2.v2 } : ext ? ext.glbOpts : {}) });
+  if (v2) finishV2(v2, glb, stats);
+  return { glb, stats, built, info, rigClips, ctm, ctmNames, ext, v2 };
 }

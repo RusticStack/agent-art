@@ -112,11 +112,14 @@ function buildAtlas(meshes, maxSize = 256) {
     // baked AO rides along (every primitive of a mesh shares the AO lightmap / has vertex AO)
     if (on.every((p) => p.uv1)) merged.uv1 = new Float32Array(vc * 2);
     if (on.every((p) => p.ao)) merged.ao = new Float32Array(vc);
+    const vkeys = on[0].vattr ? Object.keys(on[0].vattr).join() : '';
+    if (vkeys && on.every((p) => p.vattr && Object.keys(p.vattr).join() === vkeys)) merged.vattr = Object.fromEntries(Object.entries(on[0].vattr).map(([k, a]) => [k, { size: a.size, data: new Float32Array(vc * a.size) }]));
     let vo = 0, io = 0;
     for (const p of on) {
       merged.pos.set(p.pos, vo * 3); merged.nrm.set(p.nrm, vo * 3); merged.uv.set(p.uv, vo * 2);
       if (merged.uv1) merged.uv1.set(p.uv1, vo * 2);
       if (merged.ao) merged.ao.set(p.ao, vo);
+      if (merged.vattr) for (const [k, a] of Object.entries(merged.vattr)) a.data.set(p.vattr[k].data, vo * a.size);
       for (let i = 0; i < p.idx.length; i++) merged.idx[io + i] = p.idx[i] + vo;
       vo += p.pos.length / 3; io += p.idx.length;
     }
@@ -163,8 +166,9 @@ const mul34 = (A, B) => {
  * px) | translation? (px) + rotation? [x,y,z,w] + scale?, children?: [node indices], extras? }],
  * animations?: [{ name, channels: [{ node, path: translation|rotation|scale, interpolation:
  * LINEAR|STEP, times: seconds, values: flat (translation px) }], extras? }] }. Nodes that are no
- * one's child are scene roots. opts: { scale = 32 (px per unit), up = 'y'|'z', atlas = false, name, extras }
- * -> { glb: Buffer, stats }
+ * one's child are scene roots. opts: { scale = 32 (px per unit), up = 'y'|'z', atlas = false, name, extras,
+ * v2? (materials v2 hooks from materials.js makeV2: extensions, ORM packing, texture dedupe,
+ * TANGENT, vertex data) } -> { glb: Buffer, stats }
  */
 export function writeGLB(scene, opts = {}) {
   const scale = Number(opts.scale ?? 32);
@@ -190,7 +194,14 @@ export function writeGLB(scene, opts = {}) {
     accessors: [], bufferViews: [], buffers: [],
   };
   const imageOf = new Map();
+  const v2 = opts.v2 || null, byHash = v2 ? new Map() : null;
   const texture = (key, w, h, data, name) => {
+    if (!imageOf.has(key) && v2) {
+      // v2: identical images are written once (shared across materials)
+      const hk = v2.hash(w, h, data);
+      if (byHash.has(hk)) { imageOf.set(key, byHash.get(hk)); v2.deduped(); }
+      else byHash.set(hk, json.textures.length);
+    }
     if (!imageOf.has(key)) {
       json.images.push({ name, mimeType: 'image/png', bufferView: view(encodePNG(w, h, data)) });
       json.textures.push({ sampler: 0, source: json.images.length - 1 });
@@ -213,7 +224,7 @@ export function writeGLB(scene, opts = {}) {
     const pbr = !overlay && t.pbr, mrMap = !overlay && t.mr;
     // metallicRoughness: maps carry the factors baked in (factors 1); plain PBR = factors; default dielectric rough
     const m = { name, pbrMetallicRoughness: { baseColorTexture: texture(ik, t.width, t.height, t.data, t.name || t.key), metallicFactor: mrMap ? 1 : pbr ? pbr.metal : 0, roughnessFactor: mrMap ? 1 : pbr ? pbr.rough : 1 } };
-    if (mrMap) m.pbrMetallicRoughness.metallicRoughnessTexture = texture(t.mrKey ?? ik + '#mr', t.width, t.height, t.mr, name + '_mr');
+    if (mrMap) m.pbrMetallicRoughness.metallicRoughnessTexture = v2 ? v2.mr(t, texture, name, ik, m) : texture(t.mrKey ?? ik + '#mr', t.width, t.height, t.mr, name + '_mr');
     const spec = !overlay && t.material;
     // overlay (grime/moss/...): own UV set TEXCOORD_1, strength in COLOR_0 alpha, cut out by MASK
     if (overlay) m.pbrMetallicRoughness.baseColorTexture.texCoord = 1;
@@ -231,6 +242,7 @@ export function writeGLB(scene, opts = {}) {
     if (t.normal) m.normalTexture = texture(t.normalKey ?? ik + '#n', t.width, t.height, t.normal, name + '_normal');
     // baked AO lightmap: every opaque material samples it with TEXCOORD_1
     if (!overlay && !noAO && opts.ao && !(spec && spec.blend)) m.occlusionTexture = { ...texture('ao#map', opts.ao.width, opts.ao.height, opts.ao.data, 'ao'), texCoord: 1 };
+    if (v2) v2.material(m, t, { texture, overlay, noAO, name, ik });
     json.materials.push(m);
     matOf.set(mk, json.materials.length - 1);
     return json.materials.length - 1;
@@ -241,7 +253,8 @@ export function writeGLB(scene, opts = {}) {
   for (const m of meshes) {
     const prims = [];
     let mt = 0, morphNames = null;
-    for (const p of m.prims) {
+    for (let p of m.prims) {
+      if (v2) p = v2.prepare(p);
       const vc = p.pos.length / 3;
       const P = new Float32Array(p.pos.length);
       const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
@@ -260,7 +273,7 @@ export function writeGLB(scene, opts = {}) {
         TEXCOORD_0: acc(view(p.overlay ? p.uv0 : p.uv, ARRAY), FLOAT, vc, 'VEC2'),
       };
       if (!p.overlay && p.uv1) attributes.TEXCOORD_1 = acc(view(p.uv1, ARRAY), FLOAT, vc, 'VEC2');
-      if (!p.overlay && p.ao) {
+      if (!p.overlay && p.ao && !(p.vattr && p.vattr.COLOR_0)) {
         const col = new Float32Array(vc * 3);
         for (let i = 0; i < vc; i++) col.fill(p.ao[i], i * 3, i * 3 + 3);
         attributes.COLOR_0 = acc(view(col, ARRAY), FLOAT, vc, 'VEC3');
@@ -271,7 +284,8 @@ export function writeGLB(scene, opts = {}) {
         for (let i = 0; i < vc; i++) col.set([1, 1, 1, p.alpha[i]], i * 4);
         attributes.COLOR_0 = acc(view(col, ARRAY), FLOAT, vc, 'VEC4');
       }
-      const prim = { attributes, indices: acc(view(I, ELEMENTS), big ? U32 : U16, I.length, 'SCALAR'), material: material(p.tex, !!p.overlay, !p.overlay && !!opts.ao && !p.uv1), mode: 4 };
+      if (v2) v2.attributes(p, attributes, (arr, type) => acc(view(arr, ARRAY), FLOAT, vc, type));
+      const prim = { attributes, indices: acc(view(I, ELEMENTS), big ? U32 : U16, I.length, 'SCALAR'), material: material(p.tex, !!p.overlay, !p.overlay && (!!opts.ao || !!(v2 && v2.bakedUV)) && !p.uv1), mode: 4 };
       if (p.morphs) {
         // morph targets: POSITION / NORMAL deltas (units), names in mesh.extras.targetNames
         prim.targets = p.morphs.map((t) => {
@@ -379,6 +393,7 @@ export function writeGLB(scene, opts = {}) {
   } else json.scenes[0].nodes = top;
 
   if (gpuUsed) json.extensionsUsed = [...(json.extensionsUsed || []), 'EXT_mesh_gpu_instancing'];
+  if (v2) v2.finish(json);
   const binBuf = Buffer.concat([...bin, Buffer.alloc((4 - (binLen % 4)) % 4)]);
   json.buffers.push({ byteLength: binBuf.length });
   let js = Buffer.from(JSON.stringify(json), 'utf8');
@@ -394,7 +409,7 @@ export function writeGLB(scene, opts = {}) {
     stats: {
       bytes: glb.length, triangles, vertices, meshes: json.meshes.length, nodes: scene.nodes.length, materials: json.materials.length, textures: json.textures.length,
       animations: json.animations ? json.animations.length : undefined,
-      atlased: atlased || undefined, bounds: { min: bmin.map(fin), max: bmax.map(fin), size: bmax.map((v, i) => fin(v - bmin[i])) },
+      atlased: atlased || undefined, ...(v2 ? { v2: v2.report } : {}), bounds: { min: bmin.map(fin), max: bmax.map(fin), size: bmax.map((v, i) => fin(v - bmin[i])) },
     },
   };
 }
