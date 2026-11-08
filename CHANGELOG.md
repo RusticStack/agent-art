@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Ships, interiors, industrial kits and megastructures (`art_model`)
+
+- `hull` part: lofted from a plan curve, a side profile and cross-section stations. It has hard creases, chamfered polygon sections, panel-line grooves, raised plates, mask carving and `uv:"fit"` livery mapping, and the surface stays closed.
+- `on_hull` places a part on a hull surface. Assemblies expand one part into several, each with sockets, poses and clips.
+  - Ship parts: canopy, engine, thruster, wing, fin, landing gear, ramp, cargo door, turret, rotary cannon, hardpoint, antenna, sensor dome, RCS quad, intake, vent, armour plate and container rack.
+  - Interior kit on a 64 px deck grid: corridor, room, door, airlock, ladder, lift, seat, console, bridge, engine room, quarters, cargo bay, hangar, med bay and armoury.
+  - Industrial and city kit: tower, dish, tank, silo, crane, gantry, pipeline, scaffold, hangar shell, hab module, rock platform, shaft, atrium, walkway bridge, lift shaft, cable web, pipe wall, market stall and sign frame.
+- New builders: `truss`, `beam`, `revolve`, `dome`, `rock`, `wing_panel`, `catwalk`, `landing_pad`, `container`, `neon`, `sign`, `holo`, `fog_card`, `god_ray`, `light` and `marker`. Lights and markers export as empty nodes with extras.
+- Templates `fighter`, `dropship`, `hauler` and `capital_ring` build complete original ships from a seed.
+- New actions:
+  - `kit` paints the kit texture canvases.
+  - `livery` paints paint masks, stripes, hazard zones, decals, an emblem and wear.
+  - `generate` builds a ship interior fitted to its hull, a mining colony or an underground market.
+  - `budget` reports scale classes, triangles, a LOD estimate and draw calls.
+- Export options: `static` (bake a rig pose), `split` (keep meshes under 20k triangles for Roblox) and `budget` (refuse over-budget exports). Preview option: `mood` (lit by the model's own lights).
+- Raster previews support coloured point lights and additive blending. Additive materials export `extras.blending: "additive"`.
+- The pixel fonts moved to `src/fonts.js`; `doc.js` re-exports them.
+- Plain models (no assemblies, `on_hull`, markers or new export options) export byte-identical .glb files.
+
 ## 0.7.0
 
 ### Weapon handling (`art_rig`, `art_model`)
