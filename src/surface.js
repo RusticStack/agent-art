@@ -233,6 +233,7 @@ export function paintTrimSheet({ width = 64, strips = DEFAULT_TRIM, colors = {},
     if (!(h >= 1 && h <= 64)) throw new Error(`strip "${s.name}": h must be 1..64 rows`);
     return { ...s, style, h };
   });
+  if (!list.length) throw new Error('trim strips: give at least one strip [{name, style, h}] (or leave strips out for the default sheet)');
   const H = list.reduce((a, s) => a + s.h, 0);
   if (H > 1024) throw new Error('trim sheet taller than 1024 rows');
   const pal = { base: hex(colors.base ?? '#5a606a'), light: hex(colors.light ?? '#8a909a'), dark: hex(colors.dark ?? '#2e3238'), accent: hex(colors.accent ?? '#d8a020'), glow: hex(colors.glow ?? '#7fd8ff') };

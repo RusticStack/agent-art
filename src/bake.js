@@ -134,7 +134,7 @@ export function normAO(v) {
     mode, samples: Math.max(4, Math.min(256, Math.round(Number(o.samples ?? 24)))), distance: Number(o.distance ?? 24), strength: Number(o.strength ?? 1),
     texel: Number(o.texel ?? 2), levels: o.levels ? Math.max(2, Math.round(Number(o.levels))) : 0, bias: Number(o.bias ?? 0.05), maxSize: Math.max(64, Math.min(4096, Math.round(Number(o.max_size ?? 2048)))),
   };
-  if (!(r.distance > 0) || !(r.texel > 0) || !(r.strength >= 0)) throw new Error('bake_ao distance and texel must be > 0, strength >= 0');
+  if (!(r.distance > 0) || !(r.texel > 0) || !(r.strength >= 0) || !Number.isFinite(r.samples) || !Number.isFinite(r.bias) || (o.levels && !Number.isFinite(r.levels))) throw new Error('bake_ao distance and texel must be > 0, strength >= 0, samples / levels / bias numbers');
   return r;
 }
 

@@ -109,6 +109,7 @@ export function exportExtras(engine, def, built, a, { scale, file, info, meshes,
   const ao = normAO(a.bake_ao);
   const cullSpec = a.cull ?? def.cull;
   const screen = { height: Number(a.lod_screen?.height ?? 720), fov: Number(a.lod_screen?.fov ?? 70), px: Number(a.lod_screen?.px ?? 1) };
+  if (!(screen.height > 0 && screen.fov > 0 && screen.fov < 180 && screen.px > 0)) throw new Error('lod_screen must be {height?:720 px > 0, fov?:70 deg (0..180), px?:1 > 0}');
   const root = built.mesh;
   const base = file.replace(/\.glb$/i, '');
   if (info || a.instances) {
