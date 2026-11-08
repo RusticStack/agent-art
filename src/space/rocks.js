@@ -108,10 +108,10 @@ export function crystalMesh(o) {
   return m;
 }
 
-/** Grass / dry-brush card: two crossed quads, alpha-cut pixel blades, double sided. */
+/** Grass / dry-brush card: crossed quads (cards: 2 or 3), alpha-cut pixel blades, double sided. */
 export function grassCard(o) {
-  const m = new Mesh(), w = o.size ?? 0.8, h = w * 0.75;
-  for (const a of [0, Math.PI / 2]) {
+  const m = new Mesh(), w = o.size ?? 0.8, h = w * (o.aspect ?? 0.75), n = o.cards ?? 2;
+  for (const a of Array.from({ length: n }, (_, i) => (i * Math.PI) / n)) {
     const dx = (Math.cos(a) * w) / 2, dz = (Math.sin(a) * w) / 2, n = [-Math.sin(a), 0, Math.cos(a)];
     m.face(o.tex, [[-dx, 0, -dz], [dx, 0, dz], [dx, h, dz], [-dx, h, -dz]], [0, 1, 0], [[0, 1], [1, 1], [1, 0], [0, 0]], n, 0);
   }
@@ -134,6 +134,21 @@ export function grassTexture(ramp, { size = 32, seed = 1 } = {}) {
       data[o4] = cc[0]; data[o4 + 1] = cc[1]; data[o4 + 2] = cc[2]; data[o4 + 3] = 255;
     }
   }
+  return { width: S, height: S, data };
+}
+
+/** Dry shrub card texture: branching twigs from a root, a few dead leaves (transparent background). */
+export function shrubTexture(ramp, { size = 32, seed = 1 } = {}) {
+  ramp = ramp.map((c) => (Array.isArray(c) ? c : hexRGB(c)));
+  const S = size, data = new Uint8ClampedArray(S * S * 4), r = mulberry32(seedOf(seed, 63));
+  const put = (x, y, c) => { x = Math.round(x); y = Math.round(y); if (x >= 0 && y >= 0 && x < S && y < S) data.set([c[0], c[1], c[2], 255], (y * S + x) * 4); };
+  const branch = (x, y, ang, len, depth) => {
+    const c = ramp[Math.min(ramp.length - 1, 3 - depth < 0 ? 0 : 3 - depth)] || ramp[0];
+    for (let k = 0; k < len; k++) { x += Math.cos(ang); y -= Math.sin(ang); put(x, y, c); if (depth < 2 && r() < 0.08) branch(x, y, ang + (r() - 0.5) * 1.6, len * 0.5, depth + 1); }
+    if (depth < 3) { branch(x, y, ang + 0.35 + r() * 0.4, len * 0.62, depth + 1); branch(x, y, ang - 0.35 - r() * 0.4, len * 0.62, depth + 1); }
+    else if (r() < 0.6) put(x, y, ramp[ramp.length - 1]);
+  };
+  for (let k = 0; k < 3; k++) branch(S / 2 + (r() - 0.5) * 4, S - 1, Math.PI / 2 + (r() - 0.5) * 0.9, S * 0.28, 0);
   return { width: S, height: S, data };
 }
 
