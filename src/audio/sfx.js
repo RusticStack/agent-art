@@ -429,14 +429,15 @@ export function validateSfx(def, ctx = {}) {
   return spec;
 }
 
-/** Seamless loop of length `len`: the `xf` samples after it crossfade (equal power) into the start; longer tails wrap. */
+/** Seamless loop of length `len`: the `xf` samples after it crossfade (equal power) into the start. Anything past
+ *  len + xf is dropped: it was already faded out by the crossfade, so adding it back at full level would
+ *  click and step the level up at sample xf of every loop. */
 function makeLoop(chs, len, xf) {
   const T = chs[0].length;
   const B = Math.max(64, Math.min(len, T - xf));
   return chs.map((c) => {
     const o = c.slice(0, B);
     for (let i = 0; i < xf && B + i < T; i++) { const x = (i + 0.5) / xf; o[i] = c[i] * Math.sin((Math.PI / 2) * x) + c[B + i] * Math.cos((Math.PI / 2) * x); }
-    for (let i = B + xf; i < T; i++) o[(i - B) % B] += c[i];
     return o;
   });
 }

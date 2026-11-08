@@ -149,6 +149,12 @@ test('sfx: FPS recipes render, honour environment/surface vars and loopable ones
   assert.ok(renderSfx({ recipe: 'casing_drop', vars: { surface: 'metal' } }).chs[0].length > renderSfx({ recipe: 'casing_drop', vars: { surface: 'concrete' } }).chs[0].length);
   assert.ok(renderSfx({ recipe: 'drone_rotor' }).loop && renderSfx({ recipe: 'alarm_klaxon' }).loop);
   assert.equal(renderSfx({ recipe: 'drone_rotor', loop: false }).loop, null);
+  // content past loop length + crossfade must not come back at full level at the crossfade end (click + level step)
+  for (const [recipe, xf] of [['drone_rotor', 0.15], ['alarm_klaxon', 0.05]]) {
+    const c = renderSfx({ recipe, seed: 1 }).chs[0], i0 = Math.round(xf * SR), w = 2000;
+    let a = 0, b = 0; for (let i = i0 - w; i < i0; i++) a += c[i] ** 2; for (let i = i0; i < i0 + w; i++) b += c[i] ** 2;
+    assert.ok(Math.abs(10 * Math.log10(b / a)) < 2, `${recipe} level step at the crossfade end ${(10 * Math.log10(b / a)).toFixed(1)} dB`);
+  }
 });
 
 test('sfx fixes: fx/reverb on layers, vars.target, default instrument, pitch_env sign, sfxr DC, loops', () => {
