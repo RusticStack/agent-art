@@ -117,7 +117,9 @@ export function damagedBuilt(def, built, state) {
   const st = spec.states.find((s) => s.name === state);
   if (!st) throw new Error(`damage: no state "${state}" (states: intact, ${spec.states.map((s) => s.name).join(', ')})`);
   const s = damageState(built, def, spec, st);
-  return { ...built, mesh: s.mesh, _rig: undefined, _rigF: undefined, layout: null };
+  // keep the layout / shift (part-attached sockets, named nodes): the rig is re-derived from the damaged
+  // mesh, whose faces keep their node tags, so only the mesh changes
+  return { ...built, mesh: s.mesh, _rig: undefined, _rigF: undefined };
 }
 
 /** Engine ops, bound to modelops internals (getModel, build, saveModel). */

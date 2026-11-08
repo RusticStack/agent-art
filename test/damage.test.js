@@ -317,3 +317,20 @@ test('damage: preview a state, delete removes the states, no damage files withou
   assert.equal(r.damage, undefined);
   assert.deepEqual(fs.readdirSync(dir).sort(), ['crate.glb', 'crate.meta.json']);
 });
+
+// ---------- regressions (PR #22 review) ----------
+test('damage render / preview on a model with part-attached sockets keeps the rig (named nodes + socket anchors)', () => {
+  const e = new Engine({ home: tmp() });
+  e.run('create', { name: 'out', width: 32 });
+  e.run('model_create', { name: 'gun', parts: [{ type: 'box', name: 'a', w: 8, h: 8, d: 8, color: '#777' }, { type: 'box', name: 'b', parent: 'a', w: 4, h: 4, d: 4, at: [0, 8, 0], color: '#999' }], sockets: { muzzle: { part: 'b', at: [0, 10, 0] } } });
+  e.run('model_damage', { name: 'gun', states: ['scuffed', 'wrecked'], seed: 3 });
+  for (const st of ['scuffed', 'wrecked']) {
+    const r = e.run('model_render', { name: 'gun', damage: st, canvas: 'out', size: 32 });
+    assert.ok(JSON.stringify(r.anchors).includes('socket_muzzle'), JSON.stringify(r.anchors));
+  }
+  e.run('model_create', { name: 'fighter', template: 'fighter' });
+  e.run('model_damage', { name: 'fighter', states: ['scuffed'] });
+  assert.ok(e.run('model_render', { name: 'fighter', damage: 'scuffed', canvas: 'out', size: 32 }).count >= 1);
+  assert.ok(e.run('model_preview', { name: 'fighter', damage: 'scuffed', size: 64 }).image.length > 100);
+});
+
