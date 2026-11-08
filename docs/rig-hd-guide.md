@@ -12,7 +12,7 @@ art_rig {"action":"create","name":"soldier","frame":[128,192],"template":"humano
 
 The reply lists:
 
-- **cells**: `[x, y, w, h]` for every part in every drawn view on canvas `soldier_parts`. There is one row band per view: `side` starts at y=0, `front_side` starts at y=74, `front` starts at y=148, `back_side` starts at y=222, `back` starts at y=296.
+- **cells**: where every part goes on canvas `soldier_parts`. There is one row band per view, in view order, and each band is as tall as the tallest part cell + 1 px. The reply gives them compactly as `cells.rows` (the y where each view's band starts) and `cells.parts` (`[x, w, h]` per part), so a cell is `[x, rows[view], w, h]`; `full:true` lists `[x, y, w, h]` per view. With the default parts at 128x192 the 73 px cape is the tallest cell, so the bands start at y = 0, 74, 148, 222, 296. Remove or resize parts and the bands move: with `cape:null` the 54 px thigh is the tallest, giving 0, 55, 110, 165, 220. Always read the rows from the reply instead of assuming them.
 - **views**: `side`, `front_side`, `front`, `back_side`, `back`. **mirror_views**: `side_left`, `front_side_left`, `back_side_left`. Mirrors are generated, not drawn.
 - **presets**: `idle` (12f), `blink` (10f), `walk` (16f), `run` (12f), `crouch_walk` (16f), `aim` (1f), `shoot` (6f), `reload` (24f), `hurt` (8f), `death` (20f), `throw` (12f).
 
@@ -29,7 +29,7 @@ art_rig {"action":"create","name":"soldier","frame":[128,192],"template":"humano
 - **side** faces RIGHT. `*_f` is the near side in that view: draw `*_b` parts darker, because they sit behind the body.
 - **Pivots** (red dots on the visible `cells` guide layer) are the joints. The pivot sits at the top of each limb piece (shoulder, elbow, wrist, hip, knee, ankle). The pelvis pivot is the hip line. The torso, chest, neck and head pivots are near their bottom.
 - **Limb cells overlap their joints** by a few pixels above and below. Paint a rounded end there so a bent elbow or knee stays closed.
-- **foot** pivot = ankle; toes point right in `side`. **weapon** pivot = the grip; draw the gun pointing right in `side`, and foreshortened toward the camera in `front` / `back`.
+- **foot** pivot = ankle; toes point right in `side`. **weapon** pivot = the grip; draw the gun pointing right in `side`, and foreshortened toward the camera in `front` / `back`. With weapon handling (`weapon:{class:"rifle"}`, section 5b) draw the weapon in the `side` row only: the other views project that cell.
 - **head:blink** = the same head with closed eyes (used by blink, hurt and death).
 - Optional slots (`weapon`, `gear_back`, `gear_hip`, `cape`) can stay empty or be removed with `null`.
 - `front_side` = 3/4 toward the camera, `back_side` = 3/4 away. Use the same palette keys in every view.

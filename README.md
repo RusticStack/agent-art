@@ -77,7 +77,35 @@ For detailed sprites in the style of late-90s pre-rendered games or *Replaced* (
 - **Follow another animation (`ik_from`):** `animate {ik_from:{canvas, animation, map:{hand_r:"socket_grip_r", hand_l:{anchor:"socket_grip_l", bend:-1}}, offset?}}` takes per-frame IK targets from another canvas's anchors, for example an `art_model render` of a gun clip, and copies its frame count, timing and loop. A map value is an anchor name or `{anchor, bend?, rot?, at?, weight?}`. Give the rig the render's frame size (or an `offset`). See [the end-to-end example](#rigid-part-rigs-animation-clips-and-pre-rendered-sprites).
 - `art_animation export {format: "spritesheet", json: false}` skips the sidecar JSON.
 
+- **Equipment sets:** give parts variants (`chest: ["plate"]`, `head: ["helmet", "helmet_blink"]`) and optionally a rig `variant_sets: {heavy: {chest: "plate", head: "helmet"}}`. Then `animate {..., variant: "heavy"}` renders every part with that set, so armour sets need no sheet swapping. A pose variant such as `blink` combines as `<set>_<variant>` (`helmet_blink`) when the part has one.
+- **Tags:** preset animations are always tagged `<preset>_<view>` (`walk_side`, `walk_front`). Pass `animation` to choose your own.
+- **Compact replies:** `create`, `update` and `info` reply with a summary. Cells come as `rows` (the y of each view's band) plus `parts` (`[x, w, h]`), so a cell is `[x, rows[view], w, h]`. `full: true` returns everything, and `fields: ["poses"]` returns only those fields. `art_info` works the same way.
+
 See [docs/rig-hd-guide.md](docs/rig-hd-guide.md) for a step-by-step guide. Skill: `rig-hd`.
+
+#### Held weapons: `weapon`
+
+Without constraints, generated sprites hold guns wrong: the support hand misses the foregrip, arms don't reach, the rifle clips through the torso, the gun swaps hands halfway through a walk cycle, and it vanishes outside aim poses. Declare the weapon and the rig handles it in every frame of every pose, clip and view:
+
+```jsonc
+{ "action": "create", "name": "soldier", "frame": [128, 192], "template": "humanoid_hd",
+  "weapon": { "class": "rifle", "attachments": { "vgrip": "vertical_grip" } } }
+// draw "weapon" and "att_vgrip" in the side row only, pointing right; then
+{ "action": "check", "name": "soldier" }   // every preset x 8 directions -> pass / fail + failing frames
+{ "action": "animate", "name": "soldier", "preset": "walk", "view": "front_side", "carry": "ready_high", "canvas": "soldier_walk_fs" }
+```
+
+- **Weapon definition:** named points in the weapon cell: `grip_main` (trigger hand), `grip_support` (handguard; it may slide back along the rail), `stock` (shoulder pocket contact), `muzzle`, `optic` (eye line) and `mag`. Classes (`rifle`, `carbine`, `smg`, `shotgun`, `dmr`, `sniper`, `lmg`, `pistol`) give defaults as fractions of the cell. Attachments are sub-parts that mount on sockets (`underbarrel`, `top`, `muzzle`). A vertical or angled grip or a bipod takes over `grip_support`, a suppressor the `muzzle`, an optic the `optic`. `attach` picks the active ones, and `animate {attach: []}` overrides them per call.
+- **Hands:** both hands solve onto their grips with two-bone IK every frame, and the wrists turn to each grip's angle. The support hand of a pistol cups the trigger hand. Mirrored views, 3/4 views and front and back views all hold, because the weapon and arms are solved once in a 3D body proxy and projected into each view.
+- **Reach:** arm lengths come from the rig. The shoulders protract a little. If that isn't enough, the support hand slides back along the rail and then the weapon moves back along its axis, or the frame is flagged. Limbs never stretch, and elbows always bend down and out.
+- **Dead zone:** the torso, head and legs (and any free arm) are capsules the weapon may not enter. The weapon is pushed out forward first, then outward, turning about the stock when it is shouldered. `standoff` sets the minimum gap between chest and receiver. When aiming, the stock sits in the shoulder pocket and the head tilts for a cheek weld to the optic line.
+- **Carry states:** long guns have `aim`, `ready_low`, `ready_high`, `hip`, `sprint`, `reload`, `slung`, `one_hand_low`, `drop` and `holster`. Pistols have `aim`, `compressed`, `low`, `reload`, `one_hand_low` and `holster`. Outside firing states the muzzle points down or forward-low, never at the character's own body. Set the state with `carry` on a pose or key, `weapon.poses` (by pose name), `weapon.carry` (the default) or `animate {carry}`, and add your own with `weapon.states`. The humanoid_hd presets come mapped: walk and idle use `ready_low`, run `sprint`, aim and shoot `aim`, reload `reload`, and throw `slung` (a pistol is holstered). The weapon stays visible unless it is holstered.
+- **Mirroring:** `mirror_pairs` swaps legs and free arms but keeps held hands and the weapon on their side. The key option `mirror_hands: true` deliberately swaps handedness.
+- **Front-view readability:** a barrel pointing at the camera is canted outward with a length floor (`foreshorten: {floor, cant, back_cant} | false`). In back-facing views the muzzle angles out past the silhouette on the weapon side.
+- **Layering:** the weapon is drawn over the torso when it is held in front of it and under it when behind, using projected depth. `weapon.layer: {above, below, pin}` overrides that. `layers {name, pose | preset + frame, view}` lists the draw order with the reason for each z, and `explain {part_a, part_b}` says why one part is drawn over another.
+- **Validation:** `check` measures every frame: hand-to-grip distance, limb over-extension, inverted elbows, weapon-body penetration, muzzle flags, layering and weapon visibility. `animate` runs the same checks and by default refuses to write a clip with a violating frame. `constraints: "fix"` auto-corrects instead (muzzle down, stronger cant, flipped elbows, draw order), and `"warn"` writes the frames and reports.
+
+The same system works for first-person `art_model` arms: see [Guns held by arms](#guns-held-by-arms-first-person). Skill: `weapon-handling`.
 
 ### 3D environments and props (HD-2D): `art_model`
 
@@ -166,6 +194,22 @@ End to end, a first-person rifle from the template to 2D sprite layers with arms
 ```
 
 The full pipeline (gun and magazine layers, angle sweep, 3D arms) is in `art_help {topic:"3d"}` under "Rigs & clips" and "Pre-rendered sprites". Skills: `fp-weapon`, `prop-rig` (doors, chests, turrets).
+
+#### Guns held by arms (first person)
+
+Create `fp_rifle` or `fp_pistol` with `weapon` and the `fp_arms` hands solve onto the gun instead of following a fixed pose:
+
+```jsonc
+{ "action": "create", "name": "arms", "template": "fp_arms" }
+{ "action": "create", "name": "gun", "template": "fp_rifle", "weapon": { "attach": ["vertical_grip"] } }
+{ "action": "render", "name": "arms", "canvas": "arms_low", "camera": "fp", "hold": { "weapon": "gun", "carry": "ready_low", "both": true } }
+{ "action": "check", "name": "arms", "hold": { "weapon": "gun" } }   // every carry state and clip -> pass / fail
+{ "action": "animate", "name": "arms", "clip": "reload_empty", "hold": { "weapon": "gun", "carry": "reload", "bake_weapon": "reload_empty_held" } }
+```
+
+- **Weapon:** `grip_main`, `grip_support`, `stock`, `muzzle`, `optic` and `mag` name sockets or `{part, at, look, up}` points. The attachments `vertical_grip`, `angled_grip`, `bipod` and `suppressor` add parts and sockets and take over the grip or the muzzle. Without `weapon` the templates are unchanged.
+- **Hold:** two-bone IK puts each palm on its grip, with the wrist turned to the grip's `look` and `up`. The carry states are `hip`, `aim` (the optic on the screen centre, stock welded), `ready_low`, `ready_high`, `sprint`, `reload` (the support hand on the magazine) and `holster`, plus pistol `compressed` and `low`. `weapon.states` adds your own, with `base`. A grip out of reach moves the gun back or slides the support hand, never stretching the arm. A gun inside the head, chest or shoulder capsules is pushed out. The muzzle must point down outside firing states, and `fix: true` lowers it.
+- **Output:** `render {hold}` and `animate {hold}` return a `hold` / `held` report (corrections, issues, pass). `animate {hold}` bakes the solved arms into a clip, and `bake_weapon` also writes the matching gun clip, so the exported glTF plays back without the solver. `check` adds visibility: how much of the gun is on screen and how much the arms hide.
 
 #### Ships and vehicles
 

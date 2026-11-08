@@ -3,15 +3,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseColor, toHex } from './color.js';
-import { buildModel, PART_DOCS } from './model3d.js';
+import { buildModel, PART_DOCS, matMul } from './model3d.js';
 import { generateCTM, CTM_METHODS } from './ctm.js';
 import { Doc, MAX_SIZE } from './doc.js';
-import { writeGLB } from './glb.js';
+import { writeGLB, trsMatrix } from './glb.js';
 import { renderViews, makeCamera, renderCamera } from './raster3d.js';
 import { encodePNG } from './png.js';
 import { packImages } from './sheet.js';
 import { BAYER4 } from './util.js';
-import { rigInfo, rigSummary, rigScene, rigMeta, resolveOffsets, clipKeys, sampleClip, posedWorld, angleMatrix, subtree } from './modelrig.js';
+import { normalizeWeapon3D, armsChains, solveHold3D, frameIssues3D, offsetOf } from './weapon3d.js';
+import { rigInfo, rigSummary, rigScene, rigMeta, resolveOffsets, clipKeys, sampleClip, posedWorld, angleMatrix, subtree, quatOfMat, nodeTRS } from './modelrig.js';
 import { MODEL_TEMPLATES } from './modeltemplates.js';
 
 const NAME_RE = /^[A-Za-z0-9_\-.]{1,64}$/;
@@ -328,7 +329,7 @@ function placeFrames(engine, outName, FW, FH, tag, imgs, { durations, loop, proj
 }
 
 /** Model-level options kept on create/update (besides name and parts). */
-export const MODEL_KEYS = ['grid', 'scale', 'origin', 'notes', 'project', 'overlays', 'uv_origin', 'rig', 'sockets', 'poses', 'clips'];
+export const MODEL_KEYS = ['grid', 'scale', 'origin', 'notes', 'project', 'overlays', 'uv_origin', 'rig', 'sockets', 'poses', 'clips', 'weapon', 'arms'];
 
 /** Part index from a number or a part name. */
 function partIndex(parts, k, what) {
@@ -361,7 +362,7 @@ function fromTemplate(a) {
   if (!make) throw new Error(`unknown template "${a.template}" (templates: ${Object.keys(MODEL_TEMPLATES).join(', ')})`);
   if (a.parts !== undefined) throw new Error('template: change the template parts with set:{<part name>:{..}}, add:[..] and remove:[names] (parts replaces nothing here)');
   const t = make(a);
-  const base = { name: a.name, parts: t.parts, sockets: t.sockets, poses: t.poses, clips: t.clips, notes: t.notes };
+  const base = { name: a.name, parts: t.parts, sockets: t.sockets, poses: t.poses, clips: t.clips, notes: t.notes, ...(t.weapon ? { weapon: t.weapon } : {}) };
   const merged = applyPatch(base, { set: a.set, add: a.add, remove: a.remove });
   for (const k of ['sockets', 'poses', 'clips']) if (a[k] !== undefined && a[k] !== null) {
     merged[k] = { ...(merged[k] || {}) };
@@ -421,7 +422,7 @@ export const MODEL_OPS = {
     if (models(this).has(a.name) && !a.overwrite) throw new Error(`Model "${a.name}" exists (overwrite:true replaces it; art_model update changes it)`);
     const tpl = a.template !== undefined ? fromTemplate(a) : null;
     const def = { name: a.name, parts: tpl ? tpl.parts : a.parts, grid: a.grid ?? 32, scale: a.scale ?? 32, origin: a.origin ?? 'auto' };
-    if (tpl) { for (const k of ['sockets', 'poses', 'clips']) if (tpl[k]) def[k] = tpl[k]; if (a.notes === undefined) def.notes = tpl.notes; def.template = a.template; }
+    if (tpl) { for (const k of ['sockets', 'poses', 'clips', 'weapon']) if (tpl[k]) def[k] = tpl[k]; if (a.notes === undefined) def.notes = tpl.notes; def.template = a.template; }
     for (const k of MODEL_KEYS) if (a[k] !== undefined && a[k] !== null && def[k] === undefined) def[k] = a[k];
     def.created = Date.now();
     const s = summary(def, build(this, def));
@@ -473,6 +474,7 @@ export const MODEL_OPS = {
   /** Store an animation clip: keys [{pose|parts, t (s), ease?}], loop?, events?:[{t, name}], duration?. keys:null deletes it. */
   model_animate(a, source) {
     const def = getModel(this, a.name);
+    if (a.hold) return holdAnimate(this, def, a, source);
     if (!/^[\w.-]{1,64}$/.test(a.clip || '')) throw new Error('animate needs a "clip" name (e.g. "reload_empty")');
     const clips = { ...(def.clips || {}) };
     let r = null;
@@ -507,7 +509,10 @@ export const MODEL_OPS = {
     if (a.hide) subtree(info, a.hide);
     // poses: clip samples | one pose | rest
     let samples, ms = a.duration ?? 100, loop = a.loop;
-    if (a.clip !== undefined) {
+    // hold: arms solved onto a gun (or a gun carried by arms) every frame: carry state, grips, dead zone
+    const hold = a.hold ? holdSetup(this, def, built, info, a) : null;
+    if (hold) { samples = hold.samples; ms = a.duration ?? hold.ms ?? ms; loop = loop ?? hold.loop; }
+    else if (a.clip !== undefined) {
       const cs = clipSamples(def, info, a.clip, a.frames, a.fps);
       samples = cs.samples; ms = a.duration ?? cs.ms; loop = loop ?? cs.loop;
     } else samples = [{ time: 0, pose: resolveOffsets(def, info, { pose: a.pose, parts: a.parts }) }];
@@ -533,6 +538,12 @@ export const MODEL_OPS = {
     const filter = { only: a.only, hide: a.hide };
     const posed = frames.map(({ ang, s }) => {
       const pre = ang.yaw || ang.pitch || ang.roll ? angleMatrix(ang, pivot) : null;
+      if (s.self) {
+        const full = holdPosed(s.self, pre);
+        if (a.hold.both) full.mesh.add(holdPosed(s.other, pre).mesh);
+        const shown = a.only || a.hide ? holdPosed(s.self, pre, filter) : full;
+        return { full, shown };
+      }
       const full = posedWorld(info, s.pose, { pre });
       const shown = a.only || a.hide ? posedWorld(info, s.pose, { pre, ...filter }) : full;
       return { full, shown };
@@ -595,8 +606,45 @@ export const MODEL_OPS = {
     const sheet = packImages(shown, { labels: true, checker: true, columns: grid ? Math.min(grid.columns, 8) : Math.min(shown.length, 6) });
     return {
       canvas: out.name, animation: tag, frames: [start, start + imgs.length - 1], count: imgs.length, size: `${FW}x${FH}`, camera: cam.label, ...(grid ? { grid } : {}),
-      ...(colors ? { colors } : {}), anchors: info.sockets.map((s) => s.name), image: encodePNG(sheet.width, sheet.height, sheet.data),
+      ...(colors ? { colors } : {}), ...(hold ? { hold: holdReport(hold) } : {}), anchors: info.sockets.map((s) => s.name), image: encodePNG(sheet.width, sheet.height, sheet.data),
       next: `art_animation export {canvas:"${out.name}", format:"spritesheet"} (json frames[].anchors = socket positions per frame; json:false = png only). Arms: art_rig animate {..., ik_from:{canvas:"${out.name}", animation:"${tag}", map:{hand_f:"socket_grip_r"}}}`,
+    };
+  },
+  /**
+   * Weapon-handling validation for first-person rigs: every frame of every gun clip (+ the rest
+   * pose) in every carry state: hand-to-grip distance, over-extension, gun-body penetration,
+   * muzzle flags, gun visibility through the fp camera. -> pass/fail + failing frames.
+   */
+  model_check(a) {
+    const def = getModel(this, a.name);
+    const built = build(this, def), info = rigOf(def, built, true);
+    if (!a.hold) throw new Error('check needs hold:{weapon:<gun model>} (on arms) or {arms:<arms model>} (on a gun)');
+    const probe = holdSetup(this, def, built, info, { ...a, hold: { ...a.hold, clip: undefined }, clip: undefined, pose: undefined });
+    const W = probe.gun.weapon;
+    const clips = a.clips || (a.hold.clip ? [a.hold.clip] : [null, ...Object.keys(probe.gun.def.clips || {})]);
+    const carries = a.carries || (a.hold.carry ? [a.hold.carry] : Object.keys(W.states));
+    const out = [];
+    let frames = 0, failed = 0;
+    const worst = { hand_grip: 0, reach: 0, penetration: 0, visible: null };
+    const t0 = performance.now();
+    for (const clip of clips) for (const carry of carries) {
+      const hs = holdSetup(this, def, built, info, { hold: { ...a.hold, clip: clip ?? undefined, carry }, frames: a.frames ?? (clip ? 8 : 1) });
+      for (const [i, s] of hs.samples.entries()) {
+        const m = s.sol.metrics;
+        const visible = a.visibility === false || m.hidden ? null : gunVisibility(s);
+        const issues = frameIssues3D(m, visible, W);
+        frames++;
+        for (const v of Object.values(m.hand_grip)) worst.hand_grip = Math.max(worst.hand_grip, v);
+        for (const v of Object.values(m.reach)) worst.reach = Math.max(worst.reach, v);
+        worst.penetration = Math.max(worst.penetration, m.penetration);
+        if (visible !== null) { worst.visible = worst.visible === null ? visible.visible : Math.min(worst.visible, visible.visible); worst.onscreen = worst.onscreen === undefined ? visible.onscreen : Math.min(worst.onscreen, visible.onscreen); }
+        if (issues.length) { failed++; if (out.length < (a.limit ?? 40)) out.push({ clip: clip ?? 'rest', carry, frame: i, t: +s.time.toFixed(3), issues }); }
+      }
+    }
+    return {
+      model: def.name, gun: probe.gun.def.name, arms: probe.arms.def.name, pass: failed === 0, frames_checked: frames, frames_failed: failed, worst, carries, clips: clips.map((c) => c ?? 'rest'),
+      summary: failed ? `FAIL: ${failed} of ${frames} frames violate weapon constraints (first: ${out[0].clip}/${out[0].carry} frame ${out[0].frame}: ${out[0].issues[0]})` : `PASS: ${frames} frames (${clips.length} clips x ${carries.length} carry states) hold the gun correctly`,
+      ...(out.length ? { issues: out } : {}), ms: Math.round(performance.now() - t0),
     };
   },
   model_list() {
@@ -678,3 +726,115 @@ export const MODEL_OPS = {
     return { file, meta: metaFile, ...(ctmFile ? { ctm: ctmFile } : {}), bytes: glb.length, triangles: stats.triangles, vertices: stats.vertices, materials: stats.materials, nodes: stats.nodes, bounds_units: stats.bounds, atlased: stats.atlased, ...(info ? { animations: Object.keys(rigClips), sockets: info.sockets.map((s) => s.name) } : {}) };
   },
 };
+
+// ---------- weapon handling (first-person): arms holding a gun model ----------
+/**
+ * hold:{weapon:<gun> (rendering arms) | arms:<arms> (rendering the gun), clip?, carry?, attach?, both?, fix?}
+ * -> per-frame samples of the rendered model (pose + root transform + hidden nodes) and the other model.
+ */
+function holdSetup(engine, def, built, info, a) {
+  const h = a.hold;
+  if (!h || typeof h !== 'object' || Array.isArray(h)) throw new Error('hold must be {weapon:<gun model>} (on an arms model) or {arms:<arms model>} (on a gun), with carry?, attach?, clip?, both?, fix?');
+  const selfGun = !!def.weapon;
+  const otherName = selfGun ? h.arms : h.weapon;
+  if (!otherName) throw new Error(selfGun ? 'hold on a gun needs arms:<arms model>' : 'hold on an arms model needs weapon:<gun model>');
+  const odef = getModel(engine, otherName), obuilt = build(engine, odef), oinfo = rigOf(odef, obuilt, true);
+  const [gdef, gbuilt, ginfo, adef, ainfo] = selfGun ? [def, built, info, odef, oinfo] : [odef, obuilt, oinfo, def, info];
+  if (!gdef.weapon) throw new Error(`hold: model "${gdef.name}" has no weapon setting (create {template:"fp_rifle", weapon:true} or update {weapon:{grips:{grip_main:"grip_r", grip_support:"grip_l"}}})`);
+  const gun = { def: gdef, info: ginfo, weapon: normalizeWeapon3D(gdef, ginfo, gbuilt) };
+  const arms = { def: adef, info: ainfo, chainsInfo: armsChains(adef, ainfo) };
+  if (h.carry !== undefined) { const st = typeof h.carry === 'string' ? h.carry : h.carry?.state; if (!gun.weapon.states[st]) throw new Error(`hold.carry: unknown state "${st}" (states: ${Object.keys(gun.weapon.states).join(', ')})`); }
+  if (h.attach !== undefined) for (const n of [].concat(h.attach)) if (!gun.weapon.attachments[n]) throw new Error(`hold.attach: unknown attachment "${n}" (attachments: ${Object.keys(gun.weapon.attachments).join(', ') || 'none'})`);
+  const clip = h.clip ?? a.clip;
+  let gs, ms, loop;
+  if (clip !== undefined && (gdef.clips || {})[clip]) { const cs = clipSamples(gdef, ginfo, clip, a.frames, a.fps); gs = cs.samples; ms = cs.ms; loop = cs.loop; }
+  else if (clip !== undefined) throw new Error(`hold: the gun "${gdef.name}" has no clip "${clip}" (clips: ${Object.keys(gdef.clips || {}).join(', ') || 'none'})`);
+  else gs = [{ time: 0, pose: selfGun ? resolveOffsets(gdef, ginfo, { pose: a.pose, parts: a.parts }) : new Map() }];
+  const armsBase = selfGun ? new Map() : resolveOffsets(adef, ainfo, { pose: a.pose, parts: a.parts });
+  const samples = gs.map((s) => {
+    const sol = solveHold3D(gun, arms, { gunPose: s.pose, armsPose: armsBase, carry: h.carry, attach: h.attach, fix: !!h.fix });
+    const inactive = Object.entries(gun.weapon.attachments).filter(([n]) => !sol.active.includes(n)).flatMap(([, x]) => x.parts);
+    const gunHide = sol.hidden ? [ginfo.root] : inactive;
+    const gunS = { info: ginfo, pose: s.pose, pre: sol.pre, hide: gunHide }, armS = { info: ainfo, pose: sol.arms, pre: null, hide: [] };
+    return { time: s.time, self: selfGun ? gunS : armS, other: selfGun ? armS : gunS, gun: gunS, arms: armS, sol };
+  });
+  return { samples, ms, loop, gun, arms, clip: clip ?? null };
+}
+
+/** Posed world of one hold side under an optional angle transform. */
+function holdPosed(side, angPre, extra = {}) {
+  const pre = side.pre ? (angPre ? matMul(angPre, side.pre) : side.pre) : angPre;
+  const hide = [...side.hide, ...(extra.hide || [])];
+  return posedWorld(side.info, side.pose, { pre, ...extra, ...(hide.length ? { hide } : { hide: undefined }) });
+}
+
+/**
+ * Gun visibility through the fp camera: onscreen = gun pixels in the frame / frame area (a gun
+ * pushed off screen or holstered reads as gone); visible = share of those not covered by the arms.
+ */
+function gunVisibility(sample, size = [96, 72]) {
+  const [w, h] = size;
+  const cam = makeCamera('fp', w, h, [], {});
+  const g = holdPosed(sample.gun, null).mesh, ar = holdPosed(sample.arms, null).mesh;
+  if (!g.triangles) return null;
+  const draw = (m) => renderCamera(groupsOf(m), cam, w, h, { bg: null }).data;
+  const both = g.clone(); both.add(ar.clone());
+  const G = draw(g), B = draw(both), A = ar.triangles ? draw(ar) : new Uint8ClampedArray(G.length);
+  let own = 0, vis = 0;
+  for (let i = 0; i < G.length; i += 4) {
+    if (!G[i + 3]) continue;
+    own++;
+    if (B[i + 3] && (B[i] !== A[i] || B[i + 1] !== A[i + 1] || B[i + 2] !== A[i + 2] || !A[i + 3])) vis++;
+  }
+  return { visible: own ? Math.round((vis / own) * 100) / 100 : 0, onscreen: Math.round((own / (w * h)) * 1000) / 1000 };
+}
+
+/** Compact per-frame hold metrics for render replies. */
+function holdReport(hold) {
+  const W = hold.gun.weapon;
+  const bad = [];
+  hold.samples.forEach((s, i) => { const is = frameIssues3D(s.sol.metrics, null, W); if (is.length) bad.push({ frame: i, issues: is }); });
+  return { gun: hold.gun.def.name, arms: hold.arms.def.name, states: [...new Set(hold.samples.map((s) => s.sol.metrics.state))], pass: !bad.length, ...(bad.length ? { issues: bad.slice(0, 6) } : {}), corrections: [...new Set(hold.samples.flatMap((s) => s.sol.metrics.corrections))] };
+}
+
+/**
+ * animate {name:<arms>, clip, hold:{weapon:<gun>, clip?, carry?, attach?, fps?, bake_weapon?}}: bake an arms clip that
+ * holds the gun on every key (sampled at fps, default 30); bake_weapon:"<clip>" also writes the gun's
+ * carried / corrected motion as a clip on the gun model.
+ */
+function holdAnimate(engine, def, a, source) {
+  if (!/^[\w.-]{1,64}$/.test(a.clip || '')) throw new Error('animate needs a "clip" name');
+  if (def.weapon) throw new Error('animate {hold} bakes the ARMS clip: call it on the arms model with hold:{weapon:<gun>}');
+  const built = build(engine, def), info = rigOf(def, built, true);
+  const fps = Number(a.hold.fps ?? a.fps ?? 30);
+  const gclip = a.hold.clip ?? (getModel(engine, a.hold.weapon).clips || {})[a.clip] ? (a.hold.clip ?? a.clip) : undefined;
+  const probe = gclip ? clipSamples(getModel(engine, a.hold.weapon), rigOf(getModel(engine, a.hold.weapon), build(engine, getModel(engine, a.hold.weapon)), true), gclip, undefined, fps) : null;
+  const hs = holdSetup(engine, def, built, info, { hold: { ...a.hold, clip: gclip }, frames: probe ? probe.samples.length + (probe.loop ? 0 : 0) : 1 });
+  const chains = Object.values(hs.arms.chainsInfo.chains).flat();
+  const keys = hs.samples.map((s) => ({ t: +s.time.toFixed(4), parts: Object.fromEntries(chains.filter((n) => s.sol.arms.has(n)).map((n) => [n, offsetOf(info.byName.get(n), s.sol.arms.get(n))])) }));
+  const duration = probe ? probe.duration : 0;
+  const clip = { keys: keys.length > 1 ? keys : [{ ...keys[0], t: 0 }], ...(probe?.loop ? { loop: true, duration } : duration ? { duration } : {}) };
+  const clips = { ...(def.clips || {}), [a.clip]: clip };
+  const ck = clipKeys(def, info, clip);
+  saveModel(engine, { ...def, clips }, source, `clip ${a.clip} (held)`);
+  let baked = null;
+  if (a.hold.bake_weapon) {
+    // the gun's top nodes carry the carry-state / correction transform per key
+    const g = hs.gun, top = g.info.nodes.filter((n) => n.parent === g.info.root);
+    const gkeys = hs.samples.map((s) => {
+      const parts = {};
+      for (const n of top) {
+        const off = s.gun.pose.get(n.name);
+        const L = off && off.q ? trsMatrix(off.t, off.q, off.s) : (() => { const x = nodeTRS(n, off); return trsMatrix(x.t, x.q, x.s); })();
+        const M = matMul(s.sol.pre, L);
+        parts[n.name] = offsetOf(n, { t: [M[3], M[7], M[11]], q: quatOfMat(M) });
+      }
+      for (const [nn, o] of s.gun.pose) if (!top.some((x) => x.name === nn)) { const node = g.info.byName.get(nn); if (node && o.q) parts[nn] = offsetOf(node, o); else if (o.rot) parts[nn] = { rot: o.rot, at: o.at, scale: o.scale }; }
+      return { t: +s.time.toFixed(4), parts };
+    });
+    const gclips = { ...(g.def.clips || {}), [a.hold.bake_weapon]: { keys: gkeys, ...(probe?.loop ? { loop: true, duration } : duration ? { duration } : {}) } };
+    saveModel(engine, { ...g.def, clips: gclips }, source, `clip ${a.hold.bake_weapon} (carried)`);
+    baked = a.hold.bake_weapon;
+  }
+  return { model: def.name, clip: a.clip, keys: ck.keys.length, duration: ck.duration, loop: ck.loop, held: holdReport(hs), ...(baked ? { weapon_clip: `${hs.gun.def.name}/${baked}` } : {}), next: `export {name:"${def.name}"} ships the held clip as a glTF animation; check {name:"${def.name}", hold:{weapon:"${hs.gun.def.name}"}} validates every clip and carry state` };
+}

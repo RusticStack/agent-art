@@ -3,8 +3,9 @@
 import { Doc, Layer, checkSize, MAX_SIZE } from './doc.js';
 import { encodePNG } from './png.js';
 import { packImages } from './sheet.js';
-import { rigTemplate, mergeTemplate, RIG_TEMPLATES, TEMPLATE_FRAME } from './rigtemplates.js';
-import { normalizeRig, normalizeSecondary, cellOf, renderPose, animatePoses, resolvePose, lowestRow, shiftFrame, poseAnchors, plantFeet, simulateSecondary, ikChain } from './rig.js';
+import { rigTemplate, mergeTemplate, RIG_TEMPLATES, TEMPLATE_FRAME, hdWeaponConfig } from './rigtemplates.js';
+import { weaponArt, weaponMetrics, CARRY_STATES, ATTACHMENT_TYPES, WEAPON_CLASSES, POINT_NAMES } from './weapon.js';
+import { normalizeRig, normalizeSecondary, cellOf, renderPose, animatePoses, resolvePose, lowestRow, shiftFrame, poseAnchors, plantFeet, simulateSecondary, ikChain, solvePose, partIn } from './rig.js';
 
 const partsName = (name) => `${name}_parts`;
 
@@ -12,7 +13,10 @@ function getRig(engine, name) {
   if (!name) throw new Error('rig "name" is required');
   const d = engine.docs.get(partsName(name));
   if (!d || !d.meta?.rig) throw new Error(`No rig "${name}" (art_rig create first)`);
-  return { d, rig: normalizeRig(d.meta.rig), def: d.meta.rig };
+  const rig = normalizeRig(d.meta.rig);
+  // weapon handling collides with the drawn silhouettes (cell art), not the cell boxes
+  if (rig.weapon) weaponArt(rig, artComposite(d), d.width, cellOf);
+  return { d, rig, def: d.meta.rig };
 }
 
 /** Thin 1px cell frames on a hidden "cells" layer so the UI shows where each part goes. */
@@ -55,11 +59,11 @@ function relayout(oldRig, newRig, d) {
 }
 
 /** Rig-level options stored in the definition (absent = old behaviour). */
-const RIG_OPTS = ['sampling', 'secondary', 'feet', 'scale_children'];
+const RIG_OPTS = ['sampling', 'secondary', 'feet', 'scale_children', 'weapon', 'variant_sets'];
 
 /** Validate pose data: parts, variants, per-view overrides and IK specs. */
 function checkPose(rig, P, where = 'pose') {
-  const ok = (tg) => (Array.isArray(tg) ? tg.length === 2 && tg.every((n) => Number.isFinite(Number(n))) : tg?.mix ? ok(tg.mix[0]) && ok(tg.mix[1]) : !!(tg?.part && rig.parts[tg.part]));
+  const ok = (tg) => (Array.isArray(tg) ? tg.length === 2 && tg.every((n) => Number.isFinite(Number(n))) : tg?.mix ? ok(tg.mix[0]) && ok(tg.mix[1]) : tg?.weapon !== undefined ? !!rig.weapon && (POINT_NAMES.includes(tg.weapon) || !!rig.weapon.sockets[tg.weapon]) : !!(tg?.part && rig.parts[tg.part]));
   const checkParts = (o, w) => {
     for (const [k, v] of Object.entries(o || {})) {
       if (k === 'ik' || k === 'views') continue;
@@ -69,7 +73,7 @@ function checkPose(rig, P, where = 'pose') {
     for (const [end, e] of Object.entries(o?.ik || {})) {
       if (!e) continue;
       ikChain(rig, end);
-      if (!ok(e.target)) throw new Error(`${w}: ik "${end}" needs target:[x,y] (frame px) or {part:<existing part>, at?:[dx,dy]}`);
+      if (!ok(e.target)) throw new Error(`${w}: ik "${end}" needs target:[x,y] (frame px), {part:<existing part>, at?:[dx,dy]} or, with a rig weapon, {weapon:<${POINT_NAMES.join('|')}|socket>, at?:[dx,dy]}`);
     }
   };
   checkParts(P, where);
@@ -104,10 +108,11 @@ export const RIG_OPS = {
     let def, guide;
     if (a.template) {
       // template = starting point only: caller parts/poses/presets/views/root override it
-      const t = mergeTemplate(rigTemplate(a.template, a.frame), a);
+      const t = mergeTemplate(rigTemplate(a.template, a.frame, a.weapon ? { weapon: a.weapon } : undefined), a);
       guide = t.guide;
       def = { frame: t.frame, views: t.views, mirror: t.mirror, parts: t.parts, root: t.root, pairs: a.pairs, poses: t.poses, presets: t.presets, template: a.template };
       for (const k of RIG_OPTS) if (t[k] !== undefined && !(k === 'secondary' && !Object.keys(t[k]).length)) def[k] = t[k];
+      if (a.weapon && !def.weapon) def.weapon = a.weapon;
     } else {
       def = { frame: a.frame, views: a.views, mirror: a.mirror, parts: a.parts, root: a.root, pairs: a.pairs, poses: a.poses || {}, presets: a.presets || {} };
       for (const k of RIG_OPTS) if (a[k] !== undefined) def[k] = a[k];
@@ -154,6 +159,13 @@ export const RIG_OPS = {
         else next.parts[k] = { ...(def.parts[k] || {}), ...v };
       }
     }
+    if (a.weapon && def.template === 'humanoid_hd') {
+      // humanoid_hd: carry states for the template poses and cells for any new attachments
+      next.weapon = hdWeaponConfig(a.weapon);
+      const tp = rigTemplate('humanoid_hd', next.frame || def.frame, { weapon: a.weapon }).parts;
+      next.parts = { ...(next.parts || def.parts) };
+      for (const [k, v] of Object.entries(tp)) if (/^att_/.test(k) && !next.parts[k] && v.parent === 'weapon') next.parts[k] = v;
+    }
     const rig = normalizeRig(next);
     if (a.poses) for (const [k, P] of Object.entries(a.poses)) if (P) checkPose(rig, P, `pose "${k}"`);
     relayout(oldRig, rig, d);
@@ -170,6 +182,7 @@ export const RIG_OPS = {
       parts: Object.fromEntries(rig.order.map((n) => { const p = rig.parts[n]; return [n, { w: p.w, h: p.h, pivot: p.pivot, parent: p.parent, at: p.at, z: p.z, variants: p.variants.slice(1), views: p.views }]; })),
       cells: cellsReport(rig), poses: rig.poses, presets: def.presets || {},
       sampling: rig.sampling, scale_children: rig.scaleChildren, secondary: rig.secondary, feet: rig.feet,
+      ...(rig.weapon ? { weapon: weaponSummary(rig) } : {}), ...(rig.variantSets ? { variant_sets: rig.variantSets } : {}),
       note: 'complete rig for game engines: save this JSON as <name>_rig.json',
     };
   },
@@ -203,20 +216,22 @@ export const RIG_OPS = {
   /** One pose in one view (or every view side by side) as an image. */
   rig_preview(a) {
     const { d, rig } = getRig(this, a.name);
-    const pose = a.pose !== undefined ? resolvePose(rig, { pose: a.pose }) : a.parts || {};
+    let pose = a.pose !== undefined ? resolvePose(rig, { pose: a.pose, ...(a.carry !== undefined ? { carry: a.carry } : {}) }) : a.parts || {};
+    if (a.carry !== undefined && a.pose === undefined) pose = { ...pose, carry: a.carry };
     const views = a.view ? [a.view] : [...rig.views, ...Object.keys(rig.mirror)];
     const scale = a.scale ?? Math.max(1, Math.min(12, Math.floor(160 / Math.max(...rig.frame))));
     const cache = new Map();
     const items = views.map((v) => {
-      const data = renderPose(rig, d, pose, v, cache);
+      const data = renderPose(rig, d, pose, v, cache, a.variant ? { variant: a.variant } : {});
       const W = rig.frame[0] * scale, H = rig.frame[1] * scale;
       const big = new Uint8ClampedArray(W * H * 4);
       for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
         const s = ((Math.floor(y / scale)) * rig.frame[0] + Math.floor(x / scale)) * 4;
         big.set(data.subarray(s, s + 4), (y * W + x) * 4);
       }
-      // ground line under the rest pose's lowest pixel (helps keep feet aligned)
-      const low = lowestRow(renderPose(rig, d, {}, v, cache), rig.frame[0], rig.frame[1]);
+      // ground line: the feet's contact row (where plant pins them), else under the rest pose's lowest pixel
+      const ground = feetGround(rig, v);
+      const low = ground === null ? lowestRow(renderPose(rig, d, {}, v, cache), rig.frame[0], rig.frame[1]) : ground - 1;
       const gy = Math.min(H - 1, ((low >= 0 ? low + 1 : rig.root[1])) * scale);
       for (let x = 0; x < W; x += 2) if (!big[(gy * W + x) * 4 + 3]) big.set([255, 80, 80, 120], (gy * W + x) * 4);
       return { img: { width: W, height: H, data: big }, label: v };
@@ -231,7 +246,7 @@ export const RIG_OPS = {
     const views = a.views || [...rig.views, ...Object.keys(rig.mirror)];
     const out = [];
     for (const v of views) {
-      const r = RIG_OPS.rig_animate.call(this, { name: a.name, canvas: a.canvas, animation: v, view: v, keys: [a.pose !== undefined ? { pose: a.pose } : { parts: a.parts || {} }], frames: 1, loop: false, duration: a.duration ?? 500 }, source);
+      const r = RIG_OPS.rig_animate.call(this, { name: a.name, canvas: a.canvas, animation: v, view: v, keys: [a.pose !== undefined ? { pose: a.pose } : { parts: a.parts || {} }], frames: 1, loop: false, duration: a.duration ?? 500, variant: a.variant, carry: a.carry, constraints: a.constraints }, source);
       out.push([v, r.frames[0]]);
     }
     return { canvas: a.canvas || a.name, frames: Object.fromEntries(out), next: 'export each frame with art_export {frame}, or art_animation export spritesheet' };
@@ -240,50 +255,32 @@ export const RIG_OPS = {
   /** Tween key poses into frames on an output canvas and tag them as an animation. */
   rig_animate(a, source) {
     const { d, rig, def } = getRig(this, a.name);
-    if (a.preset) {
-      const pr = (def.presets || {})[a.preset];
-      if (!pr) throw new Error(`no preset "${a.preset}" (presets: ${Object.keys(def.presets || {}).join(', ') || 'none'}; add one with art_rig update {presets:{name:{keys,frames,fps,loop?,plant_feet?}}})`);
-      const named = a.animation;
-      a = { ...pr, ...Object.fromEntries(Object.entries(a).filter(([, v]) => v !== undefined)) };
-      a.animation = named || (a.view && a.view !== rig.views[0] ? `${a.preset}_${a.view}` : a.preset);
-    }
-    if (!/^[\w.-]+$/.test(a.animation || '')) throw new Error('animate needs an "animation" name (e.g. "walk_side")');
-    const view = a.view || rig.views[0];
-    // ik_from: per-frame IK targets from another canvas's anchors (a pre-rendered gun clip's
-    // socket_grip_r / socket_grip_l), same frame count and timing as that animation
-    const follow = a.ik_from ? ikFromAnchors(this, rig, a.ik_from, view) : null;
-    if (follow) {
-      a = { ...a, frames: follow.targets.length };
-      if (a.duration === undefined && a.fps === undefined) a.duration = follow.duration;
-      if (a.loop === undefined) a.loop = follow.loop;
-      if (!a.keys) a.keys = [{ parts: {} }];
-    }
-    const loop = a.loop !== false;
-    let poses = animatePoses(rig, { keys: a.keys, frames: a.frames, loop });
-    if (follow) poses = poses.map((P, f) => {
-      const Q = structuredClone(P);
-      Q.views = Q.views || {};
-      Q.views[follow.src] = Q.views[follow.src] || {};
-      Q.views[follow.src].ik = { ...(Q.views[follow.src].ik || {}), ...follow.targets[f] };
-      return Q;
-    });
-    const notes = follow?.notes || [];
-    // plant / ik_feet: pin stance feet with leg IK on contact frames (true = rig feet, or [parts])
-    const plant = a.plant ?? a.ik_feet;
-    if (plant) {
-      const feet = Array.isArray(plant) ? plant : typeof plant === 'string' ? [plant] : rig.feet;
-      for (const f of feet) ikChain(rig, f);
-      if (feet.length) poses = plantFeet(rig, poses, view, feet, { loop });
-      else notes.push('plant: this rig has no foot parts with a two-bone leg (foot -> shin -> thigh); set rig "feet" or pass plant:[parts]');
-    }
-    // secondary: damped follow-through for rig.secondary parts (or an inline {part:{stiffness,damping}})
-    if (a.secondary) {
-      const config = typeof a.secondary === 'object' ? normalizeSecondary(rig.parts, a.secondary) : rig.secondary;
-      if (Object.keys(config).length) poses = simulateSecondary(rig, poses, view, { loop, config });
-      else notes.push('secondary: the rig has no "secondary" parts (art_rig update {secondary:{cape:{stiffness:0.3, damping:0.2}}})');
-    }
+    const fp = framePoses(this, rig, def, a);
+    a = fp.a;
+    const { view, loop, notes, follow } = fp;
+    let poses = fp.poses;
     const [FW, FH] = rig.frame;
     const outName = a.canvas || a.name;
+    const cache = new Map();
+    const ropts = a.variant ? { variant: a.variant } : {};
+    // weapon handling: validate every frame before anything is written (refuse | fix | warn | off)
+    let wsum = null;
+    if (rig.weapon) {
+      const mode = a.constraints ?? 'refuse';
+      if (!['refuse', 'fix', 'warn', 'off'].includes(mode)) throw new Error('constraints must be "refuse" (default: no frames are written when one violates), "fix" (auto-correct), "warn" (write + report) or "off"');
+      if (mode !== 'off') {
+        let fr = weaponFrames(rig, d, poses, view, { ...ropts, cache, visibility: a.visibility !== false });
+        let fixed = 0;
+        if (mode === 'fix' && fr.some((x) => x.issues.length)) {
+          const r = fixFrames(rig, d, poses, view, fr);
+          poses = r.poses; fixed = r.fixed;
+          fr = weaponFrames(rig, d, poses, view, { ...ropts, cache, visibility: a.visibility !== false });
+        }
+        const bad = fr.filter((x) => x.issues.length);
+        if (bad.length && mode === 'refuse') throw new Error(`weapon constraints: ${bad.length} of ${fr.length} frames violate (${a.animation}, ${view}): ${bad.slice(0, 4).map((x) => `frame ${x.frame}: ${x.issues.join('; ')}`).join(' | ')}${bad.length > 4 ? ' | ...' : ''}. Nothing was written. constraints:"fix" auto-corrects, "warn" writes and reports; art_rig check {name} lists every clip and view.`);
+        wsum = { pass: !bad.length, frames: fr.length, failed: bad.length, ...(fixed ? { fixed } : {}), states: [...new Set(fr.map((x) => x.state))], ...(bad.length ? { issues: bad.slice(0, 8).map((x) => ({ frame: x.frame, issues: x.issues })) } : {}) };
+      }
+    }
     let out = this.docs.get(outName);
     if (out) {
       if (out === d) throw new Error('output canvas cannot be the parts canvas');
@@ -326,20 +323,19 @@ export const RIG_OPS = {
       if (out._fresh) layer.name = 'rig';
     }
     delete out._fresh;
-    const cache = new Map();
     // plant_feet: keep the lowest painted pixel on the rest pose's ground row in every frame
     // (legs that rotate would otherwise lift the whole body off the floor); gives a natural bob
-    const ground = a.plant_feet ? lowestRow(renderPose(rig, d, {}, view, cache), FW, FH) : -1;
+    const ground = a.plant_feet ? lowestRow(renderPose(rig, d, {}, view, cache, ropts), FW, FH) : -1;
     // only / hide: render a subset of parts (paper-doll layers: body without head, gear alone)
     // with the SAME timing and ground shift as the full character, so layers stack exactly
-    const filter = { only: a.only, hide: a.hide };
+    const filter = { only: a.only, hide: a.hide, ...ropts };
     for (const k of ['only', 'hide']) if (filter[k]) for (const n of filter[k]) if (!rig.parts[n]) throw new Error(`${k}: unknown part "${n}" (parts: ${rig.order.join(', ')})`);
     const anchors = [];
     poses.forEach((pose, i) => {
       let img = renderPose(rig, d, pose, view, cache, filter);
       let dy = 0;
       if (ground >= 0) {
-        const full = filter.only || filter.hide ? renderPose(rig, d, pose, view, cache) : img;
+        const full = filter.only || filter.hide ? renderPose(rig, d, pose, view, cache, ropts) : img;
         const low = lowestRow(full, FW, FH);
         if (low >= 0) { dy = ground - low; img = shiftFrame(img, FW, FH, dy); }
       }
@@ -355,8 +351,80 @@ export const RIG_OPS = {
     out.meta = { ...(out.meta || {}), anchors: { ...(out.meta?.anchors || {}), [a.animation]: anchors } };
     out.touch?.();
     this.changed(out, { op: 'rig', source, label: `rig ${a.name}: ${a.animation} (${n} frames, ${view})`, structural: true });
-    return { canvas: outName, animation: a.animation, view, frames: [start, start + n - 1], fps: Math.round(fps * 10) / 10, total_frames: out.frames, anchors: 'per-frame part anchors saved (spritesheet json frames[].anchors)', ...(follow ? { ik_from: `${follow.canvas}/${follow.animation} (${follow.targets.length} frames)` } : {}), ...(notes.length ? { notes } : {}) };
+    return { canvas: outName, animation: a.animation, view, frames: [start, start + n - 1], fps: Math.round(fps * 10) / 10, total_frames: out.frames, anchors: 'per-frame part anchors saved (spritesheet json frames[].anchors)', ...(follow ? { ik_from: `${follow.canvas}/${follow.animation} (${follow.targets.length} frames)` } : {}), ...(a.variant ? { variant: a.variant } : {}), ...(wsum ? { weapon: wsum } : {}), ...(notes.length ? { notes } : {}) };
   },
+
+  /** Draw order of one frame (bottom -> top): part, z and what set it (pose z, view z, weapon depth / layer rules). */
+  rig_layers(a) {
+    const { rig, def } = getRig(this, a.name);
+    const { pose, view, frame, label } = oneFrame(this, rig, def, a);
+    const st = layerStack(rig, pose, view);
+    return { rig: a.name, view, frame: label, frame_index: frame, order: st.order.map((e) => [e.part, e.z, e.reason]), ...(st.hidden.length ? { hidden: st.hidden } : {}), key: '[part, z, reason], bottom first; equal z: part order' };
+  },
+
+  /** Why part_a is drawn over (or under) part_b in a frame. */
+  rig_explain(a) {
+    const { rig, def } = getRig(this, a.name);
+    for (const k of ['part_a', 'part_b']) if (!rig.parts[a[k]]) throw new Error(`explain needs ${k}: a part name (parts: ${rig.order.join(', ')})`);
+    const { pose, view, label } = oneFrame(this, rig, def, a);
+    const st = layerStack(rig, pose, view);
+    const all = [...st.order, ...st.hidden.map((p) => ({ part: p, hidden: true }))];
+    const A = all.find((e) => e.part === a.part_a), B = all.find((e) => e.part === a.part_b);
+    if (A.hidden || B.hidden) return { view, frame: label, answer: `${A.hidden ? a.part_a : a.part_b} is not drawn in this frame (hidden)` };
+    const ia = st.order.indexOf(A), ib = st.order.indexOf(B), top = ia > ib ? A : B, bot = ia > ib ? B : A;
+    const why = top.z !== bot.z ? `z ${top.z} > ${bot.z}` : 'equal z: later in the part order wins';
+    return { view, frame: label, over: top.part, under: bot.part, answer: `${top.part} is drawn over ${bot.part}: ${why}`, [top.part]: { z: top.z, reason: top.reason }, [bot.part]: { z: bot.z, reason: bot.reason } };
+  },
+
+  /**
+   * Weapon-handling validation: every frame of every preset (clip) in every view (drawn + mirror):
+   * hand-to-grip distance, limb over-extension / inverted elbows, weapon-body penetration,
+   * muzzle flags and weapon visibility. -> pass/fail summary + the failing frames.
+   */
+  rig_check(a) {
+    const { d, rig, def } = getRig(this, a.name);
+    if (!rig.weapon) throw new Error(`rig "${a.name}" has no weapon: art_rig update {name:"${a.name}", weapon:{class:"rifle"}} (or create with weapon:{...}) first`);
+    const presets = a.clips || (a.preset ? [a.preset] : Object.keys(def.presets || {}));
+    for (const p of presets) if (!(def.presets || {})[p]) throw new Error(`check: no preset "${p}" (presets: ${Object.keys(def.presets || {}).join(', ')})`);
+    const views = a.views || (a.view ? [a.view] : [...rig.views, ...Object.keys(rig.mirror)]);
+    const ropts = a.variant ? { variant: a.variant } : {};
+    const cache = new Map();
+    const clips = {};
+    let frames = 0, failed = 0;
+    const worst = { hand_grip: 0, reach: 0, penetration: 0, visible: null };
+    const issues = [];
+    for (const preset of presets) {
+      clips[preset] = {};
+      const bySrc = new Map();
+      for (const view of views) {
+        const src = rig.mirror[view] || view;
+        if (!rig.views.includes(src)) throw new Error(`check: unknown view "${view}"`);
+        let fr = bySrc.get(src);
+        if (!fr) {
+          const fp = framePoses(this, rig, def, { ...a, preset, view: src, animation: undefined, keys: undefined, frames: undefined });
+          fr = weaponFrames(rig, d, fp.poses, src, { ...ropts, cache, visibility: a.visibility !== false });
+          bySrc.set(src, fr);
+        }
+        const bad = fr.filter((x) => x.issues.length);
+        frames += fr.length; failed += bad.length;
+        for (const x of fr) {
+          for (const v of Object.values(x.hand_grip)) worst.hand_grip = Math.max(worst.hand_grip, v);
+          for (const v of Object.values(x.reach)) if (v !== null) worst.reach = Math.max(worst.reach, v);
+          worst.penetration = Math.max(worst.penetration, x.penetration);
+          if (x.visible !== null && !x.hidden) worst.visible = worst.visible === null ? x.visible : Math.min(worst.visible, x.visible);
+        }
+        clips[preset][view] = { frames: fr.length, failed: bad.length, ...(a.detail ? { metrics: fr } : {}) };
+        for (const x of bad) if (issues.length < (a.limit ?? 40)) issues.push({ clip: preset, view, frame: x.frame, state: x.state, issues: x.issues });
+      }
+    }
+    return {
+      rig: a.name, pass: failed === 0, frames_checked: frames, frames_failed: failed, worst,
+      summary: failed ? `FAIL: ${failed} of ${frames} frames violate weapon constraints (first: ${issues[0].clip}/${issues[0].view} frame ${issues[0].frame}: ${issues[0].issues[0]})` : `PASS: ${frames} frames in ${presets.length} clips x ${views.length} views hold the weapon correctly`,
+      clips, ...(issues.length ? { issues } : {}),
+      next: failed ? 'art_rig animate {..., constraints:"fix"} auto-corrects; or tune weapon.points / weapon.states (art_help {topic:"rig"})' : undefined,
+    };
+  },
+
 };
 
 /**
@@ -399,4 +467,179 @@ function ikFromAnchors(engine, rig, spec, view) {
   if (missing.size) notes.push(`ik_from: anchors ${[...missing].join(', ')} missing on some frames of ${d.name}/${animation} (those frames keep FK)`);
   const tag = d.animations[animation];
   return { canvas: d.name, animation, targets, src, notes, duration: tag ? tag.durations[0] : undefined, loop: tag ? tag.loop : undefined };
+}
+
+/**
+ * The pose pipeline of art_rig animate (and check): preset merge, ik_from, tweening, carry /
+ * attach overrides, foot planting, secondary motion. -> {a (resolved args), view, loop, poses, notes, follow}
+ */
+function framePoses(engine, rig, def, a) {
+  if (a.preset) {
+    const pr = (def.presets || {})[a.preset];
+    if (!pr) throw new Error(`no preset "${a.preset}" (presets: ${Object.keys(def.presets || {}).join(', ') || 'none'}; add one with art_rig update {presets:{name:{keys,frames,fps,loop?,plant_feet?}}})`);
+    const named = a.animation;
+    a = { ...pr, ...Object.fromEntries(Object.entries(a).filter(([, v]) => v !== undefined)) };
+    // one tag convention: <preset>_<view> (the view defaults to the rig's first view)
+    a.animation = named || `${a.preset}_${a.view || rig.views[0]}`;
+  }
+  if (!/^[\w.-]+$/.test(a.animation || '')) throw new Error('animate needs an "animation" name (e.g. "walk_side")');
+  const view = a.view || rig.views[0];
+  if (a.variant !== undefined) {
+    for (const s of [].concat(a.variant)) if (typeof s !== 'string' || !(rig.variantSets?.[s] || rig.order.some((n) => rig.parts[n].variants.includes(s)))) throw new Error(`variant: no set or part variant "${s}" (variant_sets: ${Object.keys(rig.variantSets || {}).join(', ') || 'none'}; part variants: ${[...new Set(rig.order.flatMap((n) => rig.parts[n].variants.slice(1)))].join(', ') || 'none'})`);
+  }
+  if (a.carry !== undefined || a.attach !== undefined) {
+    if (!rig.weapon) throw new Error('carry / attach need a rig weapon (art_rig update {weapon:{class:"rifle"}})');
+    if (a.carry !== undefined) { const st = typeof a.carry === 'string' ? a.carry : a.carry?.state; if (!rig.weapon.states[st]) throw new Error(`carry: unknown state "${st}" (states: ${Object.keys(rig.weapon.states).join(', ')})`); }
+    if (a.attach !== undefined) {
+      const list = [].concat(a.attach || []);
+      for (const n of list) if (!rig.weapon.attachments[n]) throw new Error(`attach: unknown attachment "${n}" (attachments: ${Object.keys(rig.weapon.attachments).join(', ') || 'none'})`);
+      rig.weapon.attach = list;
+    }
+  }
+  // ik_from: per-frame IK targets from another canvas's anchors (a pre-rendered gun clip's
+  // socket_grip_r / socket_grip_l), same frame count and timing as that animation
+  const follow = a.ik_from ? ikFromAnchors(engine, rig, a.ik_from, view) : null;
+  if (follow) {
+    a = { ...a, frames: follow.targets.length };
+    if (a.duration === undefined && a.fps === undefined) a.duration = follow.duration;
+    if (a.loop === undefined) a.loop = follow.loop;
+    if (!a.keys) a.keys = [{ parts: {} }];
+  }
+  const loop = a.loop !== false;
+  let poses = animatePoses(rig, { keys: a.carry !== undefined && Array.isArray(a.keys) ? a.keys.map((k) => ({ ...k, carry: a.carry })) : a.keys, frames: a.frames, loop });
+  if (follow) poses = poses.map((P, f) => {
+    const Q = structuredClone(P);
+    Q.views = Q.views || {};
+    Q.views[follow.src] = Q.views[follow.src] || {};
+    Q.views[follow.src].ik = { ...(Q.views[follow.src].ik || {}), ...follow.targets[f] };
+    return Q;
+  });
+  const notes = follow?.notes || [];
+  // plant / ik_feet: pin stance feet with leg IK on contact frames (true = rig feet, or [parts])
+  const plant = a.plant ?? a.ik_feet;
+  if (plant) {
+    const feet = Array.isArray(plant) ? plant : typeof plant === 'string' ? [plant] : rig.feet;
+    for (const f of feet) ikChain(rig, f);
+    if (feet.length) poses = plantFeet(rig, poses, view, feet, { loop });
+    else notes.push('plant: this rig has no foot parts with a two-bone leg (foot -> shin -> thigh); set rig "feet" or pass plant:[parts]');
+  }
+  // secondary: damped follow-through for rig.secondary parts (or an inline {part:{stiffness,damping}})
+  if (a.secondary) {
+    const config = typeof a.secondary === 'object' ? normalizeSecondary(rig.parts, a.secondary) : rig.secondary;
+    if (Object.keys(config).length) poses = simulateSecondary(rig, poses, view, { loop, config });
+    else notes.push('secondary: the rig has no "secondary" parts (art_rig update {secondary:{cape:{stiffness:0.3, damping:0.2}}})');
+  }
+  return { a, view, loop, poses, notes, follow };
+}
+
+/** Composite of the parts canvas without the "cells" guide layer. */
+function artComposite(d) {
+  const saved = d.layers;
+  d.layers = saved.filter((l) => l.name !== 'cells');
+  try { return d.composite(); } finally { d.layers = saved; }
+}
+
+/** Weapon pixels visible in a frame: (full render - render without the weapon) / weapon alone. */
+function weaponVisibility(rig, d, pose, view, cache, ropts) {
+  const W = rig.weapon;
+  const names = [W.part, ...W.attach.map((n) => W.attachments[n].part)];
+  const o = { ...ropts, sampling: 'nearest8' };
+  const only = renderPose(rig, d, pose, view, cache, { ...o, only: names });
+  let own = 0;
+  for (let i = 3; i < only.length; i += 4) if (only[i]) own++;
+  if (!own) return null;
+  const full = renderPose(rig, d, pose, view, cache, o), none = renderPose(rig, d, pose, view, cache, { ...o, hide: names });
+  let vis = 0;
+  for (let i = 0; i < full.length; i += 4) if (full[i + 3] && (full[i] !== none[i] || full[i + 1] !== none[i + 1] || full[i + 2] !== none[i + 2] || full[i + 3] !== none[i + 3])) vis++;
+  return Math.round((vis / own) * 100) / 100;
+}
+
+/** Violations of one frame's weapon metrics. */
+function frameIssues(m, vis, W) {
+  const out = [];
+  for (const [r, v] of Object.entries(m.hand_grip)) if (v > 1.5) out.push(`${r} hand ${v}px off its grip`);
+  for (const [r, v] of Object.entries(m.reach)) if (v !== null && v > W.reach + 0.005) out.push(`${r} arm over-extended (${v} of its length)`);
+  if (m.corrections.includes('out_of_reach') && !out.some((x) => /over-extended/.test(x))) out.push('a grip is out of reach (arm clamped at full extension)');
+  for (const r of m.elbow_inverted) out.push(`${r} elbow inverted`);
+  if (m.penetration > 1) out.push(`weapon ${m.penetration}px inside the ${m.hit}`);
+  if (m.muzzle) out.push(m.muzzle);
+  for (const x of m.layer || []) out.push(x);
+  if (!m.hidden && !m.exempt && vis !== null && vis !== undefined && vis < (m.back ? W.min_visible_back : W.min_visible)) out.push(`weapon only ${Math.round(vis * 100)}% visible`);
+  return out;
+}
+
+/** Solve + measure every frame. */
+function weaponFrames(rig, d, poses, view, { cache = new Map(), visibility = true, ...ropts } = {}) {
+  return poses.map((pose, frame) => {
+    const m = weaponMetrics(rig, solvePose(rig, pose, view));
+    const visible = visibility && !m.hidden ? weaponVisibility(rig, d, pose, view, cache, ropts) : null;
+    return { frame, ...m, visible, issues: frameIssues(m, visible, rig.weapon) };
+  });
+}
+
+/** constraints:"fix": re-solve violating frames with escalation (muzzle down, stronger cant / floor, flipped elbows, draw order). */
+function fixFrames(rig, d, poses, view, fr) {
+  const src = rig.mirror[view] || view;
+  const zTop = Math.max(...rig.order.map((n) => partIn(rig, n, src).z)) + 1;
+  let fixed = 0;
+  const out = poses.map((P, i) => {
+    const x = fr[i];
+    if (!x.issues.length) return P;
+    fixed++;
+    const t = { fix: true, cant: 30, floor: 0.6 };
+    if (x.elbow_inverted.length) t.flip_elbow = x.elbow_inverted;
+    if (x.visible !== null && x.visible < (x.back ? rig.weapon.min_visible_back : rig.weapon.min_visible)) t.z = zTop;
+    return { ...P, _weapon: t };
+  });
+  return { poses: out, fixed };
+}
+
+/** Compact weapon description for info / create. */
+function weaponSummary(rig) {
+  const W = rig.weapon;
+  const pt = (p) => (p ? [Math.round(p.x * 10) / 10, Math.round(p.y * 10) / 10, ...(p.angle ? [p.angle] : [])] : undefined);
+  return {
+    part: W.part, class: W.class, kind: W.kind, hands: W.hands, carry: W.carry, states: Object.keys(W.states), base_view: W.base, cells: W.cells,
+    points: Object.fromEntries(Object.entries(W.points).map(([k, p]) => [k, pt(p)])), sockets: W.sockets,
+    attachments: Object.fromEntries(Object.entries(W.attachments).map(([k, x]) => [k, { part: x.part, socket: x.socket, ...(x.type ? { type: x.type } : {}), takes: Object.keys(x.over) }])), attach: W.attach,
+    poses: W.poses, foreshorten: W.foreshorten, arm_length: Math.round(W.A * 10) / 10, standoff: Math.round(W.standoff * 10) / 10,
+  };
+}
+
+/** One frame for layers / explain: pose:<name> | preset (+ frame index), view, carry?. */
+function oneFrame(engine, rig, def, a) {
+  const view = a.view || rig.views[0];
+  if (a.preset) {
+    const fp = framePoses(engine, rig, def, { ...a, view, animation: undefined });
+    const frame = Math.max(0, Math.min(fp.poses.length - 1, Number(a.frame ?? 0)));
+    return { pose: fp.poses[frame], view, frame, label: `${a.preset}[${frame}]` };
+  }
+  const pose = a.pose !== undefined ? resolvePose(rig, { pose: a.pose, ...(a.carry !== undefined ? { carry: a.carry } : {}) }) : { ...(a.parts || {}), ...(a.carry !== undefined ? { carry: a.carry } : {}) };
+  return { pose, view, frame: 0, label: a.pose ?? 'rest' };
+}
+
+/** Draw order of a solved frame with the reason for each z. */
+function layerStack(rig, pose, view) {
+  const sp = solvePose(rig, pose, view);
+  const src = sp.src, W = rig.weapon;
+  const weaponParts = W ? new Set([W.part, ...Object.values(W.attachments).map((x) => x.part)]) : new Set();
+  const order = [], hidden = [];
+  rig.order.forEach((name, i) => {
+    const p = partIn(rig, name, src), v = sp.VP[name] || {};
+    if (p.hidden || v.hide) { hidden.push(name); return; }
+    const z = v.z ?? p.z;
+    let reason = v.z !== undefined && v.z !== null ? 'pose z' : rig.parts[name].views?.[src]?.z !== undefined ? `view z (${src})` : 'part z';
+    if (weaponParts.has(name) && sp.weapon?.layer) reason = name === W.part ? sp.weapon.layer.reason : `rides on ${W.part}`;
+    order.push({ part: name, z: Math.round(z * 100) / 100, reason, i });
+  });
+  order.sort((x, y) => x.z - y.z || x.i - y.i);
+  return { order, hidden };
+}
+
+/** Row under the feet in the rest pose (the plant contact row + 1), or null for rigs without feet. */
+function feetGround(rig, view) {
+  if (!rig.feet?.length) return null;
+  const src = rig.mirror[view] || view;
+  const W = solvePose(rig, {}, view).world;
+  return Math.round(Math.max(...rig.feet.map((f) => W[f].y + partIn(rig, f, src).h - 1 - partIn(rig, f, src).pivot[1]))) + 1;
 }

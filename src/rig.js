@@ -5,6 +5,7 @@
 // frames, animations or directions, and in-betweens can be tweened at any frame rate.
 // Per frame: view overrides -> FK -> IK -> render (rotation sampled per rig "sampling" mode).
 import { upscale } from './pixelops.js';
+import { normalizeWeapon, solveHeld, lerpCarry, heldParts } from './weapon.js';
 
 const NAME = /^[\w-]+$/;
 const GAP = 1;
@@ -89,12 +90,51 @@ export function normalizeRig(def) {
     if (!Array.isArray(feet)) throw new Error('rig "feet" must be an array of part names (e.g. ["foot_f", "foot_b"])');
     for (const f of feet) if (!chain2(f)) throw new Error(`feet: "${f}" must be a part with a parent and a grandparent (foot -> shin -> thigh)`);
   } else feet = order.filter((n) => /^foot/.test(n) && chain2(n));
-  return {
+  const rig = {
     frame, views, mirror, parts, order, roots, pairs,
     root: def.root ? [Number(def.root[0]), Number(def.root[1])] : [Math.floor(frame[0] / 2), Math.floor(frame[1] * 0.75)],
     poses: def.poses || {}, layout: { columns, rowH, width, height },
     sampling, secondary, feet, scaleChildren: !!def.scale_children,
   };
+  if (def.variant_sets) rig.variantSets = normalizeVariantSets(parts, def.variant_sets);
+  // weapon handling (opt-in): the weapon part is placed by the solver, hands lock onto its grips
+  if (def.weapon) {
+    if (parts.carry) throw new Error('"carry" is reserved in poses of a rig with a weapon; rename that part');
+    rig.weapon = normalizeWeapon(rig, def.weapon);
+  }
+  return rig;
+}
+
+/** variant_sets: {heavy: {chest:"plate", head:"helmet"}} -> validated map (set -> part -> variant). */
+export function normalizeVariantSets(parts, sets) {
+  if (!sets || typeof sets !== 'object' || Array.isArray(sets)) throw new Error('rig "variant_sets" must be {<set>: {<part>: <variant>}}');
+  const out = {};
+  for (const [s, map] of Object.entries(sets)) {
+    if (!NAME.test(s)) throw new Error(`variant_sets: bad set name "${s}"`);
+    if (!map || typeof map !== 'object' || Array.isArray(map)) throw new Error(`variant_sets.${s} must be {<part>: <variant>}`);
+    for (const [p, v] of Object.entries(map)) {
+      if (!parts[p]) throw new Error(`variant_sets.${s}: unknown part "${p}"`);
+      if (!parts[p].variants.includes(v)) throw new Error(`variant_sets.${s}: part "${p}" has no variant "${v}" (variants: ${parts[p].variants.join(', ')})`);
+    }
+    out[s] = { ...map };
+  }
+  return out;
+}
+
+/**
+ * The variant a part renders with under an equipment set (animate variant:"heavy"): the set's
+ * mapping (variant_sets) or a variant named like the set; a pose variant v (blink) combines as
+ * "<set>_<v>" when the part has it, else the pose variant wins.
+ */
+export function setVariant(rig, name, poseVariant, sets) {
+  const p = rig.parts[name];
+  for (const s of sets) {
+    const want = rig.variantSets?.[s] ? rig.variantSets[s][name] : p.variants.includes(s) ? s : null;
+    if (!want) continue;
+    if (poseVariant && poseVariant !== 'base') return p.variants.includes(`${want}_${poseVariant}`) ? `${want}_${poseVariant}` : poseVariant;
+    return want;
+  }
+  return poseVariant;
 }
 
 /** Cell of a part (variant) in a drawn view on the parts canvas. */
@@ -108,17 +148,20 @@ export function cellOf(rig, part, view, variant = 'base') {
 }
 
 /** Per-view part settings (at, z, hidden, pivot) with fallbacks. */
-function partIn(rig, name, view) {
+export function partIn(rig, name, view) {
   const p = rig.parts[name], o = p.views[view] || {};
   return { ...p, at: o.at ? [Number(o.at[0]), Number(o.at[1])] : p.at, z: o.z ?? p.z, hidden: !!o.hidden, pivot: o.pivot ? [Number(o.pivot[0]), Number(o.pivot[1])] : p.pivot };
 }
 
 const ease = (t, kind) => (kind === 'linear' ? t : kind === 'step' ? 0 : t * t * (3 - 2 * t));
 
-/** Pose values for a part: {x, y, rot, sx, sy, variant, hide}. */
-function poseOf(rig, pose, name) {
+/**
+ * Pose values for a part: {x, y, rot, sx, sy, variant, hide}, plus the solver-only fields flipx
+ * (mirror the cell about its pivot), cell (draw the cell of another drawn view) and z (draw order).
+ */
+export function poseOf(rig, pose, name) {
   const v = (typeof pose === 'string' ? rig.poses[pose] : pose)?.[name] || {};
-  return { x: Number(v.x ?? 0), y: Number(v.y ?? 0), rot: Number(v.rot ?? 0), sx: Number(v.sx ?? 1) || 1, sy: Number(v.sy ?? 1) || 1, variant: v.variant ?? null, hide: !!v.hide };
+  return { x: Number(v.x ?? 0), y: Number(v.y ?? 0), rot: Number(v.rot ?? 0), sx: Number(v.sx ?? 1) || 1, sy: Number(v.sy ?? 1) || 1, variant: v.variant ?? null, hide: !!v.hide, flipx: !!v.flipx, cell: v.cell ?? null, z: v.z ?? null };
 }
 
 const asPose = (rig, p) => (typeof p === 'string' ? rig.poses[p] : p) || {};
@@ -146,10 +189,33 @@ function swapTarget(sw, t) {
   return t.part ? { ...t, part: sw.get(t.part) ?? t.part } : t;
 }
 
-/** Swap paired parts (leg_f <-> leg_b) everywhere in a pose: parts, view overrides, IK ends and targets. */
-function swapPairs(rig, p) {
+/**
+ * Arm chains that hold something in a pose and so keep their side under mirror_pairs: with a
+ * weapon, the hands its carry state locks; otherwise every two-bone chain with an IK end that is
+ * not a foot (a hand on a prop). Legs, the body and free arms still swap.
+ */
+function heldChains(rig, p) {
+  const w = heldParts(rig, p);
+  if (w) return w;
+  const out = new Set();
+  const feet = new Set(rig.feet || []);
+  const ends = new Set([...Object.keys(p.ik || {}), ...Object.values(p.views || {}).flatMap((o) => Object.keys(o?.ik || {}))]);
+  for (const e of ends) {
+    if (feet.has(e) || !rig.parts[e]) continue;
+    const B = rig.parts[e].parent, A = B && rig.parts[B]?.parent;
+    if (A) for (const n of [e, B, A]) out.add(n);
+  }
+  return out;
+}
+
+/**
+ * Swap paired parts (leg_f <-> leg_b) everywhere in a pose: parts, view overrides, IK ends and
+ * targets. Pairs in a held arm chain keep their side (handedness) unless all is set.
+ */
+function swapPairs(rig, p, all = false) {
   const sw = new Map();
-  for (const [a, b] of rig.pairs) { sw.set(a, b); sw.set(b, a); }
+  const held = all ? new Set() : heldChains(rig, p);
+  for (const [a, b] of rig.pairs) { if (held.has(a) || held.has(b)) continue; sw.set(a, b); sw.set(b, a); }
   const parts = (o) => {
     const r = {};
     for (const [k, v] of Object.entries(o)) if (!RESERVED.has(k) && v !== undefined) r[sw.get(k) ?? k] = v;
@@ -171,7 +237,14 @@ export function resolvePose(rig, key) {
     for (const [v, o] of Object.entries(key.views)) p.views[v] = { ...(p.views[v] || {}), ...structuredClone(o) };
   }
   if (key.ik) p.ik = { ...(p.ik || {}), ...structuredClone(key.ik) };
-  if (key.mirror_pairs) p = swapPairs(rig, p);
+  if (rig.weapon) {
+    // carry state: key > pose > weapon.poses mapping (by pose name) > weapon default
+    if (key.carry !== undefined) p.carry = key.carry;
+    else if (p.carry === undefined && key.pose !== undefined && rig.weapon.poses[key.pose] !== undefined) p.carry = rig.weapon.poses[key.pose];
+  }
+  // mirror_pairs keeps held hands on their side; mirror_hands also swaps them (handedness)
+  if (key.mirror_pairs || key.mirror_hands) p = swapPairs(rig, p, !!key.mirror_hands);
+  if (key.mirror_hands && rig.weapon) p.hands_mirrored = !p.hands_mirrored;
   return p;
 }
 
@@ -221,6 +294,11 @@ export function lerpPose(rig, a, b, t) {
   const out = lerpParts(rig, A, B, t);
   const ik = lerpIK(A.ik, B.ik, t);
   if (ik) out.ik = ik;
+  if (rig.weapon) {
+    const c = lerpCarry(A.carry, B.carry, t);
+    if (c !== undefined) out.carry = c;
+    if (t < 0.5 ? A.hands_mirrored : B.hands_mirrored) out.hands_mirrored = true;
+  }
   const vs = new Set([...Object.keys(A.views || {}), ...Object.keys(B.views || {})]);
   if (vs.size) {
     out.views = {};
@@ -298,8 +376,11 @@ function partImage(cache, partsDoc, rig, name, view, variant) {
   return img;
 }
 
-/** World transforms (pivot position + rotation) of every part in a drawn view, parent-first. */
-function worldOf(rig, VP, src) {
+/**
+ * World transforms (pivot position + rotation) of every part in a drawn view, parent-first. A
+ * part posed with flipx (and everything under it) is mirrored about its pivot: flip:true.
+ */
+export function worldOf(rig, VP, src) {
   const world = {};
   const solve = (name) => {
     if (world[name]) return world[name];
@@ -310,9 +391,12 @@ function worldOf(rig, VP, src) {
       // scale_children: a parent's sx/sy (foreshortening, breathing) also moves its children's joints
       if (rig.scaleChildren) { const pv = poseOf(rig, VP, p.parent); psx = pv.sx; psy = pv.sy; }
     } else base = { x: rig.root[0], y: rig.root[1], rot: 0 };
-    const ox = p.at[0] * psx + v.x, oy = p.at[1] * psy + v.y;
+    let ox = p.at[0] * psx + v.x;
+    const oy = p.at[1] * psy + v.y;
+    if (base.flip) ox = -ox;
     const r = base.rot * D2R;
-    const pos = { x: base.x + ox * Math.cos(r) - oy * Math.sin(r), y: base.y + ox * Math.sin(r) + oy * Math.cos(r), rot: base.rot + v.rot };
+    const pos = { x: base.x + ox * Math.cos(r) - oy * Math.sin(r), y: base.y + ox * Math.sin(r) + oy * Math.cos(r), rot: base.rot + (base.flip ? -v.rot : v.rot) };
+    if (!!base.flip !== v.flipx) pos.flip = true;
     world[name] = pos;
     return pos;
   };
@@ -355,7 +439,7 @@ export function ikChain(rig, end) {
  * with scale_children) bends toward the viewer instead: aims A and foreshortens both bones.
  * rot = world rotation for the end part afterwards (keep a weapon level). weight blends with FK.
  */
-function applyIK(rig, VP, src) {
+export function applyIK(rig, VP, src) {
   if (!VP.ik) return VP;
   const set = (n, k, val) => { VP[n] = { ...(VP[n] || {}), [k]: val }; };
   for (const [end, e] of Object.entries(VP.ik)) {
@@ -422,6 +506,11 @@ export function solvePose(rig, pose, view) {
   if (rig.mirror[view]) { src = rig.mirror[view]; flip = true; }
   if (!rig.views.includes(src)) throw new Error(`unknown view "${view}" (views: ${[...rig.views, ...Object.keys(rig.mirror)].join(', ')})`);
   const P = typeof pose === 'string' ? resolvePose(rig, { pose }) : pose || {};
+  if (rig.weapon) {
+    // weapon handling: weapon placement, locked hands, cheek weld, then the remaining pose IK
+    const h = solveHeld(rig, P, src);
+    return { src, flip, VP: h.VP, world: worldOf(rig, h.VP, src), weapon: h.report };
+  }
   const VP = applyIK(rig, viewPose(rig, P, src), src);
   return { src, flip, VP, world: worldOf(rig, VP, src) };
 }
@@ -507,20 +596,27 @@ export function renderPose(rig, partsDoc, pose, view, cache = new Map(), opts = 
   const { src, flip, VP, world } = solvePose(rig, pose, view);
   const out = new Uint8ClampedArray(FW * FH * 4);
   const out32 = new Uint32Array(out.buffer);
+  const sets = opts.variant ? [].concat(opts.variant) : null;
+  const sampling = opts.sampling ?? rig.sampling;
   const list = rig.order.map((name, i) => ({ name, i, p: partIn(rig, name, src), v: poseOf(rig, VP, name) }))
     .filter((e) => !e.p.hidden && !e.v.hide && (!opts.only || opts.only.includes(e.name)) && !(opts.hide && opts.hide.includes(e.name)))
-    .sort((a, b) => a.p.z - b.p.z || a.i - b.i);
-  for (const { name, p, v } of list) {
+    .sort((a, b) => (a.v.z ?? a.p.z) - (b.v.z ?? b.p.z) || a.i - b.i);
+  for (const { name, p: pv, v } of list) {
     const T = world[name];
-    // a pose may name a variant the part no longer has (removed in an override): draw the base cell
-    const variant = v.variant && p.variants.includes(v.variant) ? v.variant : 'base';
-    const img = partImage(cache, partsDoc, rig, name, src, variant);
+    // cell: draw another drawn view's cell (weapons projected from their side cell)
+    const cellView = v.cell && v.cell !== src && rig.views.includes(v.cell) ? v.cell : src;
+    const p = cellView === src ? pv : partIn(rig, name, cellView);
+    // equipment set (animate variant:"heavy"), then a pose variant; a variant the part no longer has draws the base cell
+    const want = sets ? setVariant(rig, name, v.variant, sets) : v.variant;
+    const variant = want && p.variants.includes(want) ? want : 'base';
+    const img = partImage(cache, partsDoc, rig, name, cellView, variant);
     const px = Math.round(T.x), py = Math.round(T.y); // pixel-snapped pivot position
     const rot = ((T.rot % 360) + 360) % 360;
     const rad = (-rot * Math.PI) / 180, cos = Math.cos(rad), sin = Math.sin(rad);
-    const sx = Math.max(0.05, v.sx), sy = Math.max(0.05, v.sy); // squash & stretch around the pivot
-    const exact = (Math.abs(rot) < 1e-6 || Math.abs(rot - 360) < 1e-6) && Math.abs(sx - 1) < 1e-6 && Math.abs(sy - 1) < 1e-6;
-    if (!exact && rig.sampling !== 'nearest8') {
+    // squash & stretch around the pivot; a flipped part (weapon facing left) mirrors its cell
+    const sx = (T.flip ? -1 : 1) * Math.max(0.05, v.sx), sy = Math.max(0.05, v.sy);
+    const exact = !T.flip && (Math.abs(rot) < 1e-6 || Math.abs(rot - 360) < 1e-6) && Math.abs(sx - 1) < 1e-6 && Math.abs(sy - 1) < 1e-6;
+    if (!exact && sampling !== 'nearest8') {
       // forward-transform the cell corners for a tight bbox
       const fc = Math.cos(rot * D2R), fs = Math.sin(rot * D2R);
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -530,7 +626,7 @@ export function renderPose(rig, partsDoc, pose, view, cache = new Map(), opts = 
         x0 = Math.min(x0, X); y0 = Math.min(y0, Y); x1 = Math.max(x1, X); y1 = Math.max(y1, Y);
       }
       const bx = Math.floor(x0) - 1, by = Math.floor(y0) - 1, bw = Math.ceil(x1) - bx + 2, bh = Math.ceil(y1) - by + 2;
-      const buf = sampleRotated(img, p, rig.sampling === 'rotsprite' ? 8 : 1, px, py, cos, sin, sx, sy, bx, by, bw, bh);
+      const buf = sampleRotated(img, p, sampling === 'rotsprite' ? 8 : 1, px, py, cos, sin, sx, sy, bx, by, bw, bh);
       for (let j = 0; j < bh; j++) {
         const y = by + j;
         if (y < 0 || y >= FH) continue;
@@ -541,7 +637,7 @@ export function renderPose(rig, partsDoc, pose, view, cache = new Map(), opts = 
       }
       continue;
     }
-    const R = Math.ceil(Math.hypot(p.w, p.h) * Math.max(1, sx, sy)) + 1;
+    const R = Math.ceil(Math.hypot(p.w, p.h) * Math.max(1, Math.abs(sx), sy)) + 1;
     for (let y = py - R; y <= py + R; y++) for (let x = px - R; x <= px + R; x++) {
       if (x < 0 || y < 0 || x >= FW || y >= FH) continue;
       let c;

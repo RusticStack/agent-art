@@ -220,8 +220,45 @@ export function fpPistol(o = {}) {
 /** Move a whole template (parts + sockets) by d px. */
 function placed(t, d) {
   const mv = (v) => [v[0] + d[0], v[1] + d[1], v[2] + d[2]];
-  return { ...t, parts: t.parts.map((p) => ({ ...p, at: mv(p.at || [0, 0, 0]) })), sockets: Object.fromEntries(Object.entries(t.sockets).map(([k, s]) => [k, { ...s, at: mv(s.at) }])) };
+  const out = { ...t, parts: t.parts.map((p) => ({ ...p, at: mv(p.at || [0, 0, 0]) })), sockets: Object.fromEntries(Object.entries(t.sockets).map(([k, s]) => [k, { ...s, at: mv(s.at) }])) };
+  // weapon grip points given as {part, at} move with the parts (socket names need nothing)
+  if (t.weapon) out.weapon = { ...t.weapon, grips: Object.fromEntries(Object.entries(t.weapon.grips || {}).map(([k, g]) => [k, g && typeof g === 'object' && g.at ? { ...g, at: mv(g.at) } : g])) };
+  return out;
 }
 const lifted = (S, d) => Object.fromEntries(Object.entries(S).map(([k, v]) => [k, Array.isArray(v) ? [v[0] + d[0], v[1] + d[1], v[2] + d[2]] : v]));
 
-export const MODEL_TEMPLATES = { fp_arms: fpArms, fp_rifle: (o) => placed(fpRifle(o), OFFSET_RIFLE), fp_pistol: (o) => placed(fpPistol(o), OFFSET_PISTOL) };
+// ---------- weapon handling (opt-in: create {template, weapon:true | {attach:[..], carry?}}) ----------
+/** Attachment kits for fp_rifle: parts (parent handguard / barrel), a grip or muzzle socket, the hand frame on it. */
+function rifleAttachments(t) {
+  const x = RIFLE.x, poly = tex(t, 'polymer', '#3b3c36'), metal = tex(t, 'metal', '#2c2e33');
+  return {
+    vertical_grip: { parts: [{ type: 'box', name: 'att_vgrip', parent: 'handguard', w: 1.2, h: 3.2, d: 1.3, texture: poly, at: [x, -11.6, -19 + RZ], pivot: [0, 3.2, 0] }], sockets: { vgrip: { part: 'att_vgrip', at: [x, -10.2, -19 + RZ] } }, grip_support: 'vgrip', frame: { look: [0.2, 0, -1], up: [-1, 0.2, 0] } },
+    angled_grip: { parts: [{ type: 'box', name: 'att_agrip', parent: 'handguard', w: 1.2, h: 1.4, d: 2.8, texture: poly, at: [x, -9.6, -18.2 + RZ], rotate: [-28, 0, 0], pivot: [0, 1.4, 1.4] }], sockets: { agrip: { part: 'att_agrip', at: [x, -9.3, -18.6 + RZ] } }, grip_support: 'agrip', frame: { look: [0.25, -0.45, -1], up: [-1, 0.1, 0] } },
+    bipod: { parts: [{ type: 'box', name: 'att_bipod', parent: 'handguard', w: 1.5, h: 1.2, d: 5.5, texture: metal, at: [x, -9.6, -21.5 + RZ], pivot: [0, 1.2, 2.75] }], sockets: { bipod: { part: 'att_bipod', at: [x, -9.1, -20.5 + RZ] } }, grip_support: 'bipod', frame: { look: [0.35, 0, -1], up: [0, -1, 0.1] } },
+    suppressor: { parts: [{ type: 'cylinder', name: 'att_suppressor', parent: 'barrel', r: 0.6, h: 4.6, segments: 8, texture: metal, rotate: [-90, 0, 0], at: [x, -6.2, -28.2 + RZ] }], sockets: { muzzle_sup: { part: 'att_suppressor', at: [x, -6.2, -32.8 + RZ], look: [0, 0, -1] } }, muzzle: 'muzzle_sup' },
+  };
+}
+/** Add the weapon setting (+ attachment parts / sockets) to a template result when asked. */
+function withWeapon(t, o, kind, kits = {}) {
+  if (!o.weapon) return t;
+  const w = o.weapon === true ? {} : { ...o.weapon };
+  const names = [].concat(w.attach || []);
+  for (const n of names) if (!kits[n] && !(w.attachments || {})[n]) throw new Error(`weapon.attach: unknown attachment "${n}" (${Object.keys(kits).join(', ') || 'none for this template'})`);
+  const parts = [...t.parts], sockets = { ...t.sockets, stock: { part: kind === 'pistol' ? 'frame' : 'stock', at: kind === 'pistol' ? [PISTOL.x, -7.2, -9.4] : [RIFLE.x, -7.1, -1 + RZ] } };
+  const attachments = {};
+  for (const [n, k] of Object.entries(kits)) if (names.includes(n)) {
+    parts.push(...k.parts);
+    Object.assign(sockets, k.sockets);
+    attachments[n] = { parts: k.parts.map((p) => p.name), ...(k.grip_support ? { grip_support: k.grip_support } : {}), ...(k.muzzle ? { muzzle: k.muzzle } : {}), ...(k.frame ? { frame: k.frame } : {}) };
+  }
+  // the magazine (moves with reload clips): the support hand follows it in the reload state
+  const mag = kind === 'pistol' ? { part: 'magazine', at: [PISTOL.x, -8.6, -10.6] } : { part: 'magazine', at: [RIFLE.x, -9.6, -13 + RZ] };
+  const weapon = { kind, grips: { grip_main: 'grip_r', grip_support: 'grip_l', stock: 'stock', muzzle: 'muzzle', optic: 'sight', mag }, ...w, attachments: { ...attachments, ...(w.attachments || {}) }, attach: names };
+  return { ...t, parts, sockets, weapon };
+}
+
+export const MODEL_TEMPLATES = {
+  fp_arms: fpArms,
+  fp_rifle: (o) => placed(withWeapon(fpRifle(o), o, 'long', o.weapon ? rifleAttachments(o.textures || {}) : {}), OFFSET_RIFLE),
+  fp_pistol: (o) => placed(withWeapon(fpPistol(o), o, 'pistol'), OFFSET_PISTOL),
+};

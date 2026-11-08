@@ -136,7 +136,7 @@ test('templates: overridable starting points, presets animate, squash scales', (
   for (const v of Object.keys(r.cells)) for (const [x, y, w, h] of Object.values(r.cells[v])) cmds.push({ op: 'rect', x, y, w, h, color: '#a03030' });
   e.run('draw', { canvas: 'hero_parts', layer: 'parts', commands: cmds });
   const w = e.run('rig_animate', { name: 'hero', preset: 'walk', view: 'side' });
-  assert.equal(w.animation, 'walk');
+  assert.equal(w.animation, 'walk_side', 'preset tags are always <preset>_<view>');
   assert.equal(w.frames[1] - w.frames[0] + 1, 8);
   const f = e.run('rig_animate', { name: 'hero', preset: 'walk', view: 'front', frames: 16, fps: 24 });
   assert.equal(f.animation, 'walk_front');
@@ -441,7 +441,7 @@ test('rig hd input validation: feet, plant as a string, non-numeric IK targets',
   e.run('rig_create', { name: 'hd', frame: [64, 96], template: 'humanoid_hd' });
   // plant:'foot_f' plants that foot only, exactly like plant:['foot_f'] (not every rig foot)
   for (const [c, plant] of [['str', 'foot_f'], ['arr', ['foot_f']], ['all', true]]) e.run('rig_animate', { name: 'hd', preset: 'walk', view: 'side', canvas: c, plant, secondary: false });
-  const A = (c) => JSON.stringify(e.get(c).meta.anchors.walk);
+  const A = (c) => JSON.stringify(e.get(c).meta.anchors.walk_side);
   assert.equal(A('str'), A('arr'));
   assert.notEqual(A('str'), A('all'));
 });

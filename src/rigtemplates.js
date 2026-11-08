@@ -130,8 +130,24 @@ export function projectPose(parts, pose, view) {
   return out;
 }
 
-function humanoidHD([W, H]) {
+// weapon cell sizes per class (body units at the 98-unit figure height) and attachment cells
+const WEAPON_CELL = { pistol: [14, 9], revolver: [15, 9], handgun: [14, 9], smg: [26, 10], dmr: [42, 11], sniper: [46, 11], lmg: [42, 13] };
+const ATT_CELL = { vertical_grip: [5, 8, 'top'], angled_grip: [8, 6, 'top'], bipod: [5, 10, 'top'], suppressor: [11, 4, 'left'], optic: [10, 5, 'bottom'], light: [7, 4, 'top'] };
+const LONG_MAP = { run_contact: 'sprint', run_down: 'sprint', run_pass: 'sprint', aim: 'aim', recoil: 'aim', reload_low: 'reload', reload_hip: 'reload', reload_insert: 'reload', reload_slap: 'reload', throw_windup: 'slung', throw_release: 'slung', throw_follow: 'slung', death_buckle: 'ready_low', death_kneel: 'drop', death_ground: 'drop' };
+const PISTOL_MAP = { ...LONG_MAP, death_buckle: 'low', run_contact: 'low', run_down: 'low', run_pass: 'low', throw_windup: 'holster', throw_release: 'holster', throw_follow: 'holster' };
+/** humanoid_hd weapon handling defaults: carry states per template pose, attachment cells. */
+export function hdWeaponConfig(weapon) {
+  const cfg = weapon === true ? {} : { ...weapon };
+  const cls = cfg.class ?? (cfg.kind === 'pistol' ? 'pistol' : 'rifle');
+  const pistol = cfg.kind === 'pistol' || ['pistol', 'handgun', 'revolver'].includes(cls);
+  const attachments = {};
+  for (const [n, a] of Object.entries(cfg.attachments || {})) attachments[n] = typeof a === 'string' ? { type: a } : { ...a };
+  return { ...cfg, class: cls, attachments, poses: { ...(pistol ? PISTOL_MAP : LONG_MAP), ...(cfg.poses || {}) } };
+}
+
+function humanoidHD([W, H], opts = {}) {
   if (W < 32 || H < 48) throw new Error('humanoid_hd needs frames of at least 32x48 (64x96 .. 160x240 recommended); use template "humanoid" for small sprites');
+  const wcfg = opts.weapon ? hdWeaponConfig(opts.weapon) : null;
   const u = (H - 4) / 98, uw = Math.min(u, W / 66);
   const L = (v) => Math.max(1, r(v * u)), Wd = (v) => Math.max(2, r(v * uw)), U = (v) => r1(v * u);
   const limb = (len, w, k, ext) => ({ w, h: len + k + ext, pivot: [Math.floor(w / 2), k] });
@@ -151,36 +167,54 @@ function humanoidHD([W, H]) {
   const parts = {
     cape: { ...centred(Wd(22), L(38), L(1)), parent: 'chest', views: pv(ats([-6, -4, 0, -4, 0], -L(14)), [-10, -10, -10, 4.5, 4]) },
     gear_back: { ...centred(Wd(13), L(17), L(2)), parent: 'chest', views: pv(ats([-9, -6, 0, -6, 0], -L(14)), [-4, -9, -9, 4, 3]) },
-    upper_arm_b: { ...ua, parent: 'chest', views: pv(ats([-1, -5, -9, 5, 9], -shoulderY), [-8, -6, 4, -6, 5]) },
+    upper_arm_b: { ...ua, parent: 'chest', views: pv(ats([-1, 5, 9, -5, -9], -shoulderY), [-8, -6, 4, -6, 5]) },
     forearm_b: { ...fa, parent: 'upper_arm_b', at: [0, upperL], views: pv(null, [-7, -5.5, 4.5, -5.5, 5.5]) },
     hand_b: { ...hand, parent: 'forearm_b', at: [0, foreL], views: pv(null, [-6, -5, 5.5, -5, 6]) },
-    thigh_b: { ...th, parent: 'pelvis', views: pv(ats([-1, -2, -4, 2, 4], 0), [-5, -3, -1, -3, -1]) },
-    shin_b: { ...sh, parent: 'thigh_b', at: [0, thighL], views: pv(null, [-5, -3, -1, -3, -1]) },
-    foot_b: { ...foot, pivot: [Wd(4), footPy], parent: 'shin_b', at: [0, shinL], views: pv(null, [-5, -3, -1, -3, -1], footViews) },
+    thigh_b: { ...th, parent: 'pelvis', views: pv(ats([-1, 2, 4, -2, -4], 0), [-5, -3, 0.4, -3, 0.4]) },
+    shin_b: { ...sh, parent: 'thigh_b', at: [0, thighL], views: pv(null, [-5, -3, 0.4, -3, 0.4]) },
+    foot_b: { ...foot, pivot: [Wd(4), footPy], parent: 'shin_b', at: [0, shinL], views: pv(null, [-5, -3, 0.4, -3, 0.4], footViews) },
     pelvis: { ...centred(Wd(19), L(11), L(4)), z: 0 },
-    thigh_f: { ...th, parent: 'pelvis', views: pv(ats([1, 3, 4, -3, -4], 0), [1, 0.5, -1, 0.5, -1]) },
-    shin_f: { ...sh, parent: 'thigh_f', at: [0, thighL], views: pv(null, [1, 0.5, -1, 0.5, -1]) },
-    foot_f: { ...foot, pivot: [Wd(4), footPy], parent: 'shin_f', at: [0, shinL], views: pv(null, [1, 0.5, -1, 0.5, -1], footViews) },
+    thigh_f: { ...th, parent: 'pelvis', views: pv(ats([1, -3, -4, 3, 4], 0), [1, 0.5, 0.5, 0.5, 0.5]) },
+    shin_f: { ...sh, parent: 'thigh_f', at: [0, thighL], views: pv(null, [1, 0.5, 0.5, 0.5, 0.5]) },
+    foot_f: { ...foot, pivot: [Wd(4), footPy], parent: 'shin_f', at: [0, shinL], views: pv(null, [1, 0.5, 0.5, 0.5, 0.5], footViews) },
     torso: { ...bottom(Wd(17), L(14), L(2)), parent: 'pelvis', at: [0, -L(3)], views: pv(null, [2, 1, 1, 1, 1]) },
-    gear_hip: { ...centred(Wd(7), L(9), L(1)), parent: 'pelvis', views: pv(ats([-2, 4, 7, -5, -7], -L(1)), [4, 4, 3, 1.5, 2.5]) },
+    gear_hip: { ...centred(Wd(7), L(9), L(1)), parent: 'pelvis', views: pv(ats([-2, -6, -7, 3.5, 7], -L(1)), [4, 4, 3, 1.5, 2.5]) },
     chest: { ...bottom(Wd(24), L(18), L(2)), parent: 'torso', at: [0, -torsoL], views: pv(null, [3, 2, 2, 2, 2]) },
     neck: { ...bottom(Wd(6), L(7), L(1)), parent: 'chest', at: [0, -chestNeck], views: pv(null, [4, 4, 4, 4, 4]) },
     head: { ...bottom(Wd(14), L(15), L(1)), parent: 'neck', at: [0, -neckL], variants: ['blink'], views: pv(null, [5, 5, 5, 6, 6]) },
-    upper_arm_f: { ...ua, parent: 'chest', views: pv(ats([1, 6, 9, -6, -9], -shoulderY), [6, 6, 4, 7, 5]) },
+    upper_arm_f: { ...ua, parent: 'chest', views: pv(ats([1, -6, -9, 6, 9], -shoulderY), [6, 6, 4, 7, 5]) },
     forearm_f: { ...fa, parent: 'upper_arm_f', at: [0, upperL], views: pv(null, [7, 7, 4.5, 7.5, 5.5]) },
     weapon: { w: Wd(32), h: L(10), pivot: [Wd(9), L(4)], parent: 'hand_f', at: [0, L(3.5)], views: pv(null, [7.5, 7.5, 6, -2, -2]) },
     hand_f: { ...hand, parent: 'forearm_f', at: [0, foreL], views: pv(null, [8, 8, 5.5, 8, 6]) },
   };
+  if (wcfg) {
+    // weapon handling: a cell sized for the class, plus one cell per attachment (pivot = its mount point)
+    const [cw, ch] = WEAPON_CELL[wcfg.class] || [32, 10];
+    parts.weapon = { ...parts.weapon, w: Wd(cw), h: L(ch), pivot: [Wd(cw * 0.3), L(ch * 0.5)] };
+    for (const [n, a] of Object.entries(wcfg.attachments)) {
+      const [aw, ah, mount] = ATT_CELL[a.type] || [6, 6, 'top'];
+      const w = Wd(aw), h = L(ah);
+      const pivot = mount === 'top' ? [Math.floor(w / 2), 0] : mount === 'bottom' ? [Math.floor(w / 2), h - 1] : [0, Math.floor(h / 2)];
+      parts[a.part ?? `att_${n}`] = { w, h, pivot, parent: 'weapon', views: pv(null, [7.6, 7.6, 6.1, -1.9, -1.9]) };
+    }
+  }
   // side-view pose authoring: x/y in body units (scaled to the frame), rot in degrees
   const S = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, { ...v, ...(v.x !== undefined ? { x: U(v.x) } : {}), ...(v.y !== undefined ? { y: U(v.y) } : {}) }]));
   const NOGUN = { weapon: { hide: true } };
   // gun hold per view: hand_f wrist relative to the chest pivot (fwd/up in side units) and weapon roll
-  const gunAt = (v, fwd, up) => ({ side: [fwd, up], front_side: [4.5 + 0.707 * (fwd - 1), up], front: [6, up], back_side: [-4.5 + 0.707 * (fwd - 1), up], back: [-6, up] })[v];
+  const gunAt = (v, fwd, up) => ({ side: [fwd, up], front_side: [-4.5 + 0.707 * (fwd - 1), up], front: [-6, up], back_side: [4.5 + 0.707 * (fwd - 1), up], back: [6, up] })[v];
   const rollIn = (v, rot) => r1(rot * ({ side: 1, front_side: 0.7, back_side: 0.7, front: 0, back: 0 })[v]);
   const offAt = (v, [ax, ay]) => (YAW[v] === 0 ? [U(ax), U(ay)] : YAW[v] === 45 ? [U(ax * 0.7), U(ay)] : [U(ax * 0.1), U(ay + 1)]);
-  const bendF = (v) => (v === 'front' ? 1 : -1), bendB = (v) => (v === 'back' ? 1 : -1);
+  // elbows flare outward: the near arm is screen-left in front, screen-right in back
+  const bendF = (v) => (v === 'front' ? -1 : v === 'back' ? 1 : -1), bendB = (v) => (v === 'front' ? 1 : -1);
   /** IK for a two-handed weapon: main hand at the chest-relative grip, off hand on the weapon or another part. */
-  const gunIK = ({ fwd, up, rot = 0, off = [14, -2], offPart }) => (v) => {
+  const gunIK = ({ fwd, up, rot = 0, off = [14, -2], offPart, wpt }) => (v) => {
+    // weapon handling: the solver locks the trigger hand (and the support hand when the state
+    // holds it); a free support hand reaches for a weapon point ({weapon:"mag"}) or a pouch
+    if (wcfg) {
+      if (offPart) return { hand_b: { target: { part: offPart, at: [U(off[0]), U(off[1])] }, bend: bendB(v) } };
+      return wpt ? { hand_b: { target: { weapon: wpt[0], at: [0, U(wpt[1])] }, bend: bendB(v) } } : null;
+    }
     const [gx, gy] = gunAt(v, fwd, up);
     return {
       hand_f: { target: { part: 'chest', at: [U(gx), U(gy)] }, bend: bendF(v), rot: rollIn(v, rot) },
@@ -190,12 +224,12 @@ function humanoidHD([W, H]) {
   /** Side pose + projected overrides for the other views (+ per-view IK); fix = hand-set {view: {part: fields}} over the projection. */
   const pose = (side, ik, fix = {}) => {
     const p = S(side);
-    if (ik) p.ik = ik('side');
+    if (ik) { const x = ik('side'); if (x) p.ik = x; }
     const views = {};
     for (const v of HD_VIEWS.slice(1)) {
       const o = projectPose(parts, p, v);
       for (const [k, f] of Object.entries(S(fix[v] || {}))) o[k] = { ...(o[k] || {}), ...f };
-      if (ik) o.ik = ik(v);
+      if (ik) { const x = ik(v); if (x) o.ik = x; }
       if (Object.keys(o).length) views[v] = o;
     }
     if (Object.keys(views).length) p.views = views;
@@ -211,7 +245,8 @@ function humanoidHD([W, H]) {
     for (const s of ['f', 'b']) Object.assign(f, { ['thigh_' + s]: { rot: 0, sy: legs[0] }, ['shin_' + s]: { rot: 0, sy: legs[1] }, ['foot_' + s]: { rot: 0 } });
     const front = { ...f, upper_arm_f: { rot: -arms, sy: 0.9 }, forearm_f: { rot: -arms / 2 }, upper_arm_b: { rot: arms, sy: 0.9 }, forearm_b: { rot: arms / 2 } };
     const back = { ...f, upper_arm_f: { rot: arms, sy: 0.9 }, forearm_f: { rot: arms / 2 }, upper_arm_b: { rot: -arms, sy: 0.9 }, forearm_b: { rot: -arms / 2 } };
-    return { front, back };
+    // the near (_f) arm is screen-left in front and screen-right in back
+    return { front: back, back: front };
   };
   const poses = {
     idle_exhale: pose({ ...stance, ...relaxed, pelvis: { y: 0.3 }, chest: { rot: -1 }, head: { rot: 1 }, ...NOGUN }),
@@ -230,10 +265,10 @@ function humanoidHD([W, H]) {
     crouch_up: pose({ ...crouch, pelvis: { y: 10 }, thigh_f: { rot: -30 }, shin_f: { rot: 62 }, foot_f: { rot: -12 }, thigh_b: { rot: -75 }, shin_b: { rot: 85 }, foot_b: { rot: -15 } }),
     aim: pose({ ...aimLegs }, gunIK({ fwd: 10, up: -11 })),
     recoil: pose({ ...aimLegs, pelvis: { x: -2.4, y: 0.8 }, chest: { rot: -7 }, head: { rot: 3 } }, gunIK({ fwd: 8.5, up: -11.8, rot: -10 })),
-    reload_low: pose({ ...aimLegs, head: { rot: 14 } }, gunIK({ fwd: 9, up: -7, rot: 25, off: [10, -1] })),
+    reload_low: pose({ ...aimLegs, head: { rot: 14 } }, gunIK({ fwd: 9, up: -7, rot: 25, off: [10, -1], wpt: ['mag', 2] })),
     reload_hip: pose({ ...aimLegs, head: { rot: 18 } }, gunIK({ fwd: 9, up: -7, rot: 25, off: [0, 3], offPart: 'gear_hip' })),
-    reload_insert: pose({ ...aimLegs, head: { rot: 16 } }, gunIK({ fwd: 9, up: -7.5, rot: 22, off: [6, 3] })),
-    reload_slap: pose({ ...aimLegs, head: { rot: 12 } }, gunIK({ fwd: 9.5, up: -8.5, rot: 18, off: [6, 1.5] })),
+    reload_insert: pose({ ...aimLegs, head: { rot: 16 } }, gunIK({ fwd: 9, up: -7.5, rot: 22, off: [6, 3], wpt: ['mag', 6] })),
+    reload_slap: pose({ ...aimLegs, head: { rot: 12 } }, gunIK({ fwd: 9.5, up: -8.5, rot: 18, off: [6, 1.5], wpt: ['mag', 3] })),
     hurt_hit: pose({ pelvis: { x: -2.5, y: 1 }, torso: { rot: -10 }, chest: { rot: -8 }, neck: { rot: -6 }, head: { rot: -14, variant: 'blink' }, upper_arm_f: { rot: -30 }, forearm_f: { rot: -40 }, upper_arm_b: { rot: -36 }, forearm_b: { rot: -48 }, thigh_f: { rot: -14 }, shin_f: { rot: 18 }, foot_f: { rot: -4 }, thigh_b: { rot: 10 }, shin_b: { rot: 16 }, foot_b: { rot: -26 }, ...NOGUN }),
     hurt_recover: pose({ ...stance, pelvis: { x: -1, y: 0.8 }, torso: { rot: -4 }, chest: { rot: -3 }, head: { rot: -5 }, upper_arm_f: { rot: -12 }, forearm_f: { rot: -20 }, upper_arm_b: { rot: -14 }, forearm_b: { rot: -24 }, ...NOGUN }),
     death_buckle: pose({ pelvis: { x: -1, y: 8 }, torso: { rot: 10 }, chest: { rot: 10 }, head: { rot: 20, variant: 'blink' }, thigh_f: { rot: -40 }, shin_f: { rot: 70 }, foot_f: { rot: -30 }, thigh_b: { rot: -10 }, shin_b: { rot: 60 }, foot_b: { rot: -30 }, upper_arm_f: { rot: -20 }, forearm_f: { rot: -10 }, upper_arm_b: { rot: -24 }, forearm_b: { rot: -12 }, ...NOGUN }),
@@ -259,7 +294,9 @@ function humanoidHD([W, H]) {
   };
   const guide = 'humanoid_hd: side = facing RIGHT; *_f = the near side in that view (draw *_b darker). Spine: pelvis (root, hip-joint pivot), torso (abdomen) and chest (pivots near their bottom), neck, head (neck pivot at the bottom; "head:blink" = eyes closed). Limbs: upper_arm/forearm/hand and thigh/shin/foot, pivots at the top joint (shoulder, elbow, wrist, hip, knee, ankle); foot pivot = ankle, toes point right in "side". Limb cells overlap their joints a few px so bent elbows and knees stay closed. Optional slots (leave empty or remove with null): weapon (in hand_f, drawn pointing right with the grip on the pivot; shown in aim/shoot/reload), gear_back, gear_hip (swings), cape (secondary motion). Views: side, front_side (3/4 toward camera), front, back_side (3/4 away), back; side_left/front_side_left/back_side_left are mirrors (8 directions).';
   return {
-    frame: [W, H], views: HD_VIEWS, mirror: { side_left: 'side', front_side_left: 'front_side', back_side_left: 'back_side' }, root, parts, poses, presets, guide,
+    frame: [W, H], views: HD_VIEWS, mirror: { side_left: 'side', front_side_left: 'front_side', back_side_left: 'back_side' }, root, parts, poses, presets,
+    guide: wcfg ? `${guide} WEAPON HANDLING (weapon:{class:"${wcfg.class}"}): draw the weapon only in the "side" row, pointing RIGHT (the other views project that cell); stock at the left edge, pistol grip about 30% in, handguard / muzzle to the right. Attachment cells (att_<name>) mount on the weapon's sockets; draw them in the side row too. The solver places the weapon per carry state and locks the hands on the grips in every pose, so the weapon stays visible in every preset (holster / slung are explicit states). Check with art_rig check.` : guide,
+    ...(wcfg ? { weapon: wcfg } : {}),
     sampling: 'rotsprite', scale_children: true, secondary: { cape: { stiffness: 0.25, damping: 0.22, gravity: 0.3 }, gear_hip: { stiffness: 0.6, damping: 0.35 } },
   };
 }
@@ -322,5 +359,6 @@ export function mergeTemplate(t, a) {
   return {
     frame: t.frame, views, mirror, root: a.root || t.root, parts, poses, presets: merge(t.presets, a.presets), guide: t.guide,
     sampling: a.sampling ?? t.sampling, scale_children: a.scale_children ?? t.scale_children, secondary, feet: a.feet,
+    ...(t.weapon ? { weapon: t.weapon } : {}), ...(a.variant_sets ? { variant_sets: a.variant_sets } : {}),
   };
 }

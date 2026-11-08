@@ -25,7 +25,14 @@ const pct = (v) => Math.round(v * 100);
  * Critique one image. kind: auto | texture | sprite | scene.
  * Returns { kind, stats, issues: [{id, severity, message, fix, at?}], score }.
  */
-export function critiqueImage(data, w, h, { kind = 'auto', tileable, maxColors } = {}) {
+/** HD style (detailed 64x96+ sprites, 128px+ art): richer palettes and deliberate ordered dithering. */
+export function isHD(w, h, style) {
+  if (style === 'hd') return true;
+  if (style === 'lowres') return false;
+  return Math.max(w, h) >= 96 && w * h >= 6144;
+}
+
+export function critiqueImage(data, w, h, { kind = 'auto', tileable, maxColors, style } = {}) {
   const { at, op, key } = view(data, w, h);
   const N = w * h;
   let opaque = 0, semi = 0;
@@ -50,9 +57,11 @@ export function critiqueImage(data, w, h, { kind = 'auto', tileable, maxColors }
   colors.sort((a, b) => b.n - a.n);
 
   // --- palette size ---
-  const limit = maxColors ?? (kind === 'scene' ? 64 : Math.max(8, Math.min(32, Math.round(Math.sqrt(opaque) * 1.2))));
+  // colour budget scales with size: <= 32 for low-res sprites, 48-128 for HD (64x96+ sprites, big art)
+  const hd = isHD(w, h, style);
+  const limit = maxColors ?? (hd ? (kind === 'scene' ? 128 : Math.max(48, Math.min(128, Math.round(Math.sqrt(opaque) * 1.2)))) : kind === 'scene' ? 64 : Math.max(8, Math.min(32, Math.round(Math.sqrt(opaque) * 1.2))));
   if (colors.length > limit) {
-    add('too_many_colors', 'warn', `${colors.length} colors for a ${w}x${h} ${kind} (aim for <= ${limit}).`, 'Use a small ramp per material (4-6 shades); run quantize with your palette, or remap near-duplicate colors.');
+    add('too_many_colors', 'warn', `${colors.length} colors for a ${w}x${h} ${hd ? 'HD ' : ''}${kind} (aim for <= ${limit}${hd ? '; HD range 48-128' : ''}).`, 'Use a small ramp per material (4-6 shades); run quantize with your palette, or remap near-duplicate colors.');
   }
   // --- near-duplicate colors (wasted shades that read as noise) ---
   const dups = [];
@@ -70,9 +79,22 @@ export function critiqueImage(data, w, h, { kind = 'auto', tileable, maxColors }
   let noisy = 0;
   const wrap = kind === 'texture';
   const nb4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  // ordered dithering (HD): a pixel on a regular 2-px lattice of its own colour (checkerboard /
+  // Bayer) between close shades is texture, not noise
+  let dithered = 0;
+  const kAt = (xx, yy) => { if (wrap) { xx = (xx + w) % w; yy = (yy + h) % h; } return op(xx, yy) ? key(xx, yy) : null; };
+  const isDither = (x, y, me, c) => {
+    let diag = 0, lat = 0;
+    for (const [dx, dy] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) if (kAt(x + dx, y + dy) === me) diag++;
+    for (const [dx, dy] of [[2, 0], [-2, 0], [0, 2], [0, -2]]) if (kAt(x + dx, y + dy) === me) lat++;
+    if (diag < 3 && lat < 3) return false;
+    for (const [dx, dy] of nb4) { const k = kAt(x + dx, y + dy); if (k !== null && k !== me && dist(c, at((x + dx + w) % w, (y + dy + h) % h)) > 110) return false; }
+    return true;
+  };
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     if (!op(x, y)) continue;
     const me = key(x, y), c = at(x, y);
+    if (hd && isDither(x, y, me, c)) { dithered++; continue; }
     let same = 0, diffCount = 0, neighbours = 0, minD = Infinity;
     for (const [dx, dy] of nb4) {
       let xx = x + dx, yy = y + dy;
@@ -198,7 +220,7 @@ export function critiqueImage(data, w, h, { kind = 'auto', tileable, maxColors }
   const score = Math.max(0, 100 - issues.reduce((a, i) => a + sev[i.severity], 0));
   return {
     kind,
-    stats: { size: `${w}x${h}`, colors: colors.length, coverage: pct(coverage), value_range: pct(hi - lo), noise: pct(noiseRatio) },
+    stats: { size: `${w}x${h}`, colors: colors.length, coverage: pct(coverage), value_range: pct(hi - lo), noise: pct(noiseRatio), ...(hd ? { style: 'hd', color_budget: limit, dithered: pct(dithered / opaque) } : {}) },
     ...(seams ? { seams } : {}),
     issues,
     score,

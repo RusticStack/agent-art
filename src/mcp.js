@@ -4,6 +4,7 @@
 //
 // Token budget: tool definitions are sent with every request, so they stay terse. Details,
 // recipes and examples are served on demand (art_help, MCP prompts/resources, error hints).
+import { compactInfo, compactRig } from './compact.js';
 import readline from 'node:readline';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -64,9 +65,9 @@ export const TOOLS = [
   },
   {
     name: 'art_info',
-    description: 'Canvas details: size, frames, layers, palette, animations, colors used.',
-    inputSchema: { type: 'object', properties: { canvas: S.canvas, color_limit: { type: 'integer' } }, required: ['canvas'] },
-    run: (call, a) => call('info', a),
+    description: 'Canvas details (summary): size, frames, layers, animations, meta keys, colour count. full:true = everything (palette, meta, frame lists); fields:[..] = only those fields in full.',
+    inputSchema: { type: 'object', properties: { canvas: S.canvas, color_limit: { type: 'integer' }, full: { type: 'boolean' }, fields: { type: 'array', items: { type: 'string' } } }, required: ['canvas'] },
+    run: async (call, a) => compactInfo(await call('info', a), a),
   },
   {
     name: 'art_draw',
@@ -116,7 +117,7 @@ export const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        canvas: S.canvas, kind: { type: 'string', enum: ['auto', 'texture', 'sprite', 'scene'] }, frame: S.frame, animation: { type: 'string' },
+        canvas: S.canvas, kind: { type: 'string', enum: ['auto', 'texture', 'sprite', 'scene'] }, frame: S.frame, animation: { type: 'string' }, style: { enum: ['auto', 'lowres', 'hd'] },
         layer: S.layer, tileable: { type: 'boolean' }, max_colors: { type: 'integer' }, all_frames: { type: 'boolean' },
       },
       required: ['canvas'],
@@ -237,14 +238,16 @@ export const TOOLS = [
   },
   {
     name: 'art_rig',
-    description: 'Rigs: parts drawn once per view, poses tweened into frames, so a character stays identical across views and animations. Fastest: create {name, frame, template:"humanoid"|"humanoid_hd" (64x96+, 8 directions, IK)|"blob"|"flyer"} (override/add/remove parts, views, poses, presets), draw the cells, animate {preset, view}. Custom: create {name, frame, views?, mirror?, parts:{p:{w,h,pivot,parent?,at?,z?,variants?,views?:{view:{at,z,hidden,pivot}}}}, root?, sampling?, secondary?:{part:{stiffness,damping}}, scale_children?}; info; update; templates; pose {pose, parts:{p:{x,y,rot,sx,sy,variant,hide}}, views?:{view:{p:{..}}}, ik?:{end:{target:[x,y]|{part,at},bend?,rot?}}, from?}; preview; turnaround; animate {preset} or {animation, view, keys:[{pose|parts,t?,ease?,mirror_pairs?}], frames, fps, loop?, plant?, secondary?, plant_feet?, canvas?, only?/hide?}. art_help {topic:"rig"}.',
+    description: 'Rigs: parts drawn once per view, poses tweened into frames, so a character stays identical across views and animations. Fastest: create {name, frame, template:"humanoid"|"humanoid_hd" (64x96+, 8 directions, IK)|"blob"|"flyer"} (override/add/remove parts, views, poses, presets), draw the cells, animate {preset, view}. Custom: create {name, frame, views?, mirror?, parts:{p:{w,h,pivot,parent?,at?,z?,variants?,views?:{view:{at,z,hidden,pivot}}}}, root?, sampling?, secondary?:{part:{stiffness,damping}}, scale_children?}; info; update; templates; pose {pose, parts:{p:{x,y,rot,sx,sy,variant,hide}}, views?:{view:{p:{..}}}, ik?:{end:{target:[x,y]|{part,at},bend?,rot?}}, from?}; preview; turnaround; animate {preset} or {animation, view, keys:[{pose|parts,t?,ease?,mirror_pairs?}], frames, fps, loop?, plant?, secondary?, plant_feet?, canvas?, only?/hide?, variant?}. Held weapons: weapon:{class, attachments?} (carry states, hands locked on grips; animate carry?/constraints?; check = validate every clip+view; layers/explain = draw order). info/create/update reply in summary (full:true). art_help {topic:"rig"}.',
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['create', 'info', 'update', 'pose', 'preview', 'animate', 'turnaround', 'templates'] }, name: { type: 'string' },
+        action: { type: 'string', enum: ['create', 'info', 'update', 'pose', 'preview', 'animate', 'turnaround', 'templates', 'check', 'layers', 'explain'] }, name: { type: 'string' }, part_a: { type: 'string' }, part_b: { type: 'string' },
+        weapon: { type: ['object', 'boolean'] }, carry: { type: ['string', 'object'] }, attach: { type: 'array', items: { type: 'string' } },
+        variant: { type: ['string', 'array'] }, variant_sets: { type: 'object' }, constraints: { enum: ['refuse', 'fix', 'warn', 'off'] }, clips: { type: 'array', items: { type: 'string' } }, visibility: { type: 'boolean' }, full: { type: 'boolean' }, fields: { type: 'array', items: { type: 'string' } },
         template: { type: 'string', enum: ['humanoid', 'humanoid_hd', 'blob', 'flyer'] }, preset: { type: 'string' }, presets: { type: 'object' }, poses: { type: 'object' }, plant_feet: { type: 'boolean' }, plant: { type: ['boolean', 'array'] }, secondary: { type: ['boolean', 'object'] }, ik: { type: 'object' }, sampling: { type: 'string', enum: ['nearest8', 'rotsprite', 'smooth'] }, scale_children: { type: 'boolean' }, feet: { type: 'array' }, only: { type: 'array', items: { type: 'string' } }, hide: { type: 'array', items: { type: 'string' } },
         ik_from: { type: 'object', description: '{canvas, animation?, map:{hand_f:"socket_grip_r"}} per-frame IK targets' },
-        frame: { type: 'array', items: { type: 'integer' } }, views: { type: ['array', 'object'] }, mirror: { type: 'object' },
+        frame: { type: ['array', 'integer'], items: { type: 'integer' } }, views: { type: ['array', 'object'] }, mirror: { type: 'object' },
         parts: { type: 'object' }, root: { type: 'array', items: { type: 'number' } }, pairs: { type: 'array' }, project: { type: 'string' }, palette: { type: 'object' },
         pose: { type: 'string' }, from: { type: 'string' }, merge: { type: 'boolean' }, view: { type: 'string' }, scale: { type: 'integer' },
         animation: { type: 'string' }, keys: { type: 'array', items: { type: 'object' } }, frames: { type: 'integer' }, fps: { type: 'number' },
@@ -252,15 +255,19 @@ export const TOOLS = [
       },
       required: ['action'],
     },
-    run: (call, a) => call(`rig_${a.action}`, a),
+    run: async (call, a) => {
+      const r = await call(`rig_${a.action}`, a);
+      return ['info', 'create', 'update'].includes(a.action) ? compactRig(a.action, r, a) : r;
+    },
   },
   {
     name: 'art_model',
-    description: '3D low-poly models textured with pixel art (HD-2D, nearest filter) -> glTF .glb. Units px (32 px = 1 unit). create {name, parts:[{type, ...args, at?:[x,y,z], cell?:[gx,gy,gz] (x grid), turn?:0-3, rotate?:[x,y,z]deg (X,Y,Z about origin or pivot?), scale?, mirror?, array?:{count, step|cell_step, turn?, rotate?, about?}, opacity?|glass?, name?, parent?}]}. Rigs (art_help 3d): name/parent parts = nodes (pivot = joint), sockets, template:fp_arms|fp_rifle|fp_pistol; pose {pose, parts:{<part>:{rot,at}}}; animate {clip, keys:[{pose|parts,t}], events?}; preview {pose|clip, view:fp|side}; render {canvas, pose|clip, camera, size:[w,h], sweep?, quantize?, outline?, only?|hide?} = sprites + socket anchors. Kit: floor wall corner pillar column arch vault stairs ledge balustrade roof rubble box (taper|bevel|insets) wedge inset cylinder (r_top/r_bottom, wrap) cone plane shape loft; props: extrude lathe; layout: model (place other models). texture|faces{top,front,..}|side|top|color; world UVs, seamless across pieces. Ruins: broken, holes:<mask>. overlays:[{texture,where:bottom|top|corners|edges}]. ctm {name:<new canvas>, ctm:{base, method:full|compact|horizontal|vertical|random|repeat|overlay, border?}} = connected textures. update {name, parts|add|set:{i:{..}}|remove:[i]}; info; list; delete; preview {name, views?, size?} (game = 38° camera); export {name, path?, instances?, atlas?, up?:"z", normal_maps?}. art_help {topic:"3d"}.',
+    description: '3D low-poly models textured with pixel art (HD-2D, nearest filter) -> glTF .glb. Units px (32 px = 1 unit). create {name, parts:[{type, ...args, at?:[x,y,z], cell?:[gx,gy,gz] (x grid), turn?:0-3, rotate?:[x,y,z]deg (X,Y,Z about origin or pivot?), scale?, mirror?, array?:{count, step|cell_step, turn?, rotate?, about?}, opacity?|glass?, name?, parent?}]}. Rigs (art_help 3d): name/parent parts = nodes (pivot = joint), sockets, template:fp_arms|fp_rifle|fp_pistol; pose {pose, parts:{<part>:{rot,at}}}; animate {clip, keys:[{pose|parts,t}], events?}; preview {pose|clip, view:fp|side}; render {canvas, pose|clip, camera, size:[w,h], sweep?, quantize?, outline?, only?|hide?, hold?} = sprites + socket anchors. Guns: weapon:true (hold:{weapon} on arms = hands on grips per carry state; check validates). Kit: floor wall corner pillar column arch vault stairs ledge balustrade roof rubble box (taper|bevel|insets) wedge inset cylinder (r_top/r_bottom, wrap) cone plane shape loft; props: extrude lathe; layout: model (place other models). texture|faces{top,front,..}|side|top|color; world UVs, seamless across pieces. Ruins: broken, holes:<mask>. overlays:[{texture,where:bottom|top|corners|edges}]. ctm {name:<new canvas>, ctm:{base, method:full|compact|horizontal|vertical|random|repeat|overlay, border?}} = connected textures. update {name, parts|add|set:{i:{..}}|remove:[i]}; info; list; delete; preview {name, views?, size?} (game = 38° camera); export {name, path?, instances?, atlas?, up?:"z", normal_maps?}. art_help {topic:"3d"}.',
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['create', 'update', 'info', 'list', 'delete', 'preview', 'export', 'ctm', 'pose', 'animate', 'render'] }, name: { type: 'string' },
+        action: { type: 'string', enum: ['create', 'update', 'info', 'list', 'delete', 'preview', 'export', 'ctm', 'pose', 'animate', 'render', 'check'] }, name: { type: 'string' },
+        weapon: { type: ['object', 'boolean'] }, arms: { type: 'object' }, hold: { type: 'object', description: '{weapon|arms, carry?, attach?, clip?, both?, fix?}' }, clips: { type: 'array', items: { type: 'string' } }, carries: { type: 'array', items: { type: 'string' } },
         parts: { type: ['array', 'object'], items: MODEL_PART },
         add: { type: 'array', items: { type: 'object' } }, set: { type: 'object' }, remove: { type: 'array', items: { type: ['integer', 'string'] } },
         template: { type: 'string', enum: ['fp_arms', 'fp_rifle', 'fp_pistol'] }, textures: { type: 'object' },

@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Weapon handling (`art_rig`, `art_model`)
+
+- `art_rig` `weapon:{class, points, attachments, attach, carry, poses, states, standoff, foreshorten, layer, ...}`. Both hands use IK on the grips every frame with wrist orientation, and a pistol support hand cups the trigger hand. Reach limits apply: shoulder protraction, then the support hand slides along the rail, then the weapon moves back, or the frame is flagged; limbs never stretch. Torso, head and limb capsules form a dead zone: the weapon is pushed out forward first, then outward, and the stock stays in the pocket. Aim has a cheek weld. The muzzle stays down outside firing states. Carry states: long guns `aim`, `ready_low`, `ready_high`, `hip`, `sprint`, `reload`, `slung`, `one_hand_low`, `drop` and `holster`; pistols `aim`, `compressed`, `low`, `reload`, `one_hand_low` and `holster`. `humanoid_hd {weapon}` maps every preset to a carry state and adds attachment cells.
+- Weapon draw order is driven by depth (over the torso when held in front). New actions `check` (per-frame hand-grip distance, over-extension, inverted elbows, penetration, muzzle flags, layering, visibility, with a pass/fail summary), `layers` (draw order with the reasons) and `explain` (why A is drawn over B). `animate {constraints:"refuse"|"fix"|"warn"|"off"}` defaults to refusing to write violating frames when a weapon is set.
+- Front-view readability: a barrel pointing at the camera gets an outward cant with a length floor. In back views the muzzle angles out past the silhouette.
+- `art_model` `fp_rifle` / `fp_pistol {weapon}`, with the attachments `vertical_grip`, `angled_grip`, `bipod` and `suppressor`. `render`, `animate` and `check` take `{hold}`, which solves the `fp_arms` hands onto the grips per carry state, with reach and dead-zone correction and muzzle discipline. `animate {hold}` bakes the arms clip and, with `bake_weapon`, the gun clip.
+- Equipment sets: `variant_sets` and `animate`/`preview {variant:"heavy"}`.
+- Skill `weapon-handling`.
+
+### Changed defaults and fixes
+
+- `mirror_pairs` no longer swaps arm chains that are held by IK onto a weapon (the gun used to change hands). Set `mirror_hands: true` on a key to swap them deliberately.
+- `humanoid_hd`: the `_f` limbs were on the wrong screen side in the 3/4, front and back views; they are now on the correct side. In the front and back views the thighs draw above the pelvis, which removes the "shorts" look.
+- Preset animation tags are always `<preset>_<view>` (previously `idle` for the first view and `idle_<view>` for the rest).
+- The `preview` ground line is drawn at the feet instead of at the root.
+- `art_critique`: HD sprites (64 px and up) get a 48-128 colour budget, with 32 kept for low-res. Ordered dithering in HD is no longer flagged as noise. `style` overrides the detection.
+- Compact replies: `art_info` and `art_rig` `info`, `create` and `update` reply with a summary. `full: true` returns everything; `fields:[...]` returns only the fields named.
+- `docs/rig-hd-guide.md`: the view-band offsets are the tallest cell + 1 (0, 74, 148, 222, 296 by default; 55, 110, 165, 220 with `cape: null`). The doc was wrong; the code was right.
+
 ## 0.6.0
 
 ### 3D rigs, clips and pre-rendered sprites (`art_model`)
