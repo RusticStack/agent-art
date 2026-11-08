@@ -144,6 +144,7 @@ function summary(def, built) {
   const groups = [...mesh.groups.values()];
   const tris = mesh.triangles;
   const warnings = [];
+  checkRig(def, built);
   if (tris > 20000) warnings.push(`${tris} triangles: heavy for a kit piece (aim < 2000; lower segments/res, fewer ruins)`);
   if (groups.length > 8) warnings.push(`${groups.length} materials: reuse textures, or export atlas:true`);
   for (const g of groups) if (g.tex.width * g.tex.height > 1 && !g.tex.ctm && (g.tex.width & (g.tex.width - 1) || g.tex.height & (g.tex.height - 1))) { warnings.push(`texture ${g.tex.name} is ${g.tex.width}x${g.tex.height} (not power of two: fine for WebGL2, WebGL1 cannot REPEAT it)`); break; }
@@ -161,6 +162,18 @@ function rigOf(def, built, force = false) {
   const k = force ? '_rigF' : '_rig';
   if (built[k] === undefined) built[k] = rigInfo(def, built, force) || (force ? null : false);
   return built[k] || null;
+}
+/** Stored poses and clips must resolve against the current nodes (a removed part would only fail at export). */
+function checkRig(def, built) {
+  if (!def.poses && !def.clips) return;
+  const info = rigOf(def, built, true);
+  const fix = 'remove or replace it with poses/clips:{<name>:null|{..}}';
+  for (const [n, p] of Object.entries(def.poses || {})) {
+    try { resolveOffsets(def, info, { parts: p?.parts }); } catch (e) { throw new Error(`pose "${n}": ${e.message} (${fix})`); }
+  }
+  for (const [n, c] of Object.entries(def.clips || {})) {
+    try { clipKeys(def, info, c); } catch (e) { throw new Error(`clip "${n}": ${e.message} (${fix})`); }
+  }
 }
 const groupsOf = (mesh) => [...mesh.groups.values()].filter((g) => g.idx.length);
 
