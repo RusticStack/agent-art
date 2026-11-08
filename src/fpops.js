@@ -383,7 +383,19 @@ export function bakeClip(cls, clipName, { skin = 'mec', variant = null, engine =
 }
 
 // ---------- files ----------
-export const writePNG = (root, rel, img) => { const f = path.join(root, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, encodePNG(img.width, img.height, img.data)); return f; };
+/** Names that become path segments under the asset root (gun / magazine / skin / state): 1-64 letters, digits, _ - ., never "." or "..". */
+const FP_NAME = /^[A-Za-z0-9_\-.]{1,64}$/;
+export function checkFpName(n, what) {
+  if (typeof n !== 'string' || !FP_NAME.test(n) || /^\.+$/.test(n)) throw new Error(`${what} ${JSON.stringify(n)} must be 1-64 letters, digits, _ - . (it names files under the asset root)`);
+  return n;
+}
+/** root + rel, refusing anything that resolves outside root (defence in depth for every file the fp ops write). */
+export function insideRoot(root, rel) {
+  const base = path.resolve(root), f = path.resolve(base, rel), r = path.relative(base, f);
+  if (!r || r === '..' || r.startsWith(`..${path.sep}`) || path.isAbsolute(r)) throw new Error(`refusing to write "${rel}": it resolves outside the asset root ${base}`);
+  return f;
+}
+export const writePNG = (root, rel, img) => { const f = insideRoot(root, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, encodePNG(img.width, img.height, img.data)); return f; };
 export function readManifest(root, group) { const f = path.join(root, 'manifest', `${group}.json`); return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : {}; }
 export function writeManifest(root, group, m) { const f = path.join(root, 'manifest', `${group}.json`); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(m, null, 1)); return f; }
 export const assetRoot = (engine, a) => (engine.resolvePath ? engine.resolvePath(a.out || 'fp_assets', engine.exportDir) : path.resolve(a.out || 'fp_assets'));
@@ -416,6 +428,7 @@ export const FP_OPS = {
     const mg = readManifest(root, 'fp_guns'), mm = readManifest(root, 'fp_mags'), ma = readManifest(root, 'fp_attach');
     mg.sweeps = mg.sweeps || {}; mm.sweeps = mm.sweeps || {}; ma.sweeps = ma.sweeps || {};
     for (const name of listArg(a.guns, GUN_CLASSES)) {
+      checkFpName(name, 'gun');
       const def = fpDef(this, name, 'gun');
       const cls = def.fp?.class;
       if (!cls) throw new Error(`model "${name}" is not an fp gun (needs fp:{kind:"gun", class}; art_fp kit makes the kit guns)`);
@@ -432,11 +445,13 @@ export const FP_OPS = {
       out.guns[name] = rep;
     }
     for (const name of listArg(a.mags, MAGS)) {
+      checkFpName(name, 'magazine');
       const sw = sweepOf(this, name, 'mag', magGrid(name, step));
       mm.sweeps[name] = exportSweep(root, `fp/mags/${name}`, sw);
       out.mags[name] = { cell: sw.def.cell, cells: sw.cells.length, sheets: mm.sweeps[name].sheets.length };
     }
     for (const name of listArg(a.attachments, Object.keys(ATTACH))) {
+      checkFpName(name, 'attachment');
       const g = attachGrid(name, step), def = fpDef(this, name, 'attachment');
       const sw = sweepOf(this, name, 'attachment', g);
       ma.sweeps[`att:${name}`] = exportSweep(root, `fp/attach/${name}`, sw, { classes: g.classes, host: g.host_class });
@@ -448,6 +463,7 @@ export const FP_OPS = {
       }
     }
     for (const id of listArg(a.items, Object.keys(ITEMS))) {
+      checkFpName(id, 'item');
       const sw = sweepOf(this, id, 'item', itemGrid(id, step));
       ma.sweeps[`item:${id}`] = exportSweep(root, `fp/items/${id}`, sw);
       out.items[id] = { cell: sw.def.cell, cells: sw.cells.length, sheets: ma.sweeps[`item:${id}`].sheets.length };
@@ -460,7 +476,7 @@ export const FP_OPS = {
   fp_batch(a) {
     const root = assetRoot(this, a), t0 = performance.now(), step = Number(a.step ?? GRID_STEP);
     const skins = listArg(a.skins, ['mec']);
-    for (const s of skins) resolveSkin(this, s);
+    for (const s of skins) { checkFpName(s, 'skin'); resolveSkin(this, s); }
     const classes = listArg(a.classes, FP_CLASSES);
     const man = readManifest(root, 'fp');
     man.sprites = man.sprites || {};
@@ -487,8 +503,9 @@ export const FP_OPS = {
         clampedTotal += b.metrics.reach_clamped_frames;
       }
       man.sprites[setName] = set;
-      fs.mkdirSync(path.join(root, dir), { recursive: true });
-      fs.writeFileSync(path.join(root, dir, 'locks.json'), JSON.stringify({ class: cls, gun: a.guns?.[cls] ?? (GUN_CLASSES.includes(cls) ? cls : null), step, anims: locks }));
+      const lockFile = insideRoot(root, `${dir}/locks.json`);
+      fs.mkdirSync(path.dirname(lockFile), { recursive: true });
+      fs.writeFileSync(lockFile, JSON.stringify({ class: cls, gun: a.guns?.[cls] ?? (GUN_CLASSES.includes(cls) ? cls : null), step, anims: locks }));
       report[setName] = Object.keys(set.anims).length;
     }
     const file = writeManifest(root, 'fp', man);
@@ -502,6 +519,7 @@ export const FP_OPS = {
     const k = Math.max(1, Math.min(4, Number(a.zoom ?? 2)));
     const img = k > 1 ? zoomImg(r, k) : r;
     if (a.canvas) {
+      checkFpName(a.canvas, 'canvas');
       const d = new Doc({ name: a.canvas, width: r.width, height: r.height });
       d.layers[0].data.set(r.data);
       d.meta = { fp_composite: { class: a.class, clip: a.clip, frame: a.frame ?? 0 } };
@@ -547,7 +565,7 @@ export const FP_OPS = {
       if (d.width !== p.width || d.height !== p.height) throw new Error(`canvas ${d.name} is ${d.width}x${d.height}, sheet ${rel} is ${p.width}x${p.height}`);
       const data = d.composite();
       olds.push({ width: p.width, height: p.height, data: p.data }); news.push({ width: d.width, height: d.height, data });
-      fs.writeFileSync(path.join(root, rel), encodePNG(d.width, d.height, data));
+      fs.writeFileSync(insideRoot(root, rel), encodePNG(d.width, d.height, data));
       return rel;
     });
     // a hand-drawn source: every painted cell is kept as an override canvas, so the next sweep2d keeps it

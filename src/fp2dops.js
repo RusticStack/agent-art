@@ -5,7 +5,7 @@
 // resolves a gun / magazine / attachment / item / skin name to its drawings when they exist.
 import { Doc, Layer } from './doc.js';
 import { GUN_CLASSES, MAGS, ATTACH } from './fpkit.js';
-import { classGrid, magGrid2, attachGrid2, itemGrid, sweep2dOf, assetRoot, readManifest, writeManifest, exportSweep, GRID_STEP } from './fpops.js';
+import { classGrid, magGrid2, attachGrid2, itemGrid, sweep2dOf, assetRoot, readManifest, writeManifest, exportSweep, GRID_STEP, checkFpName } from './fpops.js';
 import { sources2d, keyOf, gunTemplate, suggestAnchors, anchorsOffArt, artOf, fitSockets, colorSet, KINDS, GUIDES, VIEWS, STATION_VIEWS, stationView } from './fp2d.js';
 import { armTemplate, traceSkin, skin2dOf, HAND_POSES, LIMB_VIEWS, HAND_VIEWS, ARM_PX_PER_CM } from './fp2darms.js';
 import { PX_PER_M, r1 } from './fp.js';
@@ -18,6 +18,7 @@ const r2 = (v) => Math.round(v * 100) / 100;
 
 /** New canvas with an "art" layer (plus "back" / "front" for hands) under a "guides" layer. */
 function newCanvas(engine, name, width, height, layers, guides, meta, a, source, hidden = []) {
+  checkFpName(name, 'canvas');
   if (engine.docs.has(name) && !a.overwrite) throw new Error(`Canvas "${name}" exists (pass overwrite: true)`);
   if (engine.docs.has(name)) engine.docs.delete(name);
   const d = new Doc({ name, width, height });
@@ -67,6 +68,7 @@ export const FP2D_OPS = {
       const part = a.part || 'hand';
       if (!['upper', 'fore', 'hand'].includes(part)) throw new Error(`part "${part}" (upper | fore | hand)`);
       if (!a.name) throw new Error('arm templates need "name" (the 2D skin they belong to)');
+      checkFpName(a.name, 'skin name');
       if (part === 'hand' && a.pose && !HAND_POSES.includes(a.pose)) throw new Error(`pose "${a.pose}" (${HAND_POSES.join(', ')})`);
       const t = armTemplate(part, { px_per_cm: a.px_per_cm });
       const view = a.view || (part === 'hand' ? 'back' : 'side');
@@ -79,6 +81,8 @@ export const FP2D_OPS = {
     }
     if (!KINDS.includes(kind)) throw new Error(`kind "${kind}" (${[...KINDS, 'arm'].join(' | ')})`);
     if (!a.name) throw new Error('templates need "name" (the source: the gun / magazine / attachment / item the drawings make)');
+    checkFpName(a.name, 'source name');
+    if (a.state !== undefined) checkFpName(a.state, 'state');
     if (kind === 'gun' && !GUN_CLASSES.includes(a.class)) throw new Error(`a gun needs class (${GUN_CLASSES.join(' | ')})`);
     const view = a.view ?? (a.yaw === undefined && a.pitch === undefined ? (kind === 'gun' ? 'hip' : 'side') : undefined);
     const m = { source: a.name, kind, ...(a.class ? { class: a.class } : {}), ...(view ? { view } : { yaw: a.yaw ?? 0, pitch: a.pitch ?? 0, ...(a.roll ? { roll: a.roll } : {}) }), ...(a.slot ? { slot: a.slot } : {}), ...(a.mag ? { mag: a.mag } : {}), ...(a.state ? { state: a.state } : {}) };
@@ -138,12 +142,14 @@ export const FP2D_OPS = {
     for (const name of names) {
       const src = all.get(name);
       if (!src) throw new Error(`no 2D source "${name}" (${[...all.keys()].join(', ')})`);
+      checkFpName(name, '2D source (meta.fp2d.source)');
       const jobs = [];
       if (src.kind === 'gun') {
         if (!GUN_CLASSES.includes(src.class)) throw new Error(`2D gun "${name}" needs a class (meta.fp2d.class: ${GUN_CLASSES.join(' | ')})`);
         const g = classGrid(src.class, step);
         jobs.push({ key: name, man: mg, dir: `fp/guns/${name}`, grid: g });
         const states = [...new Set(src.docs.map((d) => d.meta.fp2d.state).filter(Boolean))];
+        for (const st of states) checkFpName(st, `2D gun "${name}" state (meta.fp2d.state)`);
         for (const st of states) jobs.push({ key: `${name}@${st}`, man: mg, dir: `fp/guns/${name}/${st}`, grid: g.states[st] || g, state: st });
       } else if (src.kind === 'mag') jobs.push({ key: name, man: mm, dir: `fp/mags/${name}`, grid: magGrid2(this, name, src.class, step) });
       else if (src.kind === 'attachment') { const g = attachGrid2(this, name, step); jobs.push({ key: `att:${name}`, man: ma, dir: `fp/attach/${name}`, grid: g, extra: { classes: g.classes, host: g.host_class, slot: src.slot || ATTACH[name]?.slot } }); }
@@ -162,10 +168,11 @@ export const FP2D_OPS = {
 
   /** A 3D arms skin (#16's procedural parts) exported as an editable 2D skin. */
   fp_trace(a, source) {
-    const from = a.skin || 'mec', name = a.name || `${from}2d`;
+    const from = a.skin || 'mec', name = checkFpName(a.name || `${from}2d`, 'skin name');
     const list = traceSkin(from, name, { parts: a.parts, poses: a.poses, views: a.views, px_per_cm: a.px_per_cm });
     const made = [];
     for (const c of list) {
+      checkFpName(c.name, 'canvas');
       if (this.docs.has(c.name) && !a.overwrite) throw new Error(`Canvas "${c.name}" exists (pass overwrite: true)`);
       if (this.docs.has(c.name)) this.docs.delete(c.name);
       const d = new Doc({ name: c.name, width: c.width, height: c.height });

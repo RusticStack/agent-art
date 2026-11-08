@@ -11,7 +11,7 @@ import path from 'node:path';
 import { Engine } from '../src/engine.js';
 import { steps, MAX_SHEET, PX_PER_M } from '../src/fp.js';
 import { unpackSheets, anchorJumps, jumpBound } from '../src/fpsweep.js';
-import { bakeClip, sweepOf, classGrid, magGrid, MAG_VISIBLE_MIN } from '../src/fpops.js';
+import { bakeClip, sweepOf, classGrid, magGrid, MAG_VISIBLE_MIN, writePNG } from '../src/fpops.js';
 import { KIT_BUILDS } from '../src/fpkit.js';
 import { sources2d, sweep2d, colorSet, suggestAnchors, anchorsOffArt, artOf, GUIDES, MASKS } from '../src/fp2d.js';
 import { skin2dOf, handPose, POSE_OF, HAND_POSES } from '../src/fp2darms.js';
@@ -262,4 +262,27 @@ test('fp2d: #16 3D outputs are byte-identical', () => {
   assert.equal(hash(...s.cells, ...s.depths, JSON.stringify(s.def)), '1fd1c6b1d4b6d757');
   const m = sweepOf(null, 'smg_mag', 'mag', magGrid('smg_mag'));
   assert.equal(hash(...m.cells, JSON.stringify(m.def)), '741fe40d49efd1bc');
+});
+
+test('fp2d: source / state / skin / canvas names cannot escape the asset root (template, meta, sweep2d, batch, writers)', () => {
+  const e = engine(), home = tmp(), out = path.join(home, 'a', 'b', 'c', 'fp');
+  const bad = /must be 1-64 letters/;
+  assert.throws(() => e.run('fp_template', { kind: 'mag', name: '../../../../ESCAPED', class: 'rifle', canvas: 'magx' }), bad);
+  assert.throws(() => e.run('fp_template', { kind: 'gun', name: 'g', class: 'rifle', state: '../../x' }), bad);
+  assert.throws(() => e.run('fp_template', { kind: 'gun', name: '..', class: 'rifle' }), bad);
+  assert.throws(() => e.run('fp_template', { kind: 'mag', name: 'm', canvas: '../../c' }), bad);
+  assert.throws(() => e.run('fp_template', { kind: 'arm', part: 'hand', name: '../../../ARMESC', canvas: 'armx' }), bad);
+  // the same names set straight through canvas meta
+  e.run('fp_template', { kind: 'mag', name: 'okmag', class: 'rifle', canvas: 'magx' });
+  e.run('draw', { canvas: 'magx', commands: [{ op: 'rect', x: 10, y: 10, w: 20, h: 10, color: '#ff0000', fill: true }] });
+  const d = e.get('magx');
+  d.meta = { ...d.meta, fp2d: { ...d.meta.fp2d, source: '../../../../ESCAPED' } };
+  assert.throws(() => e.run('fp_sweep2d', { out, sources: ['../../../../ESCAPED'] }), bad);
+  e.run('fp_template', { kind: 'arm', part: 'hand', name: 'okarm', canvas: 'armx' });
+  const h = e.get('armx');
+  h.meta = { ...h.meta, fp2d: { ...h.meta.fp2d, skin: '../../../ARMESC' } };
+  assert.throws(() => e.run('fp_batch', { out, skins: ['mec', '../../../ARMESC'], classes: ['pistol'], clips: ['idle'], variants: false }), bad);
+  // defence in depth: the writers refuse a path outside their root
+  assert.throws(() => writePNG(out, 'fp/mags/../../../x/sweep_0.png', { width: 1, height: 1, data: new Uint8ClampedArray(4) }), /outside the asset root/);
+  assert.equal(fs.existsSync(path.join(home, 'a', 'b', 'ESCAPED')) || fs.existsSync(path.join(home, 'a', 'ARMESC')) || fs.existsSync(path.join(home, 'a', 'b', 'x')), false);
 });
