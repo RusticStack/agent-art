@@ -105,7 +105,9 @@ test('backend switches to another live server on the same workspace', async () =
 
 test('fix 18: release 0.3.0: version, changelog, README', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
-  assert.equal(pkg.version, '0.3.0');
+  // 0.3.0 or any later release (the 0.3.0 changelog entry must stay)
+  const [maj, min] = pkg.version.split('.').map(Number);
+  assert.ok(maj > 0 || min >= 3, `version ${pkg.version} >= 0.3.0`);
   const cl = fs.readFileSync(path.join(ROOT, 'CHANGELOG.md'), 'utf8');
   assert.match(cl, /^## 0\.3\.0/m);
   for (const k of ['art_model', 'art_audio', 'workspace', 'sample_rate', 'lathe', 'MASK', 'emissive', 'loop_seam']) assert.ok(cl.includes(k), `changelog mentions ${k}`);
