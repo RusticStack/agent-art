@@ -406,18 +406,28 @@ export class Cleanup {
     }
     // exports of removed assets
     const refused = [];
+    const sharedKept = [];
     if (a.include_exports) {
+      // a file several assets export (a shared manifest, a batch folder) stays while one of them stays
+      const exporters = new Map();
       for (const ed of this.graph.data.edges) {
         if (ed.rel !== 'exports_to') continue;
-        const src = this.assetOf(ed.from) || ed.from;
-        if (set.has(src) && !set.has(ed.to) && this.exists(ed.to)) set.set(ed.to, `exported by ${src}`);
+        if (!exporters.has(ed.to)) exporters.set(ed.to, new Set());
+        exporters.get(ed.to).add(this.assetOf(ed.from) || ed.from);
+      }
+      for (const [to, srcs] of exporters) {
+        const going = [...srcs].filter((s) => set.has(s));
+        if (!going.length || set.has(to) || !this.exists(to)) continue;
+        const staying = [...srcs].filter((s) => !set.has(s) && this.graph.exists(s));
+        if (staying.length) { sharedKept.push(`${to} kept: also exported by ${staying.slice(0, 2).join(', ')}`); continue; }
+        set.set(to, `exported by ${going[0]}`);
       }
     }
     for (const id of [...set.keys()]) if (kindOf(id) === 'export') {
       const why = this.refusePath(exportAbs(this.e, nameOf(id)));
       if (why) { refused.push({ path: nameOf(id), why }); set.delete(id); }
     }
-    const blocked = [], warnings = [], pins = this.pinned();
+    const blocked = [], warnings = [...sharedKept], pins = this.pinned();
     for (const id of set.keys()) {
       const needers = [];
       for (const d of hard.get(id) || []) {

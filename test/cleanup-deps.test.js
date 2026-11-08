@@ -65,3 +65,38 @@ test('cleanup kinds: art_anim skeletons, clips, skins, weapons and art_planet pl
   const usage = e.run('cleanup_usage', {});
   for (const k of ['skeleton', 'clip', 'skin', 'weapon', 'planet']) assert.ok(usage.by_kind[k], `usage lists ${k}`);
 });
+
+test('cleanup exports: every file an export writes is linked (roblox maps, cluster LOD, planets, > 12 files)', () => {
+  const home = tmp();
+  const e = new Engine({ home });
+  e.run('create', { name: 'tex', width: 16 });
+  e.run('model_create', { name: 'hull', parts: [{ type: 'box', size: [32, 32, 32], texture: 'tex' }] });
+  e.run('model_create', { name: 'src', parts: [{ type: 'cylinder', r: 16, h: 32, segments: 24, color: '#888888' }] });
+  const ex = e.run('model_export', { name: 'hull', profile: 'roblox' });
+  const cl = e.run('model_cluster_lod', { name: 'src' });
+  e.run('planet_create', { name: 'mars', preset: 'desert', equirect: 64, preview_size: 32 });
+  const sel = (id) => e.run('cleanup_plan', { full: true, select: { ids: [id] }, include_exports: true }).items.map((x) => x.id);
+  const rel = (f) => `export:${path.relative(e.exportDir, f).replace(/\\/g, '/')}`;
+  const hull = sel('model:hull');
+  for (const f of fs.readdirSync(ex.roblox.dir)) assert.ok(hull.includes(rel(path.join(ex.roblox.dir, f))), `roblox ${f}`);
+  assert.ok(hull.includes(rel(ex.file)) && hull.includes(rel(ex.meta)));
+  const src = sel('model:src');
+  for (const f of [cl.file, cl.clod, cl.meta]) assert.ok(src.includes(rel(f)), f);
+  // a planet writes far more than 12 files: all of them are its exports
+  const marsDir = path.join(e.exportDir, 'mars');
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((x) => (x.isDirectory() ? walk(path.join(d, x.name)) : [path.join(d, x.name)]));
+  const all = walk(marsDir);
+  assert.ok(all.length > 12);
+  const mars = new Set(sel('planet:mars'));
+  for (const f of all) assert.ok(mars.has(rel(f)), `planet file ${f}`);
+  // only this op's files: an older file in the same folder is not swept in
+  fs.writeFileSync(path.join(marsDir, 'readme.txt'), 'mine');
+  fs.utimesSync(path.join(marsDir, 'readme.txt'), new Date(2000, 0, 1), new Date(2000, 0, 1));
+  e.run('planet_create', { name: 'mars', preset: 'desert', equirect: 64, preview_size: 32 });
+  assert.ok(!sel('planet:mars').includes('export:mars/readme.txt'));
+  // a file another kept asset also exports (a shared manifest) stays
+  e.run('graph_link', { from: 'model:src', rel: 'exports_to', to: `export:hull.meta.json` });
+  const p = e.run('cleanup_plan', { full: true, select: { ids: ['model:hull'] }, include_exports: true });
+  assert.ok(!p.items.some((x) => x.id === 'export:hull.meta.json'));
+  assert.ok(p.warnings.some((w) => /hull\.meta\.json kept: also exported by model:src/.test(w)));
+});

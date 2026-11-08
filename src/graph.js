@@ -11,6 +11,7 @@ import { audioStore } from './audio/ops.js';
 import { modelDefs } from './modelops.js';
 import { expandDef } from './kitparts.js';
 import { assetType, assetTypes, subOwnerKind } from './assettypes.js';
+import { MAX_EXPORT_FILES } from './activity.js';
 
 export const RELS = ['part_of', 'variant_of', 'view_of', 'layer_of', 'uses_palette', 'rendered_from', 'exports_to', 'depends_on', 'replaces'];
 export const KINDS = ['canvas', 'layer', 'anim', 'frame', 'rig', 'rigpart', 'model', 'modelpart', 'palette', 'audio', 'export', 'project', 'group', 'file'];
@@ -234,17 +235,26 @@ export class Graph {
   /** Remember a file an export op wrote: <asset> exports_to export:<path>. */
   recordExport(op, a, files) {
     if (!files?.length) return;
-    let src;
-    if (op === 'model_export') src = `model:${a.name}`;
-    else if (op === 'audio_export') src = a.name && !a.name.includes('*') ? `audio:${a.name}` : null;
-    else if (op === 'pack_build') src = `project:${a.project}`;
-    else if (op === 'pack_zip') src = null;
-    else src = a.canvas ? `canvas:${a.canvas}` : null;
+    const str = (v) => (typeof v === 'string' && v && !v.includes('*') ? v : null);
+    const one = (v) => { const l = [].concat(v ?? []); return l.length === 1 ? str(l[0]) : null; };
+    let src = null;
+    if (['model_export', 'model_cluster_lod', 'model_visibility'].includes(op)) src = str(a.name) && `model:${a.name}`;
+    else if (op === 'rig_export') src = str(a.name) && `rig:${a.name}`;
+    else if (op === 'audio_export') src = str(a.name) && `audio:${a.name}`;
+    else if (op === 'pack_build') src = str(a.project) && `project:${a.project}`;
+    else if (op === 'anim_gltf') src = str(a.skin) && `skin:${a.skin}`;
+    else if (op === 'anim_batch') { const s = one(a.skins ?? a.skin); src = s && `skin:${s}`; } // several skins share one folder: not linked
+    else if (op === 'anim_weapon_sheet') src = str(a.weapon) && `weapon:${a.weapon}`;
+    else if (op === 'planet_create') src = str(a.name) && `planet:${a.name}`;
+    else if (op.startsWith('planet_')) src = str(a.planet) && `planet:${a.planet}`; // terrain / rocks / asteroids sampled from a stored planet
+    else if (op === 'export' || op === 'export_animation') src = str(a.canvas) && `canvas:${a.canvas}`;
     if (!src) return;
+    const have = new Set(this.data.edges.filter((x) => x.from === src && x.rel === 'exports_to').map((x) => x.to));
     let changed = 0;
-    for (const f of files.slice(0, 12)) {
+    for (const f of files.slice(0, MAX_EXPORT_FILES)) {
       const to = `export:${this.exportRel(f)}`;
-      if (this.data.edges.some((x) => x.from === src && x.rel === 'exports_to' && x.to === to)) continue;
+      if (have.has(to)) continue;
+      have.add(to);
       this.data.edges.push({ from: src, rel: 'exports_to', to, auto: true, ts: Date.now() });
       changed++;
     }

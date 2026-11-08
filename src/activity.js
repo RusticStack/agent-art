@@ -1,6 +1,8 @@
 // Activity recorder: every engine op and every MCP tool call becomes a timeline entry for the web UI
 // (timing, a short args/result summary, the assets it touched, before/after snapshots of the canvases
 // and models it changed). Entries live in memory (a ring buffer); snapshots have a byte budget.
+import fs from 'node:fs';
+import path from 'node:path';
 import { encodePNG } from './png.js';
 
 /** Ops that never change the workspace: no snapshots, no version scan. */
@@ -15,7 +17,16 @@ export const READ_ONLY = new Set([
   'cleanup_plan', 'cleanup_trash', 'cleanup_usage', 'cleanup_flags',
 ]);
 /** Ops that write files (exports_to edges in the asset graph). */
-const EXPORTS = new Set(['export', 'export_animation', 'model_export', 'audio_export', 'pack_zip', 'pack_build']);
+export const EXPORTS = new Set([
+  'export', 'export_animation', 'model_export', 'audio_export', 'pack_zip', 'pack_build',
+  'model_cluster_lod', 'model_visibility', 'rig_export', // mesh processing, skin2d runtime export
+  'anim_gltf', 'anim_batch', 'anim_weapon_sheet', // art_anim
+  'fp_sweep', 'fp_batch', // art_fp
+  'planet_create', 'planet_system', 'planet_terrain', 'planet_rocks', 'planet_asteroids', 'planet_skybox', 'planet_fx', // art_planet
+]);
+/** Most files one export op links to its source asset (a planet writes ~170). */
+export const MAX_EXPORT_FILES = 5000;
+const FRESH_SLACK_MS = 50; // file times can lag the clock by a timer tick (Windows ~16 ms)
 const MODEL_WRITES = new Set(['model_create', 'model_update', 'model_pose', 'model_animate', 'model_delete', 'model_material']);
 const SNAP_MAX = 512; // px: larger canvases are snapshotted downsampled
 const SNAP_BUDGET = 64 * 1024 * 1024;
@@ -86,13 +97,70 @@ function canvasSnapshot(d) {
   return { png: encodePNG(w, h, data), width: w, height: h, scale: k, frames: d.frames, frameHeight: d.frameHeight ? d.frameHeight / k : null, version: d.version };
 }
 
-/** Files named in an export result (file, files[], png, json, zip, ...). */
-export function exportedFiles(r) {
+/**
+ * Files an export op wrote, from its result: every path named anywhere in it (file, clod, meta,
+ * roblox.dir, impostor.files[], ...; relative names resolve against its dir / root / out), the
+ * files inside named directories, and side files next to a named file sharing its stem
+ * (<base>_lod1.glb, <base>.probes.json, <base>.roblox/...). Directory contents and side files
+ * count only when written by this op (modified at or after since, ms). Workspace internals (canvases,
+ * models, library, ...) are never export files.
+ */
+export function exportedFiles(r, { since = null, home = null, exportDir = null, max = MAX_EXPORT_FILES } = {}) {
   if (!r || typeof r !== 'object') return [];
-  const out = [];
-  for (const k of ['file', 'png', 'json', 'gif', 'zip', 'meta', 'ctm']) if (typeof r[k] === 'string') out.push(r[k]);
-  for (const k of ['files', 'written']) if (Array.isArray(r[k])) out.push(...r[k].filter((x) => typeof x === 'string'));
-  return [...new Set(out)];
+  const out = new Set();
+  const t0 = since === null ? -Infinity : since - FRESH_SLACK_MS;
+  const stat = (p) => { try { return fs.statSync(p); } catch { return null; } };
+  const under = (p, root) => { const rel = path.relative(root, p); return !rel.startsWith('..') && !path.isAbsolute(rel); };
+  const internal = (p) => !!home && under(p, path.resolve(home)) && !(exportDir && under(p, path.resolve(exportDir)));
+  const add = (p) => { if (out.size < max && !internal(p)) out.add(p); };
+  const fresh = (p) => (stat(p)?.mtimeMs ?? -Infinity) >= t0;
+  const walk = (dir, depth = 0) => {
+    if (depth > 8 || out.size >= max) return;
+    let list;
+    try { list = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const d of list) {
+      const p = path.join(dir, d.name);
+      if (d.isDirectory()) walk(p, depth + 1);
+      else if (d.isFile() && fresh(p)) add(p);
+    }
+  };
+  const bases = ['dir', 'root', 'out'].map((k) => r[k]).filter((v) => typeof v === 'string' && path.isAbsolute(v));
+  const named = [], dirs = [];
+  const consider = (s) => {
+    if (s.length > 1024 || /[\n\r*?"<>|]/.test(s) || !/[\\/.]/.test(s)) return;
+    const cands = path.isAbsolute(s) ? [s] : bases.map((b) => path.join(b, s));
+    for (const c of cands) {
+      const st = stat(c);
+      if (!st) continue;
+      const p = path.resolve(c);
+      if (st.isFile()) named.push(p); else if (st.isDirectory()) dirs.push(p);
+      return;
+    }
+  };
+  const SKIP = new Set(['image', 'images', 'next', 'note', 'notes', 'text', 'summary', 'warnings']);
+  const scan = (v, depth) => {
+    if (depth > 5) return;
+    if (typeof v === 'string') consider(v);
+    else if (Array.isArray(v)) { for (const x of v.slice(0, max)) scan(x, depth + 1); }
+    else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) if (!SKIP.has(k)) scan(x, depth + 1);
+  };
+  scan(r, 0);
+  for (const p of named) add(p);
+  // side files of a named file: same folder, same stem, written now (LOD glbs, probes, impostors, .roblox maps)
+  for (const p of named) {
+    const dir = path.dirname(p), stem = path.basename(p).replace(/\.[^.]+$/, '').toLowerCase();
+    if (!stem) continue;
+    let list;
+    try { list = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    for (const d of list) {
+      const n = d.name.toLowerCase();
+      if (!(n.startsWith(stem + '.') || n.startsWith(stem + '_'))) continue;
+      const q = path.join(dir, d.name);
+      if (d.isDirectory()) walk(q); else if (d.isFile() && fresh(q)) add(q);
+    }
+  }
+  for (const d of dirs) walk(d);
+  return [...out];
 }
 
 export class Activity {
@@ -198,7 +266,7 @@ export class Activity {
   record(op, args, source, ctx, fn) {
     if (this.depth > 0 || SILENT.has(op)) return fn();
     const e = this.engine;
-    const t0 = performance.now();
+    const t0 = performance.now(), wall = Date.now();
     const entry = { id: ++this.seq, type: 'op', op, source, ts: Date.now(), args: summarizeArgs(args), assets: this.argAssets(op, args || {}) };
     if (ctx?.call) entry.call = String(ctx.call);
     if (ctx?.tool) entry.tool = String(ctx.tool);
@@ -227,8 +295,10 @@ export class Activity {
       else entry.summary = summarizeResult(result);
       if (mutating) this.afterMutation(op, args || {}, entry, versions, result);
       if (!err && EXPORTS.has(op)) {
-        entry.files = exportedFiles(result).slice(0, 20);
-        try { e.graph?.recordExport(op, args || {}, entry.files); } catch { /* graph is best effort */ }
+        const files = exportedFiles(result, { since: wall, home: e.home, exportDir: e.exportDir });
+        entry.files = files.slice(0, 20); // the timeline shows the first few
+        if (files.length > 20) entry.files_total = files.length;
+        try { e.graph?.recordExport(op, args || {}, files); } catch { /* graph is best effort */ }
       }
       this.push(entry);
       const parent = entry.call && this.calls.get(entry.call);
