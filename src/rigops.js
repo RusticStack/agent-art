@@ -255,7 +255,7 @@ export const RIG_OPS = {
     // plant / ik_feet: pin stance feet with leg IK on contact frames (true = rig feet, or [parts])
     const plant = a.plant ?? a.ik_feet;
     if (plant) {
-      const feet = Array.isArray(plant) ? plant : rig.feet;
+      const feet = Array.isArray(plant) ? plant : typeof plant === 'string' ? [plant] : rig.feet;
       for (const f of feet) ikChain(rig, f);
       if (feet.length) poses = plantFeet(rig, poses, view, feet, { loop });
       else notes.push('plant: this rig has no foot parts with a two-bone leg (foot -> shin -> thigh); set rig "feet" or pass plant:[parts]');

@@ -430,3 +430,18 @@ test('plant: depth-plane leg IK lengthens a foreshortened bone even when the oth
     assert.ok(n > 0);
   }
 });
+
+test('rig hd input validation: feet, plant as a string, non-numeric IK targets', () => {
+  const parts = { body: { w: 4, h: 4, pivot: [2, 0] }, thigh: { w: 2, h: 6, pivot: [1, 0], parent: 'body' }, shin: { w: 2, h: 6, pivot: [1, 0], parent: 'thigh', at: [0, 5] }, foot_x: { w: 2, h: 2, pivot: [1, 0], parent: 'shin', at: [0, 5] } };
+  assert.deepEqual(normalizeRig({ frame: [32, 32], parts, feet: 'foot_x' }).feet, ['foot_x']);
+  assert.throws(() => normalizeRig({ frame: [32, 32], parts, feet: 5 }), /must be an array/);
+  const rig = normalizeRig({ frame: [32, 32], parts });
+  assert.throws(() => solvePose(rig, { ik: { foot_x: { target: ['a', 3] } } }, 'side'), /two numbers/);
+  const e = new Engine({ home: tmp() });
+  e.run('rig_create', { name: 'hd', frame: [64, 96], template: 'humanoid_hd' });
+  // plant:'foot_f' plants that foot only, exactly like plant:['foot_f'] (not every rig foot)
+  for (const [c, plant] of [['str', 'foot_f'], ['arr', ['foot_f']], ['all', true]]) e.run('rig_animate', { name: 'hd', preset: 'walk', view: 'side', canvas: c, plant, secondary: false });
+  const A = (c) => JSON.stringify(e.get(c).meta.anchors.walk);
+  assert.equal(A('str'), A('arr'));
+  assert.notEqual(A('str'), A('all'));
+});

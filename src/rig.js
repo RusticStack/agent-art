@@ -85,7 +85,8 @@ export function normalizeRig(def) {
   const chain2 = (n) => parts[n]?.parent && parts[parts[n].parent].parent;
   let feet;
   if (def.feet) {
-    feet = def.feet;
+    feet = typeof def.feet === 'string' ? [def.feet] : def.feet;
+    if (!Array.isArray(feet)) throw new Error('rig "feet" must be an array of part names (e.g. ["foot_f", "foot_b"])');
     for (const f of feet) if (!chain2(f)) throw new Error(`feet: "${f}" must be a part with a parent and a grandparent (foot -> shin -> thigh)`);
   } else feet = order.filter((n) => /^foot/.test(n) && chain2(n));
   return {
@@ -321,7 +322,11 @@ function worldOf(rig, VP, src) {
 
 /** World point of an IK target: [x,y] (frame px of the drawn view) | {part, at?:[dx,dy]} (in that part's rotated frame). */
 function targetPoint(rig, t, W) {
-  if (Array.isArray(t)) return [Number(t[0]), Number(t[1])];
+  if (Array.isArray(t)) {
+    const p = [Number(t[0]), Number(t[1])];
+    if (t.length !== 2 || !p.every(Number.isFinite)) throw new Error(`ik target [x,y] needs two numbers (got ${JSON.stringify(t)})`);
+    return p;
+  }
   if (t?.mix) {
     const a = targetPoint(rig, t.mix[0], W), b = targetPoint(rig, t.mix[1], W), u = Number(t.mix[2]);
     return [lerp(a[0], b[0], u), lerp(a[1], b[1], u)];
