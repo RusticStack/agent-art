@@ -3,6 +3,7 @@ import fs_v from 'node:fs';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 export const VERSION = JSON.parse(fs_v.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 import { encodeGIF } from './gif.js';
@@ -19,6 +20,21 @@ const MIME = {
   '.glb': 'model/gltf-binary', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.opus': 'audio/ogg', '.mcmeta': 'application/json; charset=utf-8', '.zip': 'application/zip',
 };
 export const APP_ID = 'agent-art';
+/** Header the web UI sends with its op calls: the per-process token embedded in the served page. */
+export const UI_TOKEN_HEADER = 'x-agent-art-ui';
+const UI_TOKEN_META = 'agent-art-ui-token';
+/**
+ * Only the web UI may act as the user (source "user" unlocks user-only settings such as
+ * art_cleanup config allow_paths). It proves it with the random token this process embeds in the
+ * page it serves (a browser page of another origin cannot read it) plus a same-origin Origin
+ * header; every other caller (MCP processes, scripts, a body that just says "user") is the agent.
+ */
+export function opSource(req, claimed, token, port) {
+  if (claimed !== 'user') return 'agent';
+  const got = String(req.headers[UI_TOKEN_HEADER] || '');
+  if (!req.headers.origin || !isLocalOrigin(req.headers.origin, port) || got.length !== token.length) return 'agent';
+  return crypto.timingSafeEqual(Buffer.from(got), Buffer.from(token)) ? 'user' : 'agent';
+}
 
 function sendJSON(res, code, obj) {
   const body = JSON.stringify(obj);
@@ -76,6 +92,7 @@ function sendBin(res, type, buf, extra = {}) {
 
 export function startServer(engine, { port, host = '127.0.0.1' }) {
   const clients = new Set();
+  const uiToken = crypto.randomBytes(24).toString('hex');
   const modelThumbs = new Map(); // model name -> {key, png}
   engine.on('event', (ev) => {
     const msg = `data: ${JSON.stringify(ev)}\n\n`;
@@ -96,7 +113,7 @@ export function startServer(engine, { port, host = '127.0.0.1' }) {
           try {
             // trace (optional): {call, tool} of the MCP tool call this op belongs to (activity timeline)
             const ctx = trace && typeof trace === 'object' && trace.call ? { call: String(trace.call).slice(0, 64), tool: trace.tool ? String(trace.tool).slice(0, 64) : undefined } : null;
-            const result = await engine.run(op, args || {}, source === 'user' ? 'user' : 'agent', ctx);
+            const result = await engine.run(op, args || {}, opSource(req, source, uiToken, port), ctx);
             return sendJSON(res, 200, { ok: true, result: packResult(result) });
           } catch (e) {
             return sendJSON(res, 200, { ok: false, error: e.message });
@@ -273,6 +290,12 @@ export function startServer(engine, { port, host = '127.0.0.1' }) {
       const file = path.normalize(path.join(PUBLIC, rel));
       if (!file.startsWith(PUBLIC) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
         return sendJSON(res, 404, { ok: false, error: 'Not found' });
+      }
+      if (path.extname(file) === '.html') {
+        // the page carries this process's UI token (see opSource); never cached
+        const html = fs.readFileSync(file, 'utf8').replace(/<head>/i, (h) => `${h}\n  <meta name="${UI_TOKEN_META}" content="${uiToken}">`);
+        res.writeHead(200, { 'content-type': MIME['.html'], 'cache-control': 'no-store' });
+        return res.end(html);
       }
       res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-cache' });
       fs.createReadStream(file).pipe(res);

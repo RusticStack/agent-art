@@ -28,9 +28,11 @@ let toastFn = null;
 export const onToast = (fn) => (toastFn = fn);
 export const toast = (text, kind = 'info') => toastFn?.(text, kind);
 
+/** The per-process UI token the server embeds in the page: it lets the server trust source "user". */
+const uiToken = () => document.querySelector('meta[name="agent-art-ui-token"]')?.content || '';
 /** POST an engine op as the user (goes through the same API as the agent). */
 export async function api(op, args) {
-  const r = await fetch('/api/op', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ op, args, source: 'user' }) });
+  const r = await fetch('/api/op', { method: 'POST', headers: { 'content-type': 'application/json', 'x-agent-art-ui': uiToken() }, body: JSON.stringify({ op, args, source: 'user' }) });
   const j = await r.json();
   if (!j.ok) { toast(`${op}: ${j.error}`, 'error'); throw new Error(j.error); }
   return j.result;
