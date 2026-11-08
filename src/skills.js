@@ -39,18 +39,18 @@ Multiple views or animations of this sprite -> use the "rig" skill so it stays i
     body: `Fast path (any humanoid, blob/slime, bat/bird): a template is a starting point you can reshape:
    art_rig ${J({ action: 'create', name: 'knight', frame: [32, 32], template: 'humanoid', parts: { head: { w: 12, h: 10 }, cape: { w: 8, h: 12, pivot: [4, 0], parent: 'body', at: [-2, -6], z: -4 } } })}
    draw every listed cell (step 2), art_rig preview, then one call per animation:
-   art_rig ${J({ action: 'animate', name: 'knight', preset: 'walk', view: 'side' })}  (override any field: frames, fps, keys, loop)
+   art_rig ${J({ action: 'animate', name: 'knight', preset: 'walk', view: 'side' })}  -> tag "walk_side" on canvas "knight" (preset tags are always <preset>_<view>; animation:"<name>" picks your own; override any field: frames, fps, keys, loop)
 High-detail character (64x96 .. 160x240, 8 directions, IK, foot planting, follow-through): use the "rig-hd" skill (template:"humanoid_hd").
 Custom rig (anything else: quadrupeds, vehicles, props with moving parts):
 1. Create the rig (parts are drawn once per view; frames are generated from them):
    art_rig ${J({ action: 'create', name: 'knight', frame: [32, 32], views: ['side', 'front', 'back'], parts: { body: { w: 12, h: 12, pivot: [6, 10] }, head: { w: 12, h: 12, pivot: [6, 11], parent: 'body', at: [0, -9] }, arm_f: { w: 5, h: 9, pivot: [2, 1], parent: 'body', at: [2, -8], z: 2 }, arm_b: { w: 5, h: 9, pivot: [2, 1], parent: 'body', at: [-2, -8], z: -1 }, leg_f: { w: 5, h: 8, pivot: [2, 1], parent: 'body', at: [1, 0], z: 1 }, leg_b: { w: 5, h: 8, pivot: [2, 1], parent: 'body', at: [-2, 0], z: -2 } }, root: [16, 22] })}
-2. The reply (and art_rig info) lists each part cell [x,y,w,h] on the "<name>_parts" canvas per view. Draw every part in every view there with art_draw (flat colors -> shade -> outline), using the SAME palette keys. Pivot (red dot) = the joint. Mirror views (mirror:{side_left:"side"}) are generated, not drawn.
+2. The reply (and art_rig info) lists the part cells on the "<name>_parts" canvas compactly: cells.rows = the y of each view's band, cells.parts = [x, w, h] per part, so a part's cell in a view is [x, rows[view], w, h] (full:true returns the complete JSON). Draw every part in every view there with art_draw (flat colors -> shade -> outline), using the SAME palette keys. Pivot (red dot) = the joint. Mirror views (mirror:{side_left:"side"}) are generated, not drawn.
 3. Key poses (offset px and rotation degrees per part, relative to the rest pose):
    art_rig ${J({ action: 'pose', name: 'knight', pose: 'walk_contact', parts: { leg_f: { rot: -25 }, leg_b: { rot: 25 }, arm_f: { rot: 20 }, arm_b: { rot: -20 } } })}
    art_rig ${J({ action: 'pose', name: 'knight', pose: 'walk_pass', parts: { body: { y: -1 }, leg_f: { rot: 5 }, leg_b: { rot: -5 } } })}
 4. Animate (tweened in-betweens, any fps):
    art_rig ${J({ action: 'animate', name: 'knight', animation: 'walk', view: 'side', keys: [{ pose: 'walk_contact' }, { pose: 'walk_pass' }, { pose: 'walk_contact', mirror_pairs: true }, { pose: 'walk_pass' }], frames: 8, fps: 10, loop: true, plant_feet: true })}
-5. art_rig preview {name} (all views + a pose) and art_critique on the output canvas (volume_drift, ground_line). Export with art_animation export.`,
+5. art_rig preview {name} (all views + a pose) and art_critique {canvas:"knight", animation:"walk"} (volume_drift, ground_line). Export with art_animation export.`,
   },
   'rig-hd': {
     title: 'High-detail character rig (humanoid_hd: 8 directions, per-view poses, IK, foot planting, follow-through)',
@@ -58,10 +58,10 @@ Custom rig (anything else: quadrupeds, vehicles, props with moving parts):
     body: `1. Create from the template (sizes scale with the frame; cape/gear_hip follow-through, RotSprite sampling and scale_children are already on):
    art_rig ${J({ action: 'create', name: 'soldier', frame: [128, 192], template: 'humanoid_hd', secondary: { cape: { stiffness: 0.15, damping: 0.2, gravity: 0.5 } } })} (merged over the template's cape/gear_hip springs)
    Parts: pelvis (root), torso, chest, neck, head (+head:blink), upper_arm/forearm/hand and thigh/shin/foot _f (near) / _b (far), slots weapon (child of hand_f), gear_back, gear_hip, cape. Remove a slot with parts:{cape:null}.
-2. Draw every cell in the 5 drawn views (side faces RIGHT, front_side, front, back_side, back) on "soldier_parts"; the _left views are mirrors. Pivot = joint at the top of each limb part; let limb cells overlap the joint a few px so bent knees and elbows stay closed. Draw *_b darker. Check: art_rig ${J({ action: 'preview', name: 'soldier', pose: 'walk_contact' })}
+2. Draw every cell in the 5 drawn views (side faces RIGHT, front_side, front, back_side, back) on "soldier_parts"; the _left views are mirrors. The reply gives cells.rows (band y per view) and cells.parts ([x, w, h]): a cell is [x, rows[view], w, h]. Pivot = joint at the top of each limb part; let limb cells overlap the joint a few px so bent knees and elbows stay closed. Draw *_b darker. Check: art_rig ${J({ action: 'preview', name: 'soldier', pose: 'walk_contact' })}
 3. Presets, one canvas per preset and view (a frame strip is at most 8192 px tall):
    art_rig ${J({ action: 'animate', name: 'soldier', preset: 'walk', view: 'front_side', canvas: 'soldier_walk_front_side' })}
-   presets: idle walk run crouch_walk aim shoot reload hurt death throw blink (planting, IK and secondary are set in them).
+   presets: idle walk run crouch_walk aim shoot reload hurt death throw blink (planting, IK and secondary are set in them). Tags are <preset>_<view>: this one is "walk_front_side".
 4. Fix a pose in one view only (merged over the base pose there; mirror views follow their source):
    art_rig ${J({ action: 'pose', name: 'soldier', pose: 'aim', merge: true, views: { front: { head: { rot: 0 } } } })}
    Forward swings in front/back views: override rot with sy foreshortening, e.g. views:{front:{thigh_f:{rot:0, sy:0.8}}}.
@@ -204,7 +204,7 @@ Keep pieces light (< 500 tris), reuse a few textures, characters stay 2D billboa
    Every frame stores each socket's screen anchor [x, y, rot] in the canvas meta.anchors. The fp camera drops (does not clip) triangles crossing the near plane, so a part reaching behind the eye (a long stock) can vanish: shorten it, move the gun forward, or use camera:"side".
 6. 2D arms that follow the gun: an art_rig with the render's frame size and one chain per arm (shoulders at the bottom edge):
    art_rig ${J({ action: 'create', name: 'arms2d', frame: [160, 120], views: ['side'], root: [80, 119], parts: { body: { w: 2, h: 2, pivot: [1, 1] }, upper_r: { w: 8, h: 32, pivot: [4, 0], parent: 'body', at: [68, 0] }, fore_r: { w: 7, h: 30, pivot: [3, 0], parent: 'upper_r', at: [0, 30] }, hand_r: { w: 8, h: 8, pivot: [4, 0], parent: 'fore_r', at: [0, 28] }, upper_l: { w: 8, h: 32, pivot: [4, 0], parent: 'body', at: [-30, 0] }, fore_l: { w: 7, h: 30, pivot: [3, 0], parent: 'upper_l', at: [0, 30] }, hand_l: { w: 8, h: 8, pivot: [4, 0], parent: 'fore_l', at: [0, 28] } } })}
-   Draw each part in the cells the reply lists (canvas arms2d_parts, layer "parts"), then:
+   Draw each part in the cells the reply lists (canvas arms2d_parts, layer "parts"; cell = [x, cells.rows.side, w, h] from cells.parts[part] = [x, w, h]), then:
    art_rig ${J({ action: 'animate', name: 'arms2d', animation: 'reload_empty', canvas: 'arms_reload', ik_from: { canvas: 'ar_reload', animation: 'reload_empty', map: { hand_r: { anchor: 'socket_grip_r', bend: -1 }, hand_l: 'socket_grip_l' } } })}
    Same frame count, timing and loop as the gun clip, with the hands solved onto the grips in every frame. Map value: "<anchor>" or {anchor, bend?, rot?:true|deg, at?:[dx,dy], weight?}; offset:[dx,dy] when the frames differ. A humanoid / humanoid_hd rig maps hand_f and hand_b.
 7. Paint over any frame by hand, then art_animation ${J({ canvas: 'ar_reload', action: 'export', format: 'spritesheet' })} for each layer (json frames[].anchors line the layers up in-engine).`,

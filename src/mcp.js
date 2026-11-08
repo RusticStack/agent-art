@@ -129,7 +129,7 @@ export const TOOLS = [
   },
   {
     name: 'art_help',
-    description: 'Docs on demand: {op:"shade"} full options + example for a draw command; {topic} guides: workflow, textures, characters, animation, rig, scenes, hires, minecraft, 3d, audio, music, mixing, perception; {skill} step-by-step recipes.',
+    description: 'Docs on demand: {op:"shade"} full options + example for a draw command; {topic} guides: workflow, textures, characters, animation, rig, scenes, hires, minecraft, 3d, audio, music, mixing, perception, graph; {skill} step-by-step recipes.',
     inputSchema: {
       type: 'object',
       properties: { op: { type: 'string' }, topic: { type: 'string', enum: ['index', 'ops', ...Object.keys(TOPICS)] }, skill: { type: 'string', enum: Object.keys(SKILLS) } },

@@ -5,9 +5,10 @@
 - **Works with weak models too.** Tool descriptions are compact, and details load on demand through `art_help`. Images are sized to their token cost. Errors print the correct usage. Rig templates turn "draw a walking character" into "draw six parts, call one preset".
 - **The same asset in every view and frame.** Rigs draw each part once per view (side/front/back plus mirrored views) and generate frames by tweening poses, at any frame rate. `humanoid_hd` adds detailed 8-direction characters with per-view poses, two-bone IK, foot planting, follow-through and RotSprite sampling.
 - **Low-res to high-res.** 8×8 icons up to 2048² scenes. Shading and cells are geometry-based, so they scale. Scale2x/EPX upscaling and RotSprite rotation keep edges clean.
-- **You can watch and paint along.** The web UI updates live as the agent draws. Your edits go through the same API, so the agent sees them.
-- **3D and audio too.** `art_model` turns pixel textures into low-poly `.glb` map kits, props, ships and vehicles. Rigid-part rigs (first-person rifle, pistol and arms templates, doors, turrets) get poses, animation clips and sockets in the `.glb`, or render to pixel sprite frames that 2D arms follow with IK. `art_audio` makes SFX (including firearms and sci-fi), music and mixes, and reports what they sound like.
-- **Zero dependencies.** Plain Node.js 20+, no native modules.
+- **Characters that hold guns right.** Declare a `weapon` on a rig and both hands stay on the grips in every frame, view and carry state (aim, ready, sprint, reload, slung, holster, ...), with reach limits, no clipping through the body, muzzle discipline and depth-driven draw order. `check` validates every clip in all 8 directions. The same solver puts first-person `fp_arms` on `fp_rifle` / `fp_pistol`.
+- **You can watch, steer and review.** The web UI updates live as the agent draws: an activity timeline of every tool call with before/after snapshots, an asset browser, viewers for canvases, animations, rigs, 3D, audio and sheets, an asset graph (`art_graph`) and review notes you pin on a frame or part (`art_review`), which the agent reads and resolves. Your edits go through the same API, so the agent sees them.
+- **3D and audio too.** `art_model` turns pixel textures into low-poly `.glb` map kits, props, ships and vehicles. Hard-surface detail (greebles, pipes and cables, trim sheets, PBR, pixel-correct height normals, booleans, morphs) and render-cost tools (baked AO, LODs, impostors, collision/occluder proxies, room/portal culling) keep sci-fi scenes rich and fast in a browser. Rigid-part rigs (first-person rifle, pistol and arms templates, doors, turrets) get poses, animation clips and sockets in the `.glb`, or render to pixel sprite frames that 2D arms follow with IK. `art_audio` makes SFX (including firearms and sci-fi), music and mixes, and reports what they sound like.
+- **Zero dependencies.** Plain Node.js 20+, no native modules. The web UI's 3D viewer uses a vendored copy of three.js r170 (MIT).
 
 > Example: [Sanctum Burn](https://sanctum-burn.vercel.app), a co-op 2.5D survivor game. All of its art was made by an agent with Agent Art.
 
@@ -26,6 +27,17 @@ Then ask the agent: *"open the art UI and make a 32×32 knight with a walk cycle
 The MCP process hosts the UI at http://localhost:7420. If an `agent-art serve` is already running on the same workspace, it uses that one, so the UI outlives agent sessions and several agents can share it. If that server goes away mid-session, the MCP process looks for another server on the same workspace (ports 7420-7440) and otherwise hosts one itself, on the same workspace; it logs each switch to stderr.
 
 From a source checkout: `npm start` (UI), `npm test`. The included `.mcp.json` registers the server for Claude Code in this folder.
+
+### Upgrading to 0.7
+
+- **Compact replies:** `art_info` and `art_rig` `info`, `create` and `update` reply with a summary. Rig cells come as `cells.rows` (the y of each view's band) plus `cells.parts` (`[x, w, h]`), so a cell is `[x, rows[view], w, h]`. Pass `full: true` for the old full reply or `fields: [...]` for just those fields.
+- **Animation tags:** preset animations are always tagged `<preset>_<view>`: `walk` in the side view is now `walk_side` (it used to be `walk` for the first view).
+- **`humanoid_hd`:** the near (`_f`) limbs now sit on the correct screen side in the 3/4, front and back views, and in the front and back views the thighs draw above the pelvis, so renders of non-side views change.
+- **`mirror_pairs`:** an arm held by IK on a non-foot end (a weapon grip, a hand on a prop) keeps its side instead of swapping. Set `mirror_hands: true` on a key to swap on purpose.
+- **`preview`:** the ground line is drawn at the feet, not at the root.
+- **`art_critique`:** HD sprites (64x96 and up) get a 48-128 colour budget instead of 32, and ordered dither there is not flagged as noise. `style` overrides the detection.
+- **Material layers:** canvas layers named `height`, `metal` or `rough` are material channels in `art_model` (normal map, metalness, roughness) and no longer show in the base colour. Rename such layers to keep them as paint.
+- **Package size:** the npm package grows from about 360 kB to about 770 kB packed (2.6 MB unpacked), because the web UI vendors three.js r170 (MIT).
 
 ## How an agent works with it
 
@@ -208,7 +220,7 @@ Create `fp_rifle` or `fp_pistol` with `weapon` and the `fp_arms` hands solve ont
 { "action": "animate", "name": "arms", "clip": "reload_empty", "hold": { "weapon": "gun", "carry": "reload", "bake_weapon": "reload_empty_held" } }
 ```
 
-- **Weapon:** `grip_main`, `grip_support`, `stock`, `muzzle`, `optic` and `mag` name sockets or `{part, at, look, up}` points. The attachments `vertical_grip`, `angled_grip`, `bipod` and `suppressor` add parts and sockets and take over the grip or the muzzle. Without `weapon` the templates are unchanged.
+- **Weapon:** `weapon.grips: {grip_main, grip_support, stock, muzzle, optic, mag}` names a socket or a `{part, at, look, up}` point for each (defaults: the template's `grip_r`, `grip_l`, `muzzle` and `sight` sockets). The attachments `vertical_grip`, `angled_grip`, `bipod` and `suppressor` add parts and sockets and take over the grip or the muzzle. Without `weapon` the templates are unchanged.
 - **Hold:** two-bone IK puts each palm on its grip, with the wrist turned to the grip's `look` and `up`. The carry states are `hip`, `aim` (the optic on the screen centre, stock welded), `ready_low`, `ready_high`, `sprint`, `reload` (the support hand on the magazine) and `holster`, plus pistol `compressed` and `low`. `weapon.states` adds your own, with `base`. A grip out of reach moves the gun back or slides the support hand, never stretching the arm. A gun inside the head, chest or shoulder capsules is pushed out. The muzzle must point down outside firing states, and `fix: true` lowers it.
 - **Output:** `render {hold}` and `animate {hold}` return a `hold` / `held` report (corrections, issues, pass). `animate {hold}` bakes the solved arms into a clip, and `bake_weapon` also writes the matching gun clip, so the exported glTF plays back without the solver. `check` adds visibility: how much of the gun is on screen and how much the arms hide.
 
@@ -406,8 +418,6 @@ art_audio { action:"sfx", name:"zap", layers:[{ kind:"glide", pts:[[0,2400],[0.2
 
 ### Canvas op options worth knowing
 
-Behaviour changes in 0.5: `crop` on a frame strip takes frame coordinates, `adjust {alpha}` is a delta (use `set_alpha` for an absolute value), and `glow` selects by HSV value (`select:"luma"` is the old behaviour).
-
 - `art_canvas crop` keeps every frame, animation and tag of a frame strip, with the rect given in frame coordinates. `rotate {angle, expand:true}` grows the canvas so rotated content is not cut off.
 - `outline` is safe to re-run: it skips pixels next to existing outline-coloured pixels (`skip_existing`).
 - `clear` with no region clears the whole layer. `stamp_visible {keep_visible:true}` keeps the source layers. `ellipse {thickness}` draws a ring. `text {font:"5x7"|"7x9"}` gives larger fonts.
@@ -422,9 +432,9 @@ Behaviour changes in 0.5: `crop` on a frame strip takes frame coordinates, `adju
 | `art_draw` | Batch of drawing commands as one undo step. `preview` returns the image, `critique` the score |
 | `art_view` | The canvas as an image: zoom/region, pixel grid, `tile` seam check, `onion`, guides (`grid:16`, `iso:32`), tint preview. Large canvases get a token-cheap overview |
 | `art_critique` | Heuristic quality report and score for a frame, an animation or every frame |
-| `art_help` | Usage and examples for any command (`{op}`), guides (`{topic}`: workflow, textures, characters, animation, rig, scenes, hires, minecraft, 3d, audio, music, mixing, perception), and step-by-step recipes (`{skill}`) |
-| `art_rig` | Multi-view, multi-animation characters from parts and poses (templates incl. `humanoid_hd`, presets, tweening, IK, foot planting, secondary motion, `ik_from` to follow rendered anchors) |
-| `art_model` | 3D: modular HD-2D kit pieces, ruins, extruded/lathed props, ships and vehicles, and dioramas, previewed from the game camera, exported to `.glb`. Rigid-part rigs with `pose`, `animate` (glTF clips) and sockets, FP templates (`fp_rifle`, `fp_pistol`, `fp_arms`), `render` to pixel sprite frames. Hard-surface: greebles, tubes, trim sheets (`trim`), PBR, height normals, booleans, morphs; export baked AO, LODs, impostors, collision/occluder proxies, cull data |
+| `art_help` | Usage and examples for any command (`{op}`), guides (`{topic}`: workflow, textures, characters, animation, rig, scenes, hires, minecraft, 3d, audio, music, mixing, perception, graph), and step-by-step recipes (`{skill}`) |
+| `art_rig` | Multi-view, multi-animation characters from parts and poses (templates incl. `humanoid_hd`, presets, tweening, IK, foot planting, secondary motion, equipment sets, `ik_from` to follow rendered anchors). Held weapons: `weapon` with carry states; `check` validates every clip and view, `layers` lists the draw order with reasons, `explain` says why one part is over another. Compact replies (`full`, `fields`) |
+| `art_model` | 3D: modular HD-2D kit pieces, ruins, extruded/lathed props, ships and vehicles, and dioramas, previewed from the game camera, exported to `.glb`. Rigid-part rigs with `pose`, `animate` (glTF clips) and sockets, FP templates (`fp_rifle`, `fp_pistol`, `fp_arms`), `render` to pixel sprite frames. `hold` puts the arms on a gun in `render` / `animate`, and `check` validates it. Hard-surface: greebles, tubes, trim sheets (`trim`), PBR, height normals, booleans, morphs; export baked AO, LODs, impostors, collision/occluder proxies, cull data |
 | `art_audio` | Sound effects, music, mixing and mastering; analysis images, listener reports and critiques; WAV/mp3/ogg/opus export |
 | `art_read` | Exact pixels as text rows plus a legend, in the format `grid` accepts |
 | `art_palette` | Named colors per canvas or project. `ramp` builds shading ramps |
@@ -433,7 +443,7 @@ Behaviour changes in 0.5: `crop` on a frame strip takes frame coordinates, `adju
 | `art_canvas` | Resize, crop, scale (`nearest` or `scale2x` pixel-art upscaling), frames, metadata, `normal_map` |
 | `art_animation` | Frame ops, tags with per-frame durations, forward/reverse/pingpong, filmstrip, GIF/spritesheet export |
 | `art_graph` | Asset graph: what is part of what (`part_of`, `variant_of`, `view_of`, `rendered_from`, ...), tags, notes and nested groups. `summary` / `query` answer in a few hundred characters, so the agent orients itself without `art_info` on everything. Structural edges are automatic |
-| `art_review` | Review notes the user leaves in the web UI (a box or pin on a frame, view, part or audio range, with a category and a "compare with" asset). `list` is one line per note, `get` returns the marked region then / now / compared as an image, `update` moves a note to `in_progress` / `fixed` |
+| `art_review` | Review notes the user leaves in the web UI (a box or pin on a frame, view, part or audio range, with a category and a "compare with" asset). `list` is one line per note, `get` returns the marked region then / now / compared as an image, `update` moves a note to `in_progress` / `fixed`, `add` asks the user something |
 | `art_undo`, `art_import`, `art_export`, `art_list`, `art_info`, `art_open_ui` | The rest |
 | `art_minecraft` | Optional: Minecraft Java resource packs (vanilla texture names and sizes for reference, pack build plus zip) |
 
@@ -446,7 +456,7 @@ Every command takes `layer`, `frame`, `mask` (opaque / transparent / a colour / 
 The recipes behind `art_help {skill}` are also served as MCP prompts and can be installed as agent skills:
 
 ```sh
-npx @rusticstack/agent-art skills --out ~/.claude/skills   # tileable-texture, sprite, rig, rig-hd, walk-cycle, iso-scene, hd2d-scene, 3d-kit, ship-model, hard-surface, fp-weapon, prop-rig, ui-icons, minecraft-pack, sfx-pack, music-track
+npx @rusticstack/agent-art skills --out ~/.claude/skills   # tileable-texture, sprite, rig, rig-hd, weapon-handling, walk-cycle, iso-scene, hd2d-scene, 3d-kit, ship-model, hard-surface, fp-weapon, prop-rig, ui-icons, minecraft-pack, sfx-pack, music-track
 ```
 
 ## CLI (no MCP needed)
@@ -475,6 +485,18 @@ The UI shows everything the agent does, live, and lets you steer it.
 - **Review notes.** Press `M`, drag a box or click a pin (on a canvas, an animation view, a rig clip, the 3D view or an audio range) and leave a note: `fix`, `redo`, `inconsistent` (across views), `layering`, `style`, `question` or `approve`, with a priority and an optional asset/view to compare with. The agent sees open notes in `art_review list` and as one line in the reply of any tool that touches that asset; it marks them `fixed` and you accept or reopen them. Approving an asset makes the agent's replies warn before it changes it.
 - **Compare** (`C`) puts two assets or two states side by side. **Follow** (`F`) switches the viewer to whatever the agent is touching; turn it off to browse while events keep streaming.
 - Resizable panes, keyboard shortcuts (`?`), dark theme, and a narrow-screen layout with drawers. Thumbnails are cached by version and load lazily, so hundreds of canvases stay fast.
+
+The agent's side of the graph and the notes:
+
+```jsonc
+// art_graph: record a relation, then ask what is connected (a few hundred characters)
+{ "action": "link", "from": "helmet_side", "rel": "variant_of", "to": "helmet_front", "attrs": { "view": "side" } }
+{ "action": "query", "node": "helmet_front" }
+// art_review: open notes, one line each; the marked region as an image; resolve it
+{ "action": "list" }
+{ "action": "get", "id": "r1" }
+{ "action": "update", "id": "r1", "status": "fixed", "reply": "closed the outline gap" }
+```
 
 More screenshots are in [docs/ui](docs/ui).
 

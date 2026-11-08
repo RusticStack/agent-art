@@ -191,6 +191,6 @@ The spritesheet JSON carries per-frame anchors (each part's pivot x, y and rotat
 
 ## Tips
 
-- Check every animation with `art_critique {"canvas":"soldier_walk_side","animation":"walk"}` and `art_animation {"action":"filmstrip"}`.
+- Check every animation with `art_critique {"canvas":"soldier_walk_side","animation":"walk_side"}` and `art_animation {"action":"filmstrip"}`.
 - Rotation looks best when limbs have clean 1 px outlines and 3-5 shade steps. `sampling: "rotsprite"` keeps only colours that are already in the part, so ramps stay intact.
 - For a different look, set `sampling: "smooth"` (supersamples the 1x cell) or `"nearest8"` (the old fast path) with `art_rig update`.
