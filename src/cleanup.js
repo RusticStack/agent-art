@@ -76,7 +76,7 @@ registerAssetType('model', {
   list: (e) => [...modelDefs(e).keys()],
   exists: (e, n) => modelDefs(e).has(n),
   info: (e, n) => { const m = modelDefs(e).get(n); return m ? { project: m.project, updated: m.updated || m.created } : {}; },
-  files: (e, n) => [modelFile(e, n)],
+  files: (e, n) => [modelFile(e, n), modelFile(e, n).replace(/\.json$/, '.mesh.bin')].filter((f, i) => i === 0 || fs.existsSync(f)), // + art_model boolean / remesh / decimate baked mesh
   unload: (e, n, source) => { modelDefs(e).delete(n); e.emit('event', { type: 'model', model: n, deleted: true, source, ts: Date.now() }); },
   reload: (e, n, source) => { const m = JSON.parse(fs.readFileSync(modelFile(e, n), 'utf8')); modelDefs(e).set(m.name, m); e.emit('event', { type: 'model', model: m.name, source, label: 'restored from trash', ts: Date.now() }); },
 });

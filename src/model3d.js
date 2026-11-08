@@ -1124,6 +1124,12 @@ export const BUILDERS = {
 BUILDERS.prism = (a, ctx) => cylinder({ segments: 6, flat: true, ...a }, ctx);
 BUILDERS.cone = (a, ctx) => cylinder({ r_top: 0, ...a }, ctx);
 BUILDERS.loft = (a, ctx) => shape({ scale_end: 0.5, ...a }, ctx);
+// baked: a processed mesh stored by art_model boolean / remesh / decimate (<models>/<mesh>.mesh.bin).
+// Not in BUILDERS: it needs the model store (ctx.baked), like type "model".
+const bakedPart = (a, ctx) => {
+  if (!ctx.baked) throw new Error('baked parts need the model store (art_model)');
+  return ctx.baked(a.mesh).clone();
+};
 
 /** One-line signatures (art_help topic 3d + error hints). px units; ? = optional. */
 export const PART_DOCS = {
@@ -1154,10 +1160,11 @@ export const PART_DOCS = {
   sweep: 'same as tube (profile sweeps: conduits, railings, rails, hoses)',
   greeble: 'w?:64,d?:64 region on y=0 facing +y, seed?, density?:0.45 (0..1 covered), size?:[3,12] px, height?:[1,4], kinds?:[panel vent pipe conduit antenna bolts hatch heatsink nozzle dome cables tank block | "model:<name>"] or {kind:weight}, grid? px (snap), align?:grid|free, gap?:1, margin?:1, avoid?:<mask canvas>|[[u,v,w,h]], texture|color, dark?, accent?, textures?:{<kind>|main|dark|accent}, drop_lod?:auto (<= 2 px tall at LOD 1, else 2), instanced? (GPU instancing). On box/wall/floor/slab/ledge: greeble:{face, ...} | greebles:[..]',
   model: 'model:"<other model>" = place another model (layouts / dioramas)',
+  baked: 'mesh:"<name>" = a processed mesh saved by art_model boolean / remesh / decimate (stored beside the model as <name>.mesh.bin)',
   light: 'light marker for baked lighting (no geometry): kind?:point|area|spot, color?:"#ffffff", intensity?:1, range?:128 px, size?:[w,h] (area), dir?:[0,-1,0] (area / spot facing), cone?:45 deg (spot); placed like any part (at, array, mirror)',
 };
-export const PART_TYPES = [...Object.keys(BUILDERS), 'model', 'light'];
-export const PART_COMMON = 'at?:[x,y,z]|cell?:[gx,gy,gz]|turn?|rotate?:[x,y,z] (deg, X then Y then Z about the part origin)|pivot?:[x,y,z] (rotate/scale about this local point)|scale?|mirror?:x|y|z|[..] (adds mirrored copies)|array?:{count,step|cell_step,rotate?,turn?,about?:[x,y,z]}|opacity?:0..1|glass?|double_sided?|overlays?:[{texture,where,map,scale,falloff,amount}]|ctm_tag?|material?:preset|{metal,rough}|bump?|trim?:"sheet:strip"|boolean?:subtract|union|intersect + target?|id?|cast_shadow?|receive_shadow?|paint?:"#rrggbb[aa]" + wetness?:0..1 (vertex colour sets)|displace?:true|{scale,bias,max_triangles,tolerance,seams}';
+export const PART_TYPES = [...Object.keys(BUILDERS), 'model', 'light', 'baked'];
+export const PART_COMMON = 'at?:[x,y,z]|cell?:[gx,gy,gz]|turn?|rotate?:[x,y,z] (deg, X then Y then Z about the part origin)|pivot?:[x,y,z] (rotate/scale about this local point)|scale?|mirror?:x|y|z|[..] (adds mirrored copies)|array?:{count,step|cell_step,rotate?,turn?,about?:[x,y,z]}|opacity?:0..1|glass?|double_sided?|overlays?:[{texture,where,map,scale,falloff,amount}]|ctm_tag?|material?:preset|{metal,rough}|bump?|trim?:"sheet:strip"|boolean?:subtract|union|intersect + target? + boolean_method?:auto|bsp|robust|id?|cast_shadow?|receive_shadow?|paint?:"#rrggbb[aa]" + wetness?:0..1 (vertex colour sets)|displace?:true|{scale,bias,max_triangles,tolerance,seams}';
 
 // ---------- world UVs (after placement) ----------
 /** Recompute UVs of world-tiled faces from their final positions: seamless across pieces. */
@@ -1650,7 +1657,7 @@ function applyBooleans(def, placed, parts, mesh) {
     const t = find(p.target, i);
     if (t === i || !placed[t]) throw new Error(`part ${i}: boolean target ${t} is not a placed part (instanced models and consumed cutters cannot be targets)`);
     const before = placed[t].triangles;
-    placed[t] = booleanMesh(op, placed[t], placed[i]);
+    placed[t] = booleanMesh(op, placed[t], placed[i], p.boolean_method ? { method: p.boolean_method } : {});
     placed[i] = null;
     parts[parts.findIndex((x) => x.i === i)].boolean = { op, target: t };
     const pt = parts.find((x) => x.i === t);
@@ -1715,7 +1722,7 @@ export function buildModel(def, ctx) {
         if (!ctx.nested) for (const { f } of local.faces) f.pi = i;
         if (p.cast_shadow !== undefined || p.receive_shadow !== undefined) for (const { f } of local.faces) { if (p.cast_shadow !== undefined) f.cs = !!p.cast_shadow; if (p.receive_shadow !== undefined) f.rs = !!p.receive_shadow; }
       } else {
-        const b = BUILDERS[type];
+        const b = type === 'baked' ? bakedPart : BUILDERS[type];
         if (!b) throw new Error(`unknown part type "${type}" (one of ${PART_TYPES.join(', ')})`);
         local = b(p, ctx);
         if (local.gpu && (ctx.nested || (layout && layout.nodeOf[i] !== null) || useBool)) flattenGpu(local);

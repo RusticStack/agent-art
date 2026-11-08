@@ -19,6 +19,7 @@ import { exportExtras, previewExtras, wantsExtras, MODEL_EXTRA_OPS } from './mod
 import { skinOps, skinCtx, skinnedOf, skinSamples, skinPosed, assembleSkinned, isSkinned, skelAnimate, skelPose, skeletonInfo } from './skinops.js';
 import { exportV2, finishV2, materialOp, describeMaterial, textureChannels, channelPreview } from './matops.js';
 import { V2_PRESETS } from './materials.js';
+import { meshOpsFor, loadBaked } from './meshops.js';
 
 const NAME_RE = /^[A-Za-z0-9_\-.]{1,64}$/;
 
@@ -180,7 +181,7 @@ export function texResolver(engine, { normal = false, bump = null } = {}) {
 const greebleKinds = (engine) => Object.fromEntries([...models(engine).values()].filter((m) => typeof m.greeble_kind === 'string').map((m) => [m.greeble_kind, m.name]));
 function build(engine, def, opts = {}) {
   const tex = opts.tex || texResolver(engine, opts);
-  const r = buildModel(def, { tex, getModel: (n) => getModel(engine, n), instances: opts.instances, greebleKinds: () => greebleKinds(engine), ...(def.materials ? { materials: def.materials } : {}) });
+  const r = buildModel(def, { tex, getModel: (n) => getModel(engine, n), instances: opts.instances, greebleKinds: () => greebleKinds(engine), baked: (n) => loadBaked(modelDir(engine), n), ...(def.materials ? { materials: def.materials } : {}) });
   // GPU-instanced greebles stay separate only for export (EXT_mesh_gpu_instancing); previews,
   // renders and summaries see them merged
   if (r.gpu && !opts.keepGpu) { for (const it of r.gpu) for (const M of it.mats) r.mesh.add(it.mesh.clone().transform(M)); delete r.gpu; }
@@ -739,6 +740,7 @@ export const MODEL_OPS = {
     if (trash) return { deleted: a.name, trash };
     models(this).delete(a.name);
     fs.rmSync(path.join(modelDir(this), `${a.name}.json`), { force: true });
+    fs.rmSync(path.join(modelDir(this), `${a.name}.mesh.bin`), { force: true });
     this.emit('event', { type: 'model', model: a.name, deleted: true, source, ts: Date.now() });
     return { deleted: a.name };
   },
@@ -812,6 +814,7 @@ export const MODEL_OPS = {
   },
   ...MODEL_EXTRA_OPS,
   ...skinOps({ getModel, saveModel, build, variantOf: (engine, def) => variantOf(engine, def), writeGLB }),
+  ...meshOpsFor({ getModel, build, saveModel, modelDir }),
 };
 /** Helpers the skinning ops share with the rest of art_model. */
 const BASE = { getModel, saveModel, build, variantOf: (engine, def) => variantOf(engine, def), writeGLB };

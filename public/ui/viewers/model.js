@@ -69,8 +69,9 @@ export class ModelViewer {
     this.root = el('div.viewer.model-viewer');
     host.append(this.root);
     const cb = (label, title, fn, checked = false) => { const i = el('input', { type: 'checkbox', checked, on: { change: () => fn(i.checked) } }); return [i, el('label.toggle', { title }, i, ' ' + label)]; };
-    let w, n, u, s, p, g;
+    let w, n, u, s, p, g, c;
     [this.wireCb, w] = cb('Wireframe', 'Wireframe (W)', () => this.applyToggles());
+    [this.clusCb, c] = cb('Clusters', 'Colour ~128-triangle clusters (spatially ordered meshlets, like art_model cluster_lod)', () => this.applyToggles());
     [this.normCb, n] = cb('Normals', 'Vertex normals', () => this.applyToggles());
     [this.uvCb, u] = cb('UV checker', 'Replace textures with a UV checker', () => this.applyToggles());
     [this.sockCb, s] = cb('Sockets', 'Socket nodes (socket_*) with axes', () => this.applyToggles(), true);
@@ -83,7 +84,7 @@ export class ModelViewer {
     this.chanSel = el('select', { title: 'Material channel (materials v2): reloads the model with profile three; lightmap / AO / bent / lightmap UVs run a quick bake', on: { change: () => this.setChannel() } },
       ...Object.entries(CHANNELS).map(([k, [label]]) => el('option', { value: k, text: label })));
     this.root.append(el('div.vtoolbar', {},
-      el('div.group', {}, w, n, u), el('div.group', {}, s, p, g),
+      el('div.group', {}, w, c, n, u), el('div.group', {}, s, p, g),
       el('div.group', {}, el('span.muted', { text: 'Channel' }), this.chanSel),
       el('div.group', {}, el('span.muted', { text: 'Clip' }), this.clipSel, this.playBtn, el('label.toggle', {}, this.loopCb, ' Loop')),
       el('button.btn', { text: 'Reset view', on: { click: () => this.frameCamera() } }),
@@ -320,6 +321,7 @@ export class ModelViewer {
     for (const s of this.sockets) s.ax.visible = this.sockCb.checked;
     for (const p of this.pivots) { p.m.visible = this.pivCb.checked; p.ax.visible = this.pivCb.checked; }
     this.grid.visible = this.gridCb.checked;
+    this.applyClusters(this.clusCb.checked);
     if (this.normCb.checked && !this.normalHelpers) {
       const { VertexNormalsHelper } = this.T;
       this.normalHelpers = [];
@@ -333,6 +335,51 @@ export class ModelViewer {
     const add = (o, text, cls) => { const l = el(`span.mlabel.${cls}`, { text }); this.labels.append(l); this.labelEls.push({ o, l }); };
     if (this.sockCb.checked) for (const s of this.sockets) add(s.o, s.name, 'socket');
     if (this.pivCb.checked) for (const p of this.pivots) add(p.o, p.name, 'pivot');
+  }
+  /** Cluster view: per mesh, triangles in Morton order cut into runs of 128, one flat colour each. */
+  applyClusters(on) {
+    const { THREE } = this.T;
+    if (this.clusterGroup && (!on || this.clusterFor !== this.model)) {
+      this.scene.remove(this.clusterGroup);
+      this.clusterGroup.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+      this.clusterGroup = null;
+    }
+    if (on && !this.clusterGroup) {
+      const grp = new THREE.Group();
+      let id = 0;
+      this.model.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(this.model), mn = box.min, sz = box.getSize(new THREE.Vector3());
+      const q = (v, i) => Math.max(0, Math.min(1023, Math.floor(((v - mn.getComponent(i)) / (sz.getComponent(i) || 1)) * 1023)));
+      const spread = (x) => { x &= 1023; x = (x | (x << 16)) & 0x30000ff; x = (x | (x << 8)) & 0x300f00f; x = (x | (x << 4)) & 0x30c30c3; return (x | (x << 2)) & 0x9249249; };
+      const colour = (k) => { let h = Math.imul((k + 1) ^ 0x9e3779b9, 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16; return new THREE.Color().setHSL(((h >>> 0) % 360) / 360, 0.65, 0.55); };
+      this.model.traverse((o) => {
+        if (!o.isMesh) return;
+        let hidden = false;
+        for (let a = o; a; a = a.parent) if (a.visible === false) hidden = true;
+        if (hidden) return;
+        const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+        const P = g.attributes.position, nt = P.count / 3, v = new THREE.Vector3(), c = new THREE.Vector3();
+        const keys = [];
+        for (let t = 0; t < nt; t++) {
+          c.set(0, 0, 0);
+          for (let k = 0; k < 3; k++) c.add(v.fromBufferAttribute(P, t * 3 + k).applyMatrix4(o.matrixWorld));
+          c.multiplyScalar(1 / 3);
+          keys.push([(spread(q(c.x, 0)) | (spread(q(c.y, 1)) << 1) | (spread(q(c.z, 2)) << 2)) >>> 0, t]);
+        }
+        keys.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+        const col = new Float32Array(P.count * 3);
+        keys.forEach(([, t], r) => { const cc = colour(id + Math.floor(r / 128)); for (let k = 0; k < 3; k++) col.set([cc.r, cc.g, cc.b], (t * 3 + k) * 3); });
+        id += Math.ceil(nt / 128);
+        g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, wireframe: this.wireCb.checked, side: o.material?.side ?? THREE.FrontSide }));
+        m.matrixAutoUpdate = false; m.matrix.copy(o.matrixWorld);
+        grp.add(m);
+      });
+      this.clusterGroup = grp; this.clusterFor = this.model; this.clusterCount = id;
+      this.scene.add(grp);
+    }
+    if (this.clusterGroup) this.clusterGroup.traverse((o) => { if (o.isMesh) o.material.wireframe = this.wireCb.checked; });
+    this.model.visible = !on;
   }
   placeLabels() {
     if (!this.labelEls?.length) return;
