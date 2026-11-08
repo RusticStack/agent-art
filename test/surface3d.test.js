@@ -462,6 +462,31 @@ test('proxies, stats, cull rooms + auto portals, shadow flags', () => {
   assert.ok(names.includes('room_a') && names.includes('room_b'));
 });
 
+test('review fixes: AO + instances valid glTF, GPU greeble unit normals, part stats after origin, bad trim / AO / lod_screen input', () => {
+  const e = setup();
+  const dir = tmp();
+  // instances:true + bake_ao: instance meshes have no TEXCOORD_1, so their materials carry no occlusionTexture
+  e.run('model_create', { name: 'prop', parts: [{ type: 'box', w: 16, h: 16, d: 16, texture: 'hull' }] });
+  e.run('model_create', { name: 'lay', parts: [{ type: 'model', model: 'prop' }, { type: 'model', model: 'prop', at: [40, 0, 0] }, { type: 'floor', w: 96, d: 32, texture: 'hull' }] });
+  const L = loadGLB(e.run('model_export', { name: 'lay', path: path.join(dir, 'lay.glb'), instances: true, bake_ao: { samples: 8 } }).file);
+  assert.ok(L.json.materials.some((m) => m.occlusionTexture), 'the baked floor keeps its AO');
+  // GPU-instanced greeble prototypes: unit normals (glTF requires them)
+  e.run('model_create', { name: 'gg', parts: [{ type: 'greeble', w: 64, d: 64, seed: 7, kinds: { dome: 1, nozzle: 1, tank: 1 }, instanced: true }] });
+  const G = loadGLB(e.run('model_export', { name: 'gg', path: path.join(dir, 'gg.glb') }).file);
+  for (const m of G.json.meshes) for (const p of m.primitives) {
+    const N = G.read(p.attributes.NORMAL);
+    for (let i = 0; i < N.length; i += 3) assert.ok(near(Math.hypot(N[i], N[i + 1], N[i + 2]), 1, 1e-3), `unit normal in ${m.name}`);
+  }
+  // parts_stats bounds follow the origin shift (same frame as the glb)
+  e.run('model_create', { name: 'oc', parts: [{ type: 'box', w: 32, h: 32, d: 32, at: [64, 10, 0] }], origin: 'center' });
+  const ox = e.run('model_export', { name: 'oc', path: path.join(dir, 'oc.glb'), stats: true });
+  assert.deepEqual(JSON.parse(fs.readFileSync(ox.meta, 'utf8')).parts_stats[0].bounds.min, ox.bounds_units.min);
+  // bad input: clear errors instead of an empty canvas / NaN data
+  assert.throws(() => e.run('model_trim', { canvas: 'empty_sheet', strips: [] }), /at least one strip/);
+  assert.throws(() => e.run('model_export', { name: 'prop', path: path.join(dir, 'p.glb'), bake_ao: { samples: 'x' } }), /samples/);
+  assert.throws(() => e.run('model_export', { name: 'prop', path: path.join(dir, 'p.glb'), lods: [1, 0.5], lod_screen: { fov: 'x' } }), /lod_screen/);
+});
+
 test('docs: art_help 3d covers the new surface and render-cost features', () => {
   const t = helpText({ topic: '3d' });
   for (const k of ['greeble', 'tube', 'trim', 'boolean', 'morphs', 'bake_ao', 'lods', 'impostor', 'collision', 'cull', 'material', 'bump']) assert.ok(t.includes(k), k);
