@@ -1,10 +1,10 @@
 // Engine ops for rigs (art_rig). The rig definition lives in the parts canvas meta.rig, so it is
 // saved, undone and shown in the UI like any canvas.
-import { Doc, Layer, checkSize } from './doc.js';
+import { Doc, Layer, checkSize, MAX_SIZE } from './doc.js';
 import { encodePNG } from './png.js';
 import { packImages } from './sheet.js';
-import { rigTemplate, mergeTemplate, RIG_TEMPLATES } from './rigtemplates.js';
-import { normalizeRig, cellOf, renderPose, animatePoses, resolvePose, lowestRow, shiftFrame, poseAnchors } from './rig.js';
+import { rigTemplate, mergeTemplate, RIG_TEMPLATES, TEMPLATE_FRAME } from './rigtemplates.js';
+import { normalizeRig, normalizeSecondary, cellOf, renderPose, animatePoses, resolvePose, lowestRow, shiftFrame, poseAnchors, plantFeet, simulateSecondary, ikChain } from './rig.js';
 
 const partsName = (name) => `${name}_parts`;
 
@@ -54,6 +54,31 @@ function relayout(oldRig, newRig, d) {
   if (cells) cells.data = cellGuides(newRig, d);
 }
 
+/** Rig-level options stored in the definition (absent = old behaviour). */
+const RIG_OPTS = ['sampling', 'secondary', 'feet', 'scale_children'];
+
+/** Validate pose data: parts, variants, per-view overrides and IK specs. */
+function checkPose(rig, P, where = 'pose') {
+  const ok = (tg) => (Array.isArray(tg) ? tg.length === 2 && tg.every((n) => Number.isFinite(Number(n))) : tg?.mix ? ok(tg.mix[0]) && ok(tg.mix[1]) : !!(tg?.part && rig.parts[tg.part]));
+  const checkParts = (o, w) => {
+    for (const [k, v] of Object.entries(o || {})) {
+      if (k === 'ik' || k === 'views') continue;
+      if (!rig.parts[k]) throw new Error(`${w}: unknown part "${k}" (parts: ${rig.order.join(', ')})`);
+      if (v?.variant && !rig.parts[k].variants.includes(v.variant)) throw new Error(`${w}: part "${k}" has no variant "${v.variant}"`);
+    }
+    for (const [end, e] of Object.entries(o?.ik || {})) {
+      if (!e) continue;
+      ikChain(rig, end);
+      if (!ok(e.target)) throw new Error(`${w}: ik "${end}" needs target:[x,y] (frame px) or {part:<existing part>, at?:[dx,dy]}`);
+    }
+  };
+  checkParts(P, where);
+  for (const [v, o] of Object.entries(P.views || {})) {
+    if (!rig.views.includes(v)) throw new Error(`${where}: views."${v}" must be a drawn view (${rig.views.join(', ')}); mirror views use their source view's override`);
+    checkParts(o, `${where} views.${v}`);
+  }
+}
+
 function cellsReport(rig) {
   const cells = {};
   for (const view of rig.views) {
@@ -68,7 +93,7 @@ function cellsReport(rig) {
 
 export const RIG_OPS = {
   rig_templates() {
-    return Object.fromEntries(Object.keys(RIG_TEMPLATES).map((k) => { const t = rigTemplate(k, [32, 32]); return [k, { views: t.views, parts: Object.keys(t.parts), presets: Object.keys(t.presets), guide: t.guide }]; }));
+    return Object.fromEntries(Object.keys(RIG_TEMPLATES).map((k) => { const t = rigTemplate(k, TEMPLATE_FRAME[k] || [32, 32]); return [k, { views: t.views, mirror_views: Object.keys(t.mirror || {}), parts: Object.keys(t.parts), presets: Object.keys(t.presets), ...(t.sampling ? { sampling: t.sampling } : {}), guide: t.guide }]; }));
   },
 
   rig_create(a, source) {
@@ -82,8 +107,13 @@ export const RIG_OPS = {
       const t = mergeTemplate(rigTemplate(a.template, a.frame), a);
       guide = t.guide;
       def = { frame: t.frame, views: t.views, mirror: t.mirror, parts: t.parts, root: t.root, pairs: a.pairs, poses: t.poses, presets: t.presets, template: a.template };
-    } else def = { frame: a.frame, views: a.views, mirror: a.mirror, parts: a.parts, root: a.root, pairs: a.pairs, poses: a.poses || {}, presets: a.presets || {} };
+      for (const k of RIG_OPTS) if (t[k] !== undefined && !(k === 'secondary' && !Object.keys(t[k]).length)) def[k] = t[k];
+    } else {
+      def = { frame: a.frame, views: a.views, mirror: a.mirror, parts: a.parts, root: a.root, pairs: a.pairs, poses: a.poses || {}, presets: a.presets || {} };
+      for (const k of RIG_OPTS) if (a[k] !== undefined) def[k] = a[k];
+    }
     const rig = normalizeRig(def);
+    for (const [k, P] of Object.entries(rig.poses)) checkPose(rig, P, `pose "${k}"`);
     checkSize(rig.layout.width, rig.layout.height);
     const d = new Doc({ name: pn, width: rig.layout.width, height: rig.layout.height });
     if (a.project) { this.getProject(a.project); d.project = a.project; }
@@ -108,7 +138,7 @@ export const RIG_OPS = {
     const { d, rig: oldRig, def } = getRig(this, a.name);
     d.checkpoint('rig update');
     const next = { ...def };
-    for (const k of ['frame', 'views', 'mirror', 'root', 'pairs']) if (a[k] !== undefined) next[k] = a[k];
+    for (const k of ['frame', 'views', 'mirror', 'root', 'pairs', ...RIG_OPTS]) if (a[k] !== undefined) next[k] = a[k];
     if (a.poses) {
       next.poses = { ...(def.poses || {}) };
       for (const [k, v] of Object.entries(a.poses)) if (v === null) delete next.poses[k]; else next.poses[k] = v;
@@ -125,6 +155,7 @@ export const RIG_OPS = {
       }
     }
     const rig = normalizeRig(next);
+    if (a.poses) for (const [k, P] of Object.entries(a.poses)) if (P) checkPose(rig, P, `pose "${k}"`);
     relayout(oldRig, rig, d);
     d.meta = { ...d.meta, rig: { ...next, frame: rig.frame, views: rig.views, root: rig.root } };
     d.touch?.();
@@ -138,6 +169,7 @@ export const RIG_OPS = {
       rig: a.name, parts_canvas: partsName(a.name), frame: rig.frame, root: rig.root, views: rig.views, mirror: rig.mirror, pairs: rig.pairs,
       parts: Object.fromEntries(rig.order.map((n) => { const p = rig.parts[n]; return [n, { w: p.w, h: p.h, pivot: p.pivot, parent: p.parent, at: p.at, z: p.z, variants: p.variants.slice(1), views: p.views }]; })),
       cells: cellsReport(rig), poses: rig.poses, presets: def.presets || {},
+      sampling: rig.sampling, scale_children: rig.scaleChildren, secondary: rig.secondary, feet: rig.feet,
       note: 'complete rig for game engines: save this JSON as <name>_rig.json',
     };
   },
@@ -148,11 +180,19 @@ export const RIG_OPS = {
     const poses = { ...(def.poses || {}) };
     if (a.parts === null || a.delete) delete poses[a.pose];
     else {
-      if (!a.parts || typeof a.parts !== 'object') throw new Error('pose needs "parts": {part: {x?, y?, rot?, variant?, hide?}} (offsets from the rest pose)');
-      for (const k of Object.keys(a.parts)) if (!rig.parts[k]) throw new Error(`pose: unknown part "${k}" (parts: ${rig.order.join(', ')})`);
-      for (const [k, v] of Object.entries(a.parts)) if (v?.variant && !rig.parts[k].variants.includes(v.variant)) throw new Error(`pose: part "${k}" has no variant "${v.variant}"`);
+      if ((!a.parts || typeof a.parts !== 'object') && !a.views && !a.ik) throw new Error('pose needs "parts": {part: {x?, y?, rot?, sx?, sy?, variant?, hide?}} (offsets from the rest pose), and/or views:{view:{part:{...}}} / ik:{end:{target, bend?, rot?}}');
+      const add = { ...(a.parts || {}) };
+      if (a.views) add.views = a.views;
+      if (a.ik) add.ik = a.ik;
+      checkPose(rig, add);
       const base = a.from ? resolvePose(rig, { pose: a.from }) : a.merge && poses[a.pose] ? poses[a.pose] : {};
-      poses[a.pose] = { ...base, ...a.parts };
+      const P = { ...base, ...add };
+      if (a.views && base.views) {
+        P.views = { ...base.views };
+        for (const [v, o] of Object.entries(a.views)) P.views[v] = { ...(base.views[v] || {}), ...o };
+      }
+      if (a.ik && base.ik) P.ik = { ...base.ik, ...a.ik };
+      poses[a.pose] = P;
     }
     d.checkpoint(`pose ${a.pose}`);
     d.meta = { ...d.meta, rig: { ...def, poses } };
@@ -210,7 +250,22 @@ export const RIG_OPS = {
     if (!/^[\w.-]+$/.test(a.animation || '')) throw new Error('animate needs an "animation" name (e.g. "walk_side")');
     const view = a.view || rig.views[0];
     const loop = a.loop !== false;
-    const poses = animatePoses(rig, { keys: a.keys, frames: a.frames, loop });
+    let poses = animatePoses(rig, { keys: a.keys, frames: a.frames, loop });
+    const notes = [];
+    // plant / ik_feet: pin stance feet with leg IK on contact frames (true = rig feet, or [parts])
+    const plant = a.plant ?? a.ik_feet;
+    if (plant) {
+      const feet = Array.isArray(plant) ? plant : rig.feet;
+      for (const f of feet) ikChain(rig, f);
+      if (feet.length) poses = plantFeet(rig, poses, view, feet, { loop });
+      else notes.push('plant: this rig has no foot parts with a two-bone leg (foot -> shin -> thigh); set rig "feet" or pass plant:[parts]');
+    }
+    // secondary: damped follow-through for rig.secondary parts (or an inline {part:{stiffness,damping}})
+    if (a.secondary) {
+      const config = typeof a.secondary === 'object' ? normalizeSecondary(rig.parts, a.secondary) : rig.secondary;
+      if (Object.keys(config).length) poses = simulateSecondary(rig, poses, view, { loop, config });
+      else notes.push('secondary: the rig has no "secondary" parts (art_rig update {secondary:{cape:{stiffness:0.3, damping:0.2}}})');
+    }
     const [FW, FH] = rig.frame;
     const outName = a.canvas || a.name;
     let out = this.docs.get(outName);
@@ -244,6 +299,8 @@ export const RIG_OPS = {
       }
     }
     if (start === undefined) {
+      const total = (blankSingle ? 0 : out.frames) + n;
+      if (total * FH > MAX_SIZE) throw new Error(`canvas "${outName}" would hold ${total} frames of ${FH}px (${total * FH}px tall, max ${MAX_SIZE}): animate into another canvas, e.g. canvas:"${a.name}_${a.animation}" (one canvas per animation)`);
       if (blankSingle) { out.reorderFrames(Array(n).fill(-1)); start = 0; }
       else { start = out.frames; out.reorderFrames([...Array(out.frames).keys(), ...Array(n).fill(-1)]); }
     }
@@ -282,6 +339,6 @@ export const RIG_OPS = {
     out.meta = { ...(out.meta || {}), anchors: { ...(out.meta?.anchors || {}), [a.animation]: anchors } };
     out.touch?.();
     this.changed(out, { op: 'rig', source, label: `rig ${a.name}: ${a.animation} (${n} frames, ${view})`, structural: true });
-    return { canvas: outName, animation: a.animation, view, frames: [start, start + n - 1], fps: Math.round(fps * 10) / 10, total_frames: out.frames, anchors: 'per-frame part anchors saved (spritesheet json frames[].anchors)' };
+    return { canvas: outName, animation: a.animation, view, frames: [start, start + n - 1], fps: Math.round(fps * 10) / 10, total_frames: out.frames, anchors: 'per-frame part anchors saved (spritesheet json frames[].anchors)', ...(notes.length ? { notes } : {}) };
   },
 };

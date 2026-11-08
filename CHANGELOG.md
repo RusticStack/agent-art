@@ -40,6 +40,25 @@
 - `art_draw {commands_file:"<path>.json"}` reads a JSON array of commands, or `{commands:[...]}`, from a file.
 - `art_critique {tileable:true}` returns `seams: {ok, edge, interior, worst:[x,y,delta]}`.
 
+### Rigs
+
+- **`humanoid_hd` rig template** for detailed characters (64x96 up to 160x240 frames).
+  - 21 parts: a pelvis/torso/chest spine, neck, head, two-bone arms with hands, two-bone legs with feet, and optional `weapon`, `gear_back`, `gear_hip` and `cape` slots.
+  - Views `side`, `front_side`, `front`, `back_side` and `back`, plus 3 mirrors (8 directions). Part sizes scale with the frame.
+  - Presets with contact, down, passing and up keys: idle (12 frames), walk (16), run (12), crouch_walk (16), aim (1), shoot (6), reload (24), hurt (8), death (20), throw (12) and blink. Each comes with per-view overrides.
+- **Per-view poses:** `views: {front: {part: {...}}}` inside a pose or key is merged over the base pose in that view (mirror views use their source view), and tweens with it. `art_rig pose` accepts `views`.
+- **Two-bone IK:** `ik: {end: {target: [x,y] | {part, at}, bend, rot?, weight?, plane?}}` in poses and keys, solved per frame after FK in each view. Targets tween between keys, and a key without an entry fades back to FK.
+- **Foot planting:** `art_rig animate {plant: true | [parts]}` (alias `ik_feet`) pins stance feet on contact frames with leg IK. Rig `feet` sets which parts count as feet.
+- **Secondary motion:** rig `secondary: {part: {stiffness, damping, gravity?, inertia?}}` and `animate {secondary: true}` add a damped angular spring for follow-through. Loops are simulated until the seam repeats.
+- **Rig `sampling`:** `"rotsprite"` (3x3 supersampling of the 8x Scale2x cell, majority colour, hole and stray-pixel cleanup) and `"smooth"`. `"nearest8"` (the old path) remains the default for existing rigs.
+- **Rig `scale_children`:** a part's `sx`/`sy` also moves its children's joints (foreshortening, breathing).
+- docs/rig-hd-guide.md: a step-by-step guide for artists.
+
+### Rig fixes
+
+- A template pose that names a removed variant (the humanoid hurt/death poses use `head:blink`) no longer breaks the rig. `mergeTemplate` drops the reference, and rendering falls back to the base cell.
+- `art_rig animate` now explains when a canvas would exceed 8192 px of frames, instead of failing on a generic size error.
+
 ## 0.4.0
 
 ### Added
