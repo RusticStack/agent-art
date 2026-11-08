@@ -3,7 +3,7 @@
 // An original 6-world system strip, a ringed bloom world from orbit (atmosphere, clouds, rings) with
 // its maps, a desert landing zone (rocks, mesas, arch), a nebula skybox and an asteroid belt.
 // Writes demo-stats.json (triangles, texture sizes, generation times) next to the images.
-// landing_before_*.png are the first terrain version (commit a61c4d9) rendered through
+// landing_before_*.png are the previous terrain (main 7bfa3f8, the merged #9) rendered through
 // landing_cams.json (same x / z framing, heights re-based on that version's ground); when present,
 // they are combined with the new renders into landing_before_after.png.
 import fs from 'node:fs';
@@ -62,7 +62,7 @@ save('landing_zone.png', packImages(views.map((k) => ({ img: png(path.join(t.dir
 const hf = JSON.parse(fs.readFileSync(path.join(t.dir, 'dulpha_lz.heightfield.json'), 'utf8'));
 const gAt = (x, z) => { const i = Math.round((x + hf.size_m / 2) / hf.spacing_m), j = Math.round((z + hf.size_m / 2) / hf.spacing_m); return hf.heights[Math.max(0, Math.min(hf.grid, j)) * (hf.grid + 1) + Math.max(0, Math.min(hf.grid, i))]; };
 fs.writeFileSync(path.join(OUT, 'landing_cams.json'), JSON.stringify(Object.fromEntries(Object.entries(tm.cameras).map(([k, c]) => [k, { ...c, ground: gAt(c.pos[0], c.pos[2]), pad: gAt(0, 0) }])), null, 1));
-// before / after: landing_before_*.png are the renders of the first version (commit a61c4d9) through the same cameras
+// before / after: landing_before_*.png are the previous terrain (main 7bfa3f8) through the same cameras
 if (views.every((k) => fs.existsSync(path.join(OUT, `landing_before_${k}.png`)))) {
   const items = [];
   for (const k of views) items.push({ img: png(path.join(OUT, `landing_before_${k}.png`)), label: `BEFORE ${k.toUpperCase()}` });

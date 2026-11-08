@@ -489,8 +489,19 @@ export function lzCameras(heightAt, anchors = []) {
   return {
     overview: { pos: [25, Math.max(pad, heightAt(25, 420)) + 320, 420], look: [0, pad, -40], fov: 55 },
     eye: { pos: [ex, heightAt(ex, ez) + 1.7, ez], look: [tgt.p[0], heightAt(ex, ez) + 1.0, tgt.p[2]], fov: 70 },
-    wide: { pos: [0, Math.max(pad, heightAt(0, 230)) + 25, 230], look: [0, pad + 15, -600], fov: 75 },
+    wide: wideCam(),
   };
+  // wide: from the patch rim across the pad to the far ranges; pick the first rim point (starting at
+  // +Z south) with no arch / mesa within 90 m of the camera or of the first 150 m of the view line
+  function wideCam() {
+    const blockers = anchors.filter((a) => a.kind !== 'landing_pad');
+    for (let k = 0; k < 16; k++) {
+      const ang = Math.PI / 2 + (k * Math.PI) / 8, cx = Math.cos(ang) * 230, cz = Math.sin(ang) * 230;
+      const fx = -Math.cos(ang), fz = -Math.sin(ang);
+      const clear = blockers.every((b) => { for (let s = 0; s <= 150; s += 15) if (Math.hypot(b.p[0] - (cx + fx * s), b.p[2] - (cz + fz * s)) < 90) return false; return true; });
+      if (clear || k === 15) return { pos: [cx, Math.max(pad, heightAt(cx, cz)) + 25, cz], look: [-Math.cos(ang) * 600, pad + 15, -Math.sin(ang) * 600], fov: 75 };
+    }
+  }
 }
 const quatM = (q, s, p) => { const [x, y, z, w] = q; return [(1 - 2 * (y * y + z * z)) * s, 2 * (x * y - z * w) * s, 2 * (x * z + y * w) * s, p[0], 2 * (x * y + z * w) * s, (1 - 2 * (x * x + z * z)) * s, 2 * (y * z - x * w) * s, p[1], 2 * (x * z - y * w) * s, 2 * (y * z + x * w) * s, (1 - 2 * (x * x + y * y)) * s, p[2]]; };
 
