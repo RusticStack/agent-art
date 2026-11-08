@@ -359,15 +359,17 @@ export const TOOLS = [
   },
   {
     name: 'art_fp',
-    description: 'First-person viewmodel (fp v2): rigged 2D arms (bones, hands, fingers) per handling class + separate gun / magazine / attachment / item sweeps the game composes at runtime. kit {guns?, mags?, attachments?, items?} = editable art_model kit; sweep {out, guns?, mags?, attachments?, items?, step?} = yaw x pitch sheets (<=1024 px) + anchors -> fp_guns/fp_mags/fp_attach; batch {out, skins?:[mec|severance], classes?, clips?, variants?} = arms back/front strips + sockets -> fp; composite {out, class, clip, frame, gun?, attachments?:{optic,muzzle,underbarrel}, yaw_offset?, pitch_offset?} = the frame as the game draws it; check {out, classes?}; paint {action:export|import, sweep}. art_help {topic:"fp"}.',
+    description: 'First-person viewmodel (fp v2): rigged 2D arms (bones, hands, fingers) per handling class + separate gun / magazine / attachment / item sweeps the game composes at runtime. kit {guns?, mags?, attachments?, items?} = editable art_model kit; sweep {out, guns?, mags?, attachments?, items?, step?} = yaw x pitch sheets (<=1024 px) + anchors -> fp_guns/fp_mags/fp_attach; batch {out, skins?:[mec|severance], classes?, clips?, variants?} = arms back/front strips + sockets -> fp; composite {out, class, clip, frame, gun?, attachments?:{optic,muzzle,underbarrel}, yaw_offset?, pitch_offset?} = the frame as the game draws it; check {out, classes?}; paint {action:export|import, sweep}. Hand-drawn, no 3D: template {kind:gun|mag|attachment|item|arm, name, class?, view?:hip|ads|reload|side|rear|top (or yaw, pitch, roll), part?:upper|fore|hand, pose?, side?} = canvas with guides; anchors {canvas, set?, remove?, suggest?, accept?} (+ checks); sweep2d {out, sources?}; trace {skin, name, parts?, poses?, views?} = 3D arms -> editable 2D skin. Batch takes 2D gun / skin names. art_help {topic:"fp"}.',
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['kit', 'sweep', 'batch', 'composite', 'check', 'paint'] }, out: { type: 'string' },
+        action: { type: 'string', enum: ['kit', 'sweep', 'batch', 'composite', 'check', 'paint', 'template', 'anchors', 'sweep2d', 'trace'] }, out: { type: 'string' },
         guns: { type: ['array', 'object', 'boolean'] }, mags: { type: ['array', 'boolean'] }, attachments: { type: ['array', 'object', 'boolean'] }, items: { type: ['array', 'boolean'] },
         skins: { type: 'array', items: { type: 'string' } }, classes: { type: 'array', items: { type: 'string' } }, clips: { type: 'array', items: { type: 'string' } }, variants: { type: 'boolean' }, step: { type: 'number' },
         class: { type: 'string' }, clip: { type: 'string' }, frame: { type: 'integer' }, gun: { type: 'string' }, mag: { type: 'string' }, skin: { type: 'string' }, yaw_offset: { type: 'number' }, pitch_offset: { type: 'number' }, canvas: { type: 'string' },
         sweep: { type: 'string' }, overwrite: { type: 'boolean' },
+        kind: { type: 'string' }, name: { type: 'string' }, view: { type: 'string' }, yaw: { type: 'number' }, pitch: { type: 'number' }, part: { type: 'string' }, pose: { type: 'string' }, slot: { type: 'string' }, state: { type: 'string' },
+        set: { type: 'object' }, remove: { type: 'array', items: { type: 'string' } }, suggest: { type: 'boolean' }, accept: { type: 'number' }, sources: { type: 'array', items: { type: 'string' } },
       },
       required: ['action'],
     },

@@ -38,6 +38,25 @@
 - Arms: an eye-space skeleton with finger chains and two-bone IK onto the drawn anchors. Bones are part sprites per view bucket with RotSprite rotation. Arm pixels behind a prop go to the back layer.
 - `art_model` keeps an `fp` key on models (kit metadata). Help topic `fp`.
 
+### Hand-drawn first person (`art_fp` 2D sources)
+
+- The fp v2 contract from pure 2D art; `fpv2.ts`, `composite` and `check` are unchanged.
+- `template`: blank key canvases for guns, magazines, attachments and items (named views hip, ads, reload, side, rear, top and others, or yaw / pitch / roll), with a guides layer showing the class anchors in that view. Arm part canvases (upper arm and forearm per view bucket, hand per pose with back / front layers) with joint / wrist / grip guides.
+- `anchors`: place, move and remove anchors in the canvas meta; suggestions from the silhouette with a confidence; warnings for anchors off the opaque pixels or inconsistent between keys.
+- `sweep2d`: a few key drawings -> the full yaw × pitch sweep in the same files and manifests as `sweep`. Nearest key, card-plane perspective warp plus a correction field through the anchors, nearest sampling from a Scale2x upscale and re-outlining: source palette only, hard alpha, deterministic; anchors take the same warp and are exact at the keys. Painted cells (`paint` import) are kept as override canvases.
+- 2D arms skins: `batch {skins:[...]}` resolves a skin to its drawings, driven by the same `classClips` / `solveClip`; the hand pose drawing is picked per frame from the finger preset. Locks carry per-hand `pose`, `vis` and `clamped` for 2D skins; `check` warns on hidden hands and clamped reach. `setDeformer(skin, fn)` is the seam for a mesh deformer.
+- `trace`: a 3D arms skin exported as an editable 2D skin.
+- Mixed sources: 2D gun + 3D arms, 3D gun + 2D arms, all 2D. The all-2D path builds no kit 3D model; hand-drawn guns take their prior anchors from the class table (`classSockets`, `CLASS_MAG`; `KIT_BUILDS` counts kit builds).
+- Hands against the gun, for any set with a 2D skin or gun:
+  - Hand drawings have `back` / `front` / `trigger` layers.
+  - Keys carry paintable contact zones (`mask_grip`, `mask_guard`, `mask_fore`, `mask_pinch`; automatic when empty) warped with the sweep, and an optional `height` layer for per-pixel depth (automatic from the distance to the outline).
+  - Front finger pixels over a prop outside its zones go behind it; the trigger finger shows only in the guard opening.
+  - Batch nudges hidden hands and hands that hide the magazine (fallback poses, half-pixel offsets inside the tolerance).
+  - Locks carry `contact` and `mag_visible`. `check` fails on finger pixels outside the zones or a magazine in hand under 50 % visible, and reports `contact_checks`, `worst.finger_out_px` and `worst.mag_visible_min`.
+- New hand pose `pinch` (charging handle), falling back to `mag_pinch`.
+- `fpclips` hands carry the finger preset name (`pose`), additive. #16's 3D outputs are byte-identical (tested).
+- Demos in `docs/fp2d/` (`scripts/fp2d-demos.js`), drawn with Agent Art's own drawing ops (`scripts/fp2d-art.js`).
+
 ### Planets and space (`art_planet`)
 
 - New tool `art_planet`: `planet` (presets ice, toxic, bloom, lava, desert, gas, barren; biome rules, fbm / ridged / billow noise with domain warp, continents, craters, canyons, emissive seams, night lights, clouds, rings, atmosphere) writes equirect and cube-face maps (albedo, height, height16, normal, roughness, emissive, night, clouds), a cube-sphere `.glb` with LODs, a cloud shell, an atmosphere shell with shader parameters and a ring annulus, quadtree tiles with a `.tiles.json` index, an octahedral impostor and a disc sprite. All textures are pixel-art palette ramps with ordered dither and at most 1024 px.
