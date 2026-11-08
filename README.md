@@ -152,7 +152,7 @@ Author motion once per skeleton and render it on every character. A skeleton is 
 - **Runtime weapon layers:** the game draws the gun, so one character export works with every gun of its handling class (pistol, smg, rifle, lmg, sniper, launcher).
   - `batch {weapon: "runtime"}` writes the body strip without the gun and the `__front` strip, which holds what is drawn over the gun. Each anim gets `class` and a per-frame `weapon` socket: `{x, y, rot, pitch, order, hidden?}` in the set's frame pixels. `pad`, `frame` and `anchor` are unchanged.
   - `weapon {name, class, skin}` makes a standalone gun asset with its grips at the class geometry. Use `from_skin` to copy a character's gun instead. `conform` checks the grips against the class geometry.
-  - `weapon_sheet` writes `weapons_world/<name>.png` with rows for the five views and columns for pitch, plus one overlay sheet per attachment. Each sheet is at most 1024 px. It merges `manifest/weapons_world.json`.
+  - `weapon_sheet` writes `weapons_world/<name>.png` with rows for the five views and columns for pitch, without the magazine. The magazine gets its own overlay, `<name>_mag.png`, which the engine leaves out on `mag:false` frames such as a reload. There is also one overlay sheet per attachment. Each sheet is at most 1024 px. It merges `manifest/weapons_world.json`.
   - `composite` shows the baked frame next to the runtime frame.
   - `weapon_check` verifies that the hands stay on the grips of every gun in the class.
   - The class table, grip geometry (in body units), carry positions and `conform` live in `src/handling.js`. They are shared with other pipelines, such as first-person viewmodels.

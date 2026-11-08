@@ -150,6 +150,11 @@ test('weapon assets: conform against the class geometry (fix), world sheet <= 10
   const ov = decodePNG(fs.readFileSync(path.join(out, man.attach.scope)));
   assert.deepEqual([ov.width, ov.height], [png.width, png.height]);
   assert.ok(count(ov.data, '#c040c0') > 0 && count(png.data, '#c040c0') === 0);
+  // the magazine: its own overlay sheet (same grid), not in the gun cells (engine hides it on mag:false)
+  assert.equal(man.mag, 'weapons_world/ar_mag.png');
+  const mg = decodePNG(fs.readFileSync(path.join(out, man.mag)));
+  assert.deepEqual([mg.width, mg.height], [png.width, png.height]);
+  assert.ok(count(mg.data, '#c8a040') > 0 && count(png.data, '#c8a040') === 0, 'magazine only on the mag sheet');
   // a big sniper still fits in 1024 px (fewer pitch steps when needed)
   const e2 = new Engine({ home: tmp() });
   e2.run('anim_skeleton', { name: 'big', template: 'humanoid_hd', frame: [256, 384], weapon: { class: 'sniper' } });

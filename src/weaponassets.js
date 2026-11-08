@@ -148,8 +148,11 @@ export function renderWeaponCells(asset, rigDef, doc, { views = SHEET_VIEWS, pit
   const g = asset.points.grip_main.at, pv = partIn(rig, 'weapon', 'side').pivot;
   const cache = new Map();
   const atParts = new Set(Object.values(asset.attachments).map((a) => a.part));
-  const hideAll = (keep) => rig.order.filter((n) => n !== 'weapon' && n !== 'mag' && !keep.includes(n) && atParts.has(n));
+  const hasMag = !!rig.parts.mag;
+  const hideAll = (keep) => rig.order.filter((n) => n !== 'weapon' && !keep.includes(n) && (atParts.has(n) || n === 'mag'));
+  // base: the gun without its magazine (+ the attach list); mag: the magazine alone (same grid)
   const sets = { base: { hide: hideAll(attach.map((n) => asset.attachments[n].part)) } };
+  if (hasMag) sets.mag = { only: ['mag'] };
   for (const n of layers || []) sets[n] = { only: [asset.attachments[n].part] };
   const raw = {}, pts = [];
   let ub = null;
@@ -223,6 +226,14 @@ export function socketOf(rig, solved, trace, { pad = [0, 0, 0, 0], pitch = DEFAU
   return s;
 }
 
+/** Cells of the same grid drawn over each other (first = bottom). */
+export function mergeCells(list) {
+  if (list.length === 1) return list[0];
+  const out = new Uint8ClampedArray(list[0].length);
+  for (const c of list) for (let i = 0; i < c.length; i += 4) if (c[i + 3]) out.set(c.subarray(i, i + 4), i);
+  return out;
+}
+
 /** Engine-identical compositing of one frame: body, gun cell rotated about its grip onto the socket, __front. */
 export function compositeFrame(body, front, cell, [fw, fh], grip, sock, [FW, FH]) {
   const out = new Uint8ClampedArray(FW * FH * 4);
@@ -238,6 +249,11 @@ export function compositeFrame(body, front, cell, [fw, fh], grip, sock, [FW, FH]
       const o = (v * fw + u) * 4;
       if (cell[o + 3]) gun.set(cell.subarray(o, o + 4), (y * FW + x) * 4);
     }
+  }
+  // the magazine overlay goes over the gun cell unless the socket says mag:false (engine rule)
+  if (Array.isArray(cell) || cell?.base) {
+    const layers = Array.isArray(cell) ? cell : [cell.base, ...(sock.mag === false ? [] : [cell.mag])];
+    return compositeFrame(body, front, mergeCells(layers.filter(Boolean)), [fw, fh], grip, sock, [FW, FH]);
   }
   const order = sock.order || 'between';
   if (order === 'behind') { over(gun); over(body); over(front); }

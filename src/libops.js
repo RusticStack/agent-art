@@ -572,13 +572,16 @@ Object.assign(LIB_OPS, {
     fs.writeFileSync(path.join(out, file), encodePNG(base.W, base.H, base.data));
     const attach = {};
     for (const n of atts) { const s = sheetImage(C.cells[n], C.frame); attach[n] = `weapons_world/${w.name}_att_${n}.png`; fs.writeFileSync(path.join(out, attach[n]), encodePNG(s.W, s.H, s.data)); }
-    const entry = { class: w.handling, views, pitch, file, frame: C.frame, grip: C.pts.flat().map(() => C.grip), muzzle: C.pts.flat().map((c) => c.muzzle), ...(atts.length ? { attach } : {}) };
+    // the magazine: its own overlay (same grid), drawn by the engine unless the socket says mag:false
+    let mag = null;
+    if (C.cells.mag) { const s = sheetImage(C.cells.mag, C.frame); mag = `weapons_world/${w.name}_mag.png`; fs.writeFileSync(path.join(out, mag), encodePNG(s.W, s.H, s.data)); }
+    const entry = { class: w.handling, views, pitch, file, frame: C.frame, grip: C.pts.flat().map(() => C.grip), muzzle: C.pts.flat().map((c) => c.muzzle), ...(mag ? { mag } : {}), ...(atts.length ? { attach } : {}) };
     const mf = path.isAbsolute(a.manifest ?? '') ? a.manifest : path.join(out, a.manifest ?? 'manifest/weapons_world.json');
     const man = fs.existsSync(mf) ? readJSON(mf) : {};
     man.weapons_world = { ...(man.weapons_world || {}), [w.name]: entry };
     writeJSON(mf, man);
     const note = pitch !== DEFAULT_PITCH && !a.pitch ? `the default pitch steps would pass ${max} px: this sheet uses pitch ${JSON.stringify(pitch)}; export the characters with the same anim_batch pitch so socket rot matches the cells` : undefined;
-    return { weapon: w.name, file: path.join(out, file), size: [base.W, base.H], frame: C.frame, pitch, ...(note ? { note } : {}), cells: views.length * pitch.length, attach: Object.keys(attach), manifest: mf, ...this.pathNote(a.out, out) };
+    return { weapon: w.name, file: path.join(out, file), size: [base.W, base.H], frame: C.frame, pitch, ...(note ? { note } : {}), cells: views.length * pitch.length, ...(mag ? { mag: path.join(out, mag) } : {}), attach: Object.keys(attach), manifest: mf, ...this.pathNote(a.out, out) };
   },
 
   /**
@@ -600,7 +603,7 @@ Object.assign(LIB_OPS, {
       const f = R.frames[i];
       if (!f) continue;
       const col = pitchCol(pitch, f.sock.pitch);
-      const comp = compositeFrame(f.body, f.front, C.cells.base[0][col], C.frame, C.grip, f.sock, [FW, FH]);
+      const comp = compositeFrame(f.body, f.front, { base: C.cells.base[0][col], mag: C.cells.mag?.[0][col] }, C.frame, C.grip, f.sock, [FW, FH]);
       const err = supportError(f, C, 0, pitch);
       errors.push(err === null ? null : Math.round(err * 10) / 10);
       items.push({ img: { width: FW, height: FH, data: f.full }, label: `baked ${i}` }, { img: { width: FW, height: FH, data: comp }, label: `runtime ${i}${err !== null ? ` ${err.toFixed(1)}px` : ''}` });

@@ -42,7 +42,7 @@
 - New actions:
   - `weapon`: a standalone gun asset (rig plus `library/weapons/<name>.json`) with its grips at the class geometry, or copied from a skin's gun.
   - `conform`: checks the gun against its class geometry; `fix` moves the points onto it.
-  - `weapon_sheet`: a 5-view × pitch world sheet plus attachment overlays, each at most 1024 px, merged into `manifest/weapons_world.json`.
+  - `weapon_sheet`: a 5-view × pitch world sheet without the magazine, a magazine overlay (`<name>_mag.png`, manifest key `mag`; left out on `mag:false` frames) and attachment overlays. Each sheet is at most 1024 px, and the result is merged into `manifest/weapons_world.json`.
   - `composite`: the baked frame next to the engine-identical runtime frame.
   - `weapon_check`: hands on the grips across every gun of a class.
 - `batch {weapon: "runtime"}`: exports gun-free body and `__front` strips with per-frame sockets `{x, y, rot, pitch, order, hidden?}`. The sockets are mirrored for mirror views, and the auto `pad`, `frame` and `anchor` are kept.
