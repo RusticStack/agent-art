@@ -153,6 +153,9 @@ test('batch: skins x loadouts x clips x views -> strips + manifest (auto padding
   e.run('anim_batch', { skins: ['sev'], clips: ['idle'], views: ['side'], out });
   const man2 = JSON.parse(fs.readFileSync(path.join(out, 'manifest', 'characters.json'), 'utf8'));
   assert.ok(man2.sprites.mec_heavy && man2.sprites.sev.anims.idle_side);
+  // a bad pad or view is refused before anything is rendered (a negative pad sheared the strips)
+  for (const pad of [-4, 2.5, [1, 2], 'big']) assert.throws(() => e.run('anim_batch', { skins: ['sev'], clips: ['idle'], views: ['side'], out, pad }), /pad must be/);
+  assert.throws(() => e.run('anim_batch', { skins: ['sev'], clips: ['idle'], views: ['../x'], out }), /unknown view/);
 });
 
 test('glTF skin export: one joint per part, skinned quads, clips as animations with events', () => {

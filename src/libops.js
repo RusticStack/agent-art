@@ -276,13 +276,15 @@ export const LIB_OPS = {
       const clips = a.clips === undefined || a.clips === 'all' ? allClips : [].concat(a.clips);
       for (const c of clips) if (!allClips.includes(c)) throw new Error(`batch: skeleton "${sk.name}" has no clip "${c}"`);
       const views = a.views === undefined || a.views === 'drawn' ? rig.views : a.views === 'all' ? [...rig.views, ...Object.keys(rig.mirror)] : [].concat(a.views);
+      for (const v of views) if (!rig.views.includes(v) && !rig.mirror[v]) throw new Error(`batch: unknown view "${v}" (views: ${[...rig.views, ...Object.keys(rig.mirror)].join(', ')})`);
       const loadouts = a.loadouts === 'all' ? Object.keys(skin.loadouts || {}) : a.loadouts ? [].concat(a.loadouts) : [null];
       for (const lo of loadouts) {
         const set = `${sname}${lo ? '_' + lo : ''}`;
         const lopt = loadoutOpts(skin, lo);
         // render everything with a generous pad, then crop every frame to the set's padding
         const auto = a.pad === undefined || a.pad === 'auto';
-        const fixed = auto ? null : typeof a.pad === 'number' ? [a.pad, a.pad, a.pad, a.pad] : Array.isArray(a.pad) ? a.pad.map(Number) : [0, 0, 0, 0];
+        const fixed = auto ? null : typeof a.pad === 'number' ? [a.pad, a.pad, a.pad, a.pad] : Array.isArray(a.pad) ? a.pad.map(Number) : null;
+        if (!auto && !(fixed && fixed.length === 4 && fixed.every((n) => Number.isInteger(n) && n >= 0))) throw new Error('batch: pad must be "auto", a whole number of pixels >= 0, or [left, top, right, bottom]');
         const G = auto ? [Math.ceil(W / 2), Math.ceil(H / 4), Math.ceil(W / 2), Math.ceil(H / 8)] : fixed;
         const GW = W + G[0] + G[2], GH = H + G[1] + G[3];
         const rendered = [];
