@@ -23,6 +23,20 @@
 - Exports of models without a skeleton and skin are byte-identical.
 - The tool-list size limit rises from 32650 to 33000 (32847 measured).
 
+### 2D skinning, deform shapes and constraints (`art_rig`)
+
+- New `art_rig` actions, the 2D counterpart of `art_model` skinning:
+  - `skin`: binds a part's cell (`part`, with `absorb` for the joints it replaces) or a whole drawn canvas (`canvas`, `bones:"all"`) to the bones as a lattice mesh clipped to the opaque pixels (cut where pixels do not connect). Weights: `heat` (default), `distance` or `rigid`, at most 4 influences summing to 1, `paint` regions, `weight_canvas`, `smooth`; per-view meshes and weights (`views`) for 8-direction rigs.
+  - `weights`: weights check (unweighted, pruned, non-normalised, unused bones) plus an image: the drawing with its lattice and a bone's heat map (or the dominant bone per pixel).
+  - `shapes`: deform shapes (sculpt move / scale / rotate / inflate in a region, or a variant drawing fitted to the silhouette that swaps in at >= 0.5) and correctives driven by a joint angle (`driver:{bone, from, to}`). Keys, poses and `preview` take `shapes:{name: w}`.
+  - `chain`: cable / strap / sling helper. It adds bone-only segments along a drawn strip, heat-skins it and returns the CCD end.
+  - `export`: `<name>.skin2d.json` (bones, rigid part cells, meshes with vertices / uvs / triangles / joints / weights / shapes, baked clips) + textures + strips; with `layers:true`, one strip per drawn part / mesh.
+- Pixel-art-safe deformation: inverse-mapped nearest sampling in a Scale2x 8x copy with a 3x3 majority, exact copies for triangles that only move (the rest pose is the drawing), pinhole / stray cleanup and outline repair. Only the drawing's colours; deterministic.
+- Part option `bone:true` (a joint without a drawing). Rig options `limits:{part:[min,max]}` and `constrain:[{type:"aim"|"look_at"|"copy_rotation", ...}]` with named targets from pose / key `targets`. IK ends take `chain:n` for damped CCD over n bones.
+- `art_anim` clips, `render` and `batch` play on skinned rigs unchanged. Rigs without `skin`, `constrain`, `limits` or `chain:n` render byte-identical to before.
+- Web UI: the rig viewer's "Skin mesh + weights" mode (`/api/rig/<name>/weights.png`). Help topic `skin2d`; demos and the runtime format in `docs/skin2d/`.
+- The tool-list size limit in `test/quality.test.js` rises from 32650 to 33100 (33038 measured).
+
 ### Animation library (`art_anim`) and 2D rotated-sprite tooling
 
 - New tool `art_anim`:

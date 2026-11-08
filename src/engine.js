@@ -14,6 +14,7 @@ import { MODEL_OPS } from './modelops.js';
 import { FP_OPS } from './fpops.js';
 import { FP2D_OPS } from './fp2dops.js';
 import { LIB_OPS } from './libops.js';
+import { SKIN2D_OPS } from './skin2dops.js';
 import { AUDIO_OPS } from './audio/ops.js';
 import { PLANET_OPS } from './space/ops.js';
 import { Activity } from './activity.js';
@@ -996,5 +997,5 @@ const OPS = {
   },
 };
 
-Object.assign(OPS, RIG_OPS, MODEL_OPS, AUDIO_OPS, GRAPH_OPS, REVIEW_OPS, LIB_OPS, PLANET_OPS, FP_OPS, FP2D_OPS, CLEANUP_OPS);
+Object.assign(OPS, RIG_OPS, MODEL_OPS, AUDIO_OPS, GRAPH_OPS, REVIEW_OPS, LIB_OPS, PLANET_OPS, FP_OPS, FP2D_OPS, CLEANUP_OPS, SKIN2D_OPS);
 export const OP_NAMES = Object.keys(OPS);

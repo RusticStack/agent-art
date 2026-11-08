@@ -8,6 +8,8 @@ import { weaponArt, weaponMetrics, CARRY_STATES, ATTACHMENT_TYPES, WEAPON_CLASSE
 import { normalizeRig, normalizeSecondary, cellOf, renderPose, animatePoses, resolvePose, lowestRow, shiftFrame, poseAnchors, plantFeet, simulateSecondary, ikChain, solvePose, partIn, poseOf, stableRotations, eventFrames } from './rig.js';
 import { depthPass, findFlicker, layerIssues, orderOf } from './depth.js';
 import { consistencyReport, deriveCells } from './consistency.js';
+import { ccdChain } from './chain2d.js';
+import { skinSummary } from './skin2dops.js';
 
 const partsName = (name) => `${name}_parts`;
 
@@ -16,6 +18,8 @@ export function getRig(engine, name) {
   const d = engine.docs.get(partsName(name));
   if (!d || !d.meta?.rig) throw new Error(`No rig "${name}" (art_rig create first)`);
   const rig = normalizeRig(d.meta.rig);
+  // 2D skins read other canvases (a whole drawn sprite, weight canvases, shape drawings)
+  if (rig.skin) rig.skinDocs = (n) => engine.docs.get(n);
   // weapon handling collides with the drawn silhouettes (cell art), not the cell boxes
   if (rig.weapon) weaponArt(rig, artComposite(d), d.width, cellOf);
   return { d, rig, def: d.meta.rig };
@@ -63,14 +67,14 @@ function relayout(oldRig, newRig, d) {
 }
 
 /** Rig-level options stored in the definition (absent = old behaviour). */
-const RIG_OPTS = ['sampling', 'secondary', 'feet', 'scale_children', 'weapon', 'variant_sets', 'depth'];
+const RIG_OPTS = ['sampling', 'secondary', 'feet', 'scale_children', 'weapon', 'variant_sets', 'depth', 'skin', 'constrain', 'limits'];
 
 /** Validate pose data: parts, variants, per-view overrides and IK specs. */
 function checkPose(rig, P, where = 'pose') {
   const ok = (tg) => (Array.isArray(tg) ? tg.length === 2 && tg.every((n) => Number.isFinite(Number(n))) : tg?.mix ? ok(tg.mix[0]) && ok(tg.mix[1]) : tg?.weapon !== undefined ? !!rig.weapon && (POINT_NAMES.includes(tg.weapon) || !!rig.weapon.sockets[tg.weapon]) : !!(tg?.part && rig.parts[tg.part]));
   const checkParts = (o, w) => {
     for (const [k, v] of Object.entries(o || {})) {
-      if (k === 'ik' || k === 'views') continue;
+      if (k === 'ik' || k === 'views' || k === 'shapes' || k === 'targets') continue;
       if (k === 'carry' && rig.weapon && w === where) {
         // a pose may set the carry state (a state name or {state, ...overrides})
         const st = typeof v === 'string' ? v : v && typeof v === 'object' ? v.state ?? rig.weapon.carry : undefined;
@@ -82,7 +86,7 @@ function checkPose(rig, P, where = 'pose') {
     }
     for (const [end, e] of Object.entries(o?.ik || {})) {
       if (!e) continue;
-      ikChain(rig, end);
+      if (Number(e.chain) > 2) ccdChain(rig, end, Math.round(Number(e.chain))); else ikChain(rig, end);
       if (!ok(e.target)) throw new Error(`${w}: ik "${end}" needs target:[x,y] (frame px), {part:<existing part>, at?:[dx,dy]} or, with a rig weapon, {weapon:<${POINT_NAMES.join('|')}|socket>, at?:[dx,dy]}`);
     }
   };
@@ -191,10 +195,11 @@ export const RIG_OPS = {
     const { rig, def } = getRig(this, a.name);
     return {
       rig: a.name, parts_canvas: partsName(a.name), frame: rig.frame, root: rig.root, views: rig.views, mirror: rig.mirror, pairs: rig.pairs,
-      parts: Object.fromEntries(rig.order.map((n) => { const p = rig.parts[n]; return [n, { w: p.w, h: p.h, pivot: p.pivot, parent: p.parent, at: p.at, z: p.z, variants: p.variants.slice(1), views: p.views }]; })),
+      parts: Object.fromEntries(rig.order.map((n) => { const p = rig.parts[n]; return [n, { w: p.w, h: p.h, pivot: p.pivot, parent: p.parent, at: p.at, z: p.z, variants: p.variants.slice(1), views: p.views, ...(p.bone ? { bone: true } : {}) }]; })),
       cells: cellsReport(rig), poses: rig.poses, presets: def.presets || {},
       sampling: rig.sampling, scale_children: rig.scaleChildren, secondary: rig.secondary, feet: rig.feet,
       ...(rig.weapon ? { weapon: weaponSummary(rig) } : {}), ...(rig.variantSets ? { variant_sets: rig.variantSets } : {}),
+      ...(rig.skin ? { skin: skinSummary(rig) } : {}), ...(rig.constrain ? { constrain: def.constrain || [], limits: def.limits || {} } : {}),
       note: 'complete rig for game engines: save this JSON as <name>_rig.json',
     };
   },
@@ -230,6 +235,7 @@ export const RIG_OPS = {
     const { d, rig } = getRig(this, a.name);
     let pose = a.pose !== undefined ? resolvePose(rig, { pose: a.pose, ...(a.carry !== undefined ? { carry: a.carry } : {}) }) : a.parts || {};
     if (a.carry !== undefined && a.pose === undefined) pose = { ...pose, carry: a.carry };
+    if (a.shapes || a.targets) pose = { ...pose, ...(a.shapes ? { shapes: { ...(pose.shapes || {}), ...a.shapes } } : {}), ...(a.targets ? { targets: { ...(pose.targets || {}), ...a.targets } } : {}) };
     const views = a.view ? [a.view] : [...rig.views, ...Object.keys(rig.mirror)];
     const scale = a.scale ?? Math.max(1, Math.min(12, Math.floor(160 / Math.max(...rig.frame))));
     const cache = new Map();
