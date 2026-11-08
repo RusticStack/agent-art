@@ -3,6 +3,9 @@
 // An original 6-world system strip, a ringed bloom world from orbit (atmosphere, clouds, rings) with
 // its maps, a desert landing zone (rocks, mesas, arch), a nebula skybox and an asteroid belt.
 // Writes demo-stats.json (triangles, texture sizes, generation times) next to the images.
+// landing_before_*.png are the previous terrain (main 7bfa3f8, the merged #9) rendered through
+// landing_cams.json (same x / z framing, heights re-based on that version's ground); when present,
+// they are combined with the new renders into landing_before_after.png.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -47,19 +50,34 @@ save('orbit_cube_faces.png', cube);
 stats.planet = { name: PN, lods: p.lods, tiles: p.tiles, textures: p.textures, ms: p.ms, ...texStats(pd), meta_timings: JSON.parse(fs.readFileSync(path.join(pd, `${PN}.planet.json`), 'utf8')).timings_ms };
 console.log('planet', JSON.stringify(p.lods), `${p.ms} ms`);
 
-// 3. landing zone on the desert world of the system
+// 3. landing zone on the desert world of the system: overview, eye height (1.7 m), wide with horizon
 const desertBody = sys.bodies.find((b) => b.preset === 'desert');
 e.run('planet_create', { name: 'dulpha', preset: 'desert', seed: desertBody.seed, hue: desertBody.hue, equirect: 512, face: 128, tiles: false });
-const t = e.run('planet_terrain', { planet: 'dulpha', name: 'dulpha_lz', lat: 14, lon: 32, size: 512, grid: 128, chunks: 4, mesas: 2, arches: 1, preview_size: 512 });
-save('landing_zone.png', packImages([{ img: png(path.join(t.dir, 'dulpha_lz_preview.png')), label: 'OVERVIEW 512 M' }, { img: png(path.join(t.dir, 'dulpha_lz_closeup.png')), label: 'LANDING PAD CLOSE-UP' }], { columns: 2, checker: false }));
+const t = e.run('planet_terrain', { planet: 'dulpha', name: 'dulpha_lz', lat: 14, lon: 32, size: 512, mesas: 2, arches: 1, preview_size: 512 });
 const tm = JSON.parse(fs.readFileSync(path.join(t.dir, 'dulpha_lz.terrain.json'), 'utf8'));
+const views = ['overview', 'eye', 'wide'];
+for (const k of views) save(`landing_${k}.png`, png(path.join(t.dir, `dulpha_lz_${k}.png`)));
+save('landing_zone.png', packImages(views.map((k) => ({ img: png(path.join(t.dir, `dulpha_lz_${k}.png`)), label: k === 'eye' ? 'EYE HEIGHT 1.7 M' : k.toUpperCase() })), { columns: 3, checker: false }));
+// cameras + ground heights under them, so a re-render of another version keeps the same framing above its own ground
+const hf = JSON.parse(fs.readFileSync(path.join(t.dir, 'dulpha_lz.heightfield.json'), 'utf8'));
+const gAt = (x, z) => { const i = Math.round((x + hf.size_m / 2) / hf.spacing_m), j = Math.round((z + hf.size_m / 2) / hf.spacing_m); return hf.heights[Math.max(0, Math.min(hf.grid, j)) * (hf.grid + 1) + Math.max(0, Math.min(hf.grid, i))]; };
+fs.writeFileSync(path.join(OUT, 'landing_cams.json'), JSON.stringify(Object.fromEntries(Object.entries(tm.cameras).map(([k, c]) => [k, { ...c, ground: gAt(c.pos[0], c.pos[2]), pad: gAt(0, 0) }])), null, 1));
+// before / after: landing_before_*.png are the previous terrain (main 7bfa3f8) through the same cameras
+if (views.every((k) => fs.existsSync(path.join(OUT, `landing_before_${k}.png`)))) {
+  const items = [];
+  for (const k of views) items.push({ img: png(path.join(OUT, `landing_before_${k}.png`)), label: `BEFORE ${k.toUpperCase()}` });
+  for (const k of views) items.push({ img: png(path.join(OUT, `landing_${k}.png`)), label: `AFTER ${k.toUpperCase()}` });
+  save('landing_before_after.png', packImages(items, { columns: 3, checker: false }));
+}
+const crop = (im, x0, y0, w, h) => { const d = new Uint8ClampedArray(w * h * 4); for (let y = 0; y < h; y++) d.set(im.data.subarray(((y0 + y) * im.width + x0) * 4, ((y0 + y) * im.width + x0 + w) * 4), y * w * 4); return { width: w, height: h, data: d }; };
+const det = tm.detail_files[Math.floor(tm.detail_files.length / 2)];
 const lz = packImages([
-  { img: upscale(png(path.join(t.dir, 'dulpha_lz_splat.png')), 2), label: 'SPLAT (RGBA)' },
-  { img: upscale(png(path.join(t.dir, 'dulpha_lz_tileset.png')), 4), label: 'TILESET' },
-  { img: png(path.join(t.dir, 'chunks', 'chunk_1_1_albedo.png')), label: 'CHUNK ALBEDO' },
+  { img: upscale(png(path.join(t.dir, 'dulpha_lz_tileset.png')), 2), label: 'TILESET (4 VARIANTS + 2 EDGE TILES PER LAYER)' },
+  { img: (() => { const im = png(path.join(t.dir, 'dulpha_lz_splat.png')); for (let i = 3; i < im.data.length; i += 4) im.data[i] = 255; return upscale(im, 2); })(), label: 'SPLAT RGB = GROUND ROCK LOW (A = SCREE)' },
+  { img: upscale(crop(png(path.join(t.dir, det.albedo)), 384, 384, 192, 192), 2), label: 'DETAIL 32 PX/M (6 X 6 M)' },
 ], { columns: 3, checker: false });
 save('landing_zone_maps.png', lz);
-stats.terrain = { biome: t.biome, base_elevation_m: t.base_elevation_m, height_range_m: t.height_range_m, chunks: t.chunks, triangles_lod0: t.triangles_lod0, lod_triangles_per_chunk: t.lod_triangles_per_chunk, props: t.props, anchors: tm.anchors, chunk_texture_px: t.chunk_texture_px, ms: t.ms, ...texStats(t.dir), timings: tm.timings_ms };
+stats.terrain = { biome: t.biome, base_elevation_m: t.base_elevation_m, height_range_m: t.height_range_m, chunks: t.chunks, triangles_lod0: t.triangles_lod0, lod_triangles_per_chunk: t.lod_triangles_per_chunk, detail_patches: t.detail_patches, horizon_triangles: t.horizon_triangles, props: t.props, prop_stats: tm.stats.props, anchors: tm.anchors, fog: tm.fog, ms: t.ms, ...texStats(t.dir), timings: tm.timings_ms };
 console.log('terrain', JSON.stringify(t.props), `${t.ms} ms`);
 
 // 4. nebula skybox (all faces + preview + equirect)

@@ -48,7 +48,7 @@
     "hue": 10
    }
   ],
-  "ms": 702
+  "ms": 670
  },
  "planet": {
   "name": "phalo",
@@ -83,103 +83,141 @@
    "triangles_per_tile": 640
   },
   "textures": 47,
-  "ms": 5320,
+  "ms": 5100,
   "max_texture_px": 1024,
   "files": 178,
-  "bytes": 7095202,
+  "bytes": 7095201,
   "meta_timings": {
-   "equirect": 773,
-   "clouds_rings": 264,
-   "write_equirect": 625,
-   "cube_faces": 1321,
-   "lod_meshes": 129,
-   "glb": 560,
-   "impostor": 114,
-   "tiles": 1473,
-   "preview": 60,
-   "total": 5319
+   "equirect": 760,
+   "clouds_rings": 259,
+   "write_equirect": 629,
+   "cube_faces": 1326,
+   "lod_meshes": 102,
+   "glb": 522,
+   "impostor": 89,
+   "tiles": 1356,
+   "preview": 56,
+   "total": 5099
   }
  },
  "terrain": {
   "biome": "dunes",
   "base_elevation_m": 574.4975,
   "height_range_m": [
-   -9.9554,
-   32.4184
+   -52.1316,
+   73.2747
   ],
   "chunks": 16,
-  "triangles_lod0": 36864,
+  "triangles_lod0": 139264,
   "lod_triangles_per_chunk": [
+   8704,
    2304,
    640,
    192
   ],
+  "detail_patches": 9,
+  "horizon_triangles": 7680,
   "props": {
-   "instances": 230,
-   "triangles": 38166,
-   "rocks": "140/140",
-   "crystals": "0/0",
-   "grass": "90/90"
+   "instances": 1905,
+   "triangles": 58959,
+   "rocks": "260/260 (28960 tris)",
+   "debris": "1400/1400 (28000 tris)",
+   "spires": "5/5 (585 tris)",
+   "shrubs": "240/240 (1208 tris)",
+   "crystals": "0/0 (0 tris)"
+  },
+  "prop_stats": {
+   "rocks": {
+    "instances": 260,
+    "triangles": 28960
+   },
+   "debris": {
+    "instances": 1400,
+    "triangles": 28000
+   },
+   "spires": {
+    "instances": 5,
+    "triangles": 585
+   },
+   "shrubs": {
+    "instances": 240,
+    "triangles": 1208
+   },
+   "crystals": {
+    "instances": 0,
+    "triangles": 0
+   }
   },
   "anchors": [
    {
     "kind": "landing_pad",
     "p": [
      0,
-     -5.8647,
+     2.0936,
      0
     ],
-    "radius": 40.96,
-    "slope": 0.0214
+    "radius": 40,
+    "slope": 0.0058
    },
    {
     "kind": "mesa_top",
     "p": [
-     -179.2574,
-     13.0157,
-     51.4213
+     -182.458,
+     23.1547,
+     52.3394
     ],
-    "radius": 37.5232
+    "radius": 31.9093
    },
    {
     "kind": "mesa_top",
     "p": [
-     117.6966,
-     32.4184,
-     160.0706
+     118.3554,
+     35.1327,
+     160.9665
     ],
-    "radius": 49.4847
+    "radius": 41.8773
    },
    {
     "kind": "arch",
     "p": [
-     -58.1505,
-     23.7131,
-     132.5117
+     23.2205,
+     21.9336,
+     178.4238
     ],
-    "span": 50.3864,
-    "yaw": 245.4462
+    "span": 48.83,
+    "yaw": 17.3867
    }
   ],
-  "chunk_texture_px": 256,
-  "ms": 1003,
-  "textures": 19,
-  "max_texture_px": 512,
-  "files": 41,
-  "bytes": 2268191,
+  "fog": {
+   "color": "#dea06e",
+   "type": "exp2",
+   "density": 0.0004,
+   "near": 153.6,
+   "far": 5400,
+   "sky": {
+    "horizon": "#f0ad77",
+    "zenith": "#73563e"
+   },
+   "note": "three.js: scene.fog = new THREE.FogExp2(color, density) (or THREE.Fog(color, near, far)); sky gradient horizon -> zenith; fog hides the horizon ring edge"
+  },
+  "ms": 35198,
+  "textures": 33,
+  "max_texture_px": 1024,
+  "files": 65,
+  "bytes": 35437473,
   "timings": {
-   "heights_splat_chunks": 149,
-   "chunk_glbs": 643,
-   "splat_heightfield": 9,
-   "scatter": 49,
-   "preview": 153,
-   "total": 1003
+   "relief_erosion_ground": 11167,
+   "chunk_detail_horizon_glbs": 23029,
+   "maps": 121,
+   "scatter": 31,
+   "renders": 849,
+   "total": 35198
   }
  },
  "skybox": {
   "face_px": 512,
   "stars": 9437,
-  "ms": 3569,
+  "ms": 4118,
   "textures": 7,
   "max_texture_px": 1024,
   "files": 9,
@@ -239,14 +277,14 @@
   ],
   "field_triangles_lod0": 384000,
   "glb_bytes": 452096,
-  "ms": 364,
+  "ms": 296,
   "textures": 1,
   "max_texture_px": 32,
   "files": 5,
   "bytes": 1128728
  },
  "fx": {
-  "ms": 295,
+  "ms": 265,
   "textures": 5,
   "max_texture_px": 1024,
   "files": 6,
