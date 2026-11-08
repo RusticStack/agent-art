@@ -15,11 +15,11 @@ export const latLonDir = (lat, lon) => equirectDir(lon / 360 + 0.5, lat / 180 + 
 /** Local frame at a direction: up, east (+X), north (-Z). */
 export function localFrame(d) {
   const lat = Math.asin(d[1]), lon = Math.atan2(d[2], d[0]);
-  // d/dlon of equirectDir = (-sin lon, 0, cos lon); d/dlat = (-sin lat cos lon, cos lat, -sin lat sin lon)
-  let east = [-Math.sin(lon), 0, Math.cos(lon)];
+  // d/dlat = (-sin lat cos lon, cos lat, -sin lat sin lon). East = north x up, so (east, up, south)
+  // is right-handed and the patch places rigidly onto the planet mesh (d/dlon would mirror it: the
+  // equirectUv longitude runs clockwise seen from the north pole).
   const north = vnorm([-Math.sin(lat) * Math.cos(lon), Math.cos(lat), -Math.sin(lat) * Math.sin(lon)]);
-  if (Math.abs(d[1]) > 0.9999) east = [1, 0, 0];
-  return { up: d, east: vnorm(east), north };
+  return { up: d, east: vnorm(vcross(north, d)), north };
 }
 
 /** Terrain layers (splat RGBA = ground, rock, low, accent) per planet preset: tile kinds + ramps. */

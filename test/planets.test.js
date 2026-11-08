@@ -14,7 +14,7 @@ import { SKILLS } from '../src/skills.js';
 import { helpText } from '../src/docs.js';
 import { normPlanet, bakeEquirect, bakeFace, cubeSphere, facePatch, tileSkirt, heightAt, elevKm, dirToEquirect, equirectDir } from '../src/space/planet.js';
 import { cubeDir, dirToCube, cubePoint, vnorm } from '../src/space/noise.js';
-import { normTerrain, patchHeight, buildTerrain, splatWeights, latLonDir } from '../src/space/terrain.js';
+import { normTerrain, patchHeight, buildTerrain, splatWeights, latLonDir, localFrame } from '../src/space/terrain.js';
 import { normSky, bakeSkyFaces, bakeSkyEquirect, skyGas } from '../src/space/skybox.js';
 import { generateSystem } from '../src/space/ops.js';
 import { mulberry32 } from '../src/util.js';
@@ -226,6 +226,15 @@ test('terrain: patch heights come from the planet field at the sample point', ()
   // with detail on, the difference is bounded by the detail amplitude
   const t2 = normTerrain(P, { lat: 18, lon: -40, size: 512, grid: 64, chunks: 2, mesas: 0, cliffs: 0 }), H2 = patchHeight(P, t2);
   assert.ok(Math.abs(H2.at(120, 40) - H2.planet(120, 40)) <= t2.detail.amplitude * 1.4 + 1e-9);
+});
+
+test('terrain: the patch frame (+X east, +Y up, +Z south) is right-handed, so it places rigidly on the planet', () => {
+  for (const [lat, lon] of [[18, -40], [-60, 170], [89.9, 0], [0, 0]]) {
+    const F = localFrame(latLonDir(lat, lon)), s = F.north.map((v) => -v);
+    const c = [F.east[1] * F.up[2] - F.east[2] * F.up[1], F.east[2] * F.up[0] - F.east[0] * F.up[2], F.east[0] * F.up[1] - F.east[1] * F.up[0]];
+    assert.ok(Math.abs(c[0] * s[0] + c[1] * s[1] + c[2] * s[2] - 1) < 1e-9, `det [east, up, south] at ${lat}, ${lon}`);
+    assert.ok(Math.abs(F.east[0] * F.north[0] + F.east[1] * F.north[1] + F.east[2] * F.north[2]) < 1e-9, 'east _|_ north');
+  }
 });
 
 test('terrain: splat weights always sum to 255', () => {
