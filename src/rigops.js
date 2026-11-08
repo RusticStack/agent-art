@@ -5,11 +5,13 @@ import { encodePNG } from './png.js';
 import { packImages } from './sheet.js';
 import { rigTemplate, mergeTemplate, RIG_TEMPLATES, TEMPLATE_FRAME, hdWeaponConfig } from './rigtemplates.js';
 import { weaponArt, weaponMetrics, CARRY_STATES, ATTACHMENT_TYPES, WEAPON_CLASSES, POINT_NAMES } from './weapon.js';
-import { normalizeRig, normalizeSecondary, cellOf, renderPose, animatePoses, resolvePose, lowestRow, shiftFrame, poseAnchors, plantFeet, simulateSecondary, ikChain, solvePose, partIn } from './rig.js';
+import { normalizeRig, normalizeSecondary, cellOf, renderPose, animatePoses, resolvePose, lowestRow, shiftFrame, poseAnchors, plantFeet, simulateSecondary, ikChain, solvePose, partIn, poseOf, stableRotations, eventFrames } from './rig.js';
+import { depthPass, findFlicker, layerIssues, orderOf } from './depth.js';
+import { consistencyReport, deriveCells } from './consistency.js';
 
 const partsName = (name) => `${name}_parts`;
 
-function getRig(engine, name) {
+export function getRig(engine, name) {
   if (!name) throw new Error('rig "name" is required');
   const d = engine.docs.get(partsName(name));
   if (!d || !d.meta?.rig) throw new Error(`No rig "${name}" (art_rig create first)`);
@@ -23,6 +25,7 @@ function getRig(engine, name) {
 function cellGuides(rig, d) {
   const data = new Uint8ClampedArray(d.width * d.height * 4);
   for (const view of rig.views) for (const name of rig.order) for (const variant of rig.parts[name].variants) {
+    if (rig.parts[name].art) continue;
     const c = cellOf(rig, name, view, variant);
     const [px, py] = rig.parts[name].pivot;
     for (let y = c.y; y < c.y + c.h; y++) for (let x = c.x; x < c.x + c.w; x++) {
@@ -43,6 +46,7 @@ function relayout(oldRig, newRig, d) {
     if (l.name === 'cells') continue;
     const nd = new Uint8ClampedArray(W * H * 4);
     for (const view of newRig.views) for (const name of newRig.order) for (const variant of newRig.parts[name].variants) {
+      if (newRig.parts[name].art) continue;
       if (!oldRig.views.includes(view) || !oldRig.parts[name] || !oldRig.parts[name].variants.includes(variant)) continue;
       const a = cellOf(oldRig, name, view, variant), b = cellOf(newRig, name, view, variant);
       for (let y = 0; y < Math.min(a.h, b.h); y++) for (let x = 0; x < Math.min(a.w, b.w); x++) {
@@ -59,7 +63,7 @@ function relayout(oldRig, newRig, d) {
 }
 
 /** Rig-level options stored in the definition (absent = old behaviour). */
-const RIG_OPTS = ['sampling', 'secondary', 'feet', 'scale_children', 'weapon', 'variant_sets'];
+const RIG_OPTS = ['sampling', 'secondary', 'feet', 'scale_children', 'weapon', 'variant_sets', 'depth'];
 
 /** Validate pose data: parts, variants, per-view overrides and IK specs. */
 function checkPose(rig, P, where = 'pose') {
@@ -94,6 +98,7 @@ function cellsReport(rig) {
   for (const view of rig.views) {
     cells[view] = {};
     for (const name of rig.order) for (const variant of rig.parts[name].variants) {
+      if (rig.parts[name].art) continue;
       const c = cellOf(rig, name, view, variant);
       cells[view][variant === 'base' ? name : `${name}:${variant}`] = [c.x, c.y, c.w, c.h];
     }
@@ -119,6 +124,7 @@ export const RIG_OPS = {
       def = { frame: t.frame, views: t.views, mirror: t.mirror, parts: t.parts, root: t.root, pairs: a.pairs, poses: t.poses, presets: t.presets, template: a.template };
       for (const k of RIG_OPTS) if (t[k] !== undefined && !(k === 'secondary' && !Object.keys(t[k]).length)) def[k] = t[k];
       if (a.weapon && !def.weapon) def.weapon = a.weapon;
+      if (a.depth !== undefined) def.depth = a.depth;
     } else {
       def = { frame: a.frame, views: a.views, mirror: a.mirror, parts: a.parts, root: a.root, pairs: a.pairs, poses: a.poses || {}, presets: a.presets || {} };
       for (const k of RIG_OPTS) if (a[k] !== undefined) def[k] = a[k];
@@ -336,12 +342,16 @@ export const RIG_OPS = {
     // with the SAME timing and ground shift as the full character, so layers stack exactly
     const filter = { only: a.only, hide: a.hide, ...ropts };
     for (const k of ['only', 'hide']) if (filter[k]) for (const n of filter[k]) if (!rig.parts[n]) throw new Error(`${k}: unknown part "${n}" (parts: ${rig.order.join(', ')})`);
-    const anchors = [];
+    const anchors = [], order = [];
+    // stable:true | {step, hold}: quantized drawing angles with hysteresis (no pixel shimmer)
+    const rots = a.stable ? stableRotations(rig, poses, view, typeof a.stable === 'object' ? a.stable : {}) : null;
     poses.forEach((pose, i) => {
-      let img = renderPose(rig, d, pose, view, cache, filter);
+      const trace = {};
+      let img = renderPose(rig, d, pose, view, cache, { ...filter, ...(rots ? { rot: rots[i] } : {}), trace });
+      order.push(orderOf(trace));
       let dy = 0;
       if (ground >= 0) {
-        const full = filter.only || filter.hide ? renderPose(rig, d, pose, view, cache, ropts) : img;
+        const full = filter.only || filter.hide ? renderPose(rig, d, pose, view, cache, { ...ropts, ...(rots ? { rot: rots[i] } : {}) }) : img;
         const low = lowestRow(full, FW, FH);
         if (low >= 0) { dy = ground - low; img = shiftFrame(img, FW, FH, dy); }
       }
@@ -353,19 +363,49 @@ export const RIG_OPS = {
     });
     const fps = a.fps ?? (a.duration ? 1000 / a.duration : 10);
     out.setAnimation(a.animation, { from: start, to: start + n - 1, duration: a.duration ?? Math.round(1000 / fps), loop, direction: a.direction });
-    // per-frame part anchors (pivot x,y + rotation), exported with spritesheets
-    out.meta = { ...(out.meta || {}), anchors: { ...(out.meta?.anchors || {}), [a.animation]: anchors } };
+    // per-frame part anchors (pivot x,y + rotation), draw order (bottom -> top) and events,
+    // exported with spritesheets (json frames[].anchors / order / events)
+    const meta = { ...(out.meta || {}), anchors: { ...(out.meta?.anchors || {}), [a.animation]: anchors } };
+    if (rig.depth || a.order) meta.order = { ...(out.meta?.order || {}), [a.animation]: order };
+    if (fp.events.length) meta.events = { ...(out.meta?.events || {}), [a.animation]: fp.events };
+    else if (meta.events?.[a.animation]) { meta.events = { ...meta.events }; delete meta.events[a.animation]; }
+    out.meta = meta;
     out.touch?.();
     this.changed(out, { op: 'rig', source, label: `rig ${a.name}: ${a.animation} (${n} frames, ${view})`, structural: true });
-    return { canvas: outName, animation: a.animation, view, frames: [start, start + n - 1], fps: Math.round(fps * 10) / 10, total_frames: out.frames, anchors: 'per-frame part anchors saved (spritesheet json frames[].anchors)', ...(follow ? { ik_from: `${follow.canvas}/${follow.animation} (${follow.targets.length} frames)` } : {}), ...(a.variant ? { variant: a.variant } : {}), ...(wsum ? { weapon: wsum } : {}), ...(notes.length ? { notes } : {}) };
+    return { canvas: outName, animation: a.animation, view, frames: [start, start + n - 1], fps: Math.round(fps * 10) / 10, total_frames: out.frames, anchors: 'per-frame part anchors saved (spritesheet json frames[].anchors)', ...(fp.events.length ? { events: fp.events } : {}), ...(follow ? { ik_from: `${follow.canvas}/${follow.animation} (${follow.targets.length} frames)` } : {}), ...(a.variant ? { variant: a.variant } : {}), ...(wsum ? { weapon: wsum } : {}), ...(notes.length ? { notes } : {}) };
   },
 
   /** Draw order of one frame (bottom -> top): part, z and what set it (pose z, view z, weapon depth / layer rules). */
   rig_layers(a) {
     const { rig, def } = getRig(this, a.name);
+    // all_frames / a canvas tag (the web UI's Layers view): every frame's stack with the rule per part
+    if (a.all_frames || a.tag !== undefined) {
+      const { view, poses, source } = uiPoses(this, rig, def, a);
+      return { rig: a.name, view, views: [...rig.views, ...Object.keys(rig.mirror)], source: `rig_layers: ${source} (solved: depth, weapon, z keys)`, parts: rig.order, frames: poses.map((P, i) => ({ frame: i, stack: uiStack(rig, P, view) })) };
+    }
     const { pose, view, frame, label } = oneFrame(this, rig, def, a);
     const st = layerStack(rig, pose, view);
     return { rig: a.name, view, frame: label, frame_index: frame, order: st.order.map((e) => [e.part, e.z, e.reason]), ...(st.hidden.length ? { hidden: st.hidden } : {}), key: '[part, z, reason], bottom first; equal z: part order' };
+  },
+
+  /**
+   * One frame as per-part layers: the stack (bottom first, with rules) and an atlas PNG with one
+   * frame-sized cell per drawn part in draw order (the web UI's Layers view tints / solos / hit-tests
+   * them). Frame: tag + frame (UI), preset + frame, pose, or rest.
+   */
+  rig_debug_render(a) {
+    const { d, rig, def } = getRig(this, a.name);
+    const { view, poses, source } = a.tag !== undefined || !a.preset ? uiPoses(this, rig, def, a) : uiPoses(this, rig, def, { ...a, tag: undefined });
+    const fi = Math.max(0, Math.min(poses.length - 1, Number(a.frame ?? 0) || 0));
+    const pose = poses[fi];
+    const stack = uiStack(rig, pose, view);
+    const shown = stack.filter((s) => !s.hidden).map((s) => s.part);
+    const [FW, FH] = rig.frame;
+    const cache = new Map();
+    const atlas = new Uint8ClampedArray(FW * FH * Math.max(1, shown.length) * 4);
+    shown.forEach((p, i) => atlas.set(renderPose(rig, d, pose, view, cache, { only: [p] }), i * FW * FH * 4));
+    const png = encodePNG(FW, FH * Math.max(1, shown.length), atlas);
+    return { rig: a.name, view, frame: fi, size: [FW, FH], source: `rig_debug_render: ${source}`, stack, atlas_parts: shown, atlas: png.toString('base64') };
   },
 
   /** Why part_a is drawn over (or under) part_b in a frame. */
@@ -431,6 +471,62 @@ export const RIG_OPS = {
     };
   },
 
+  /**
+   * Cross-view consistency of the drawn cells: empty cells, palette drift between views of a part,
+   * bone length drift, pivots and joints off the drawing, silhouette height per view.
+   */
+  rig_consistency(a) {
+    const { d, rig } = getRig(this, a.name);
+    return { rig: a.name, ...consistencyReport(rig, d, artComposite(d), { views: a.views, tolerance: a.tolerance, limit: a.limit }) };
+  },
+
+  /** Copy drawn cells from one view into others (a start to paint over): parts?, from, to:[views], flip?, overwrite?. */
+  rig_derive(a, source) {
+    const { d, rig } = getRig(this, a.name);
+    if (!a.from || !rig.views.includes(a.from)) throw new Error(`derive needs from: a drawn view (${rig.views.join(', ')})`);
+    const to = [].concat(a.to ?? rig.views.filter((v) => v !== a.from));
+    for (const v of to) if (!rig.views.includes(v) || v === a.from) throw new Error(`derive: to must be other drawn views (${rig.views.filter((x) => x !== a.from).join(', ')})`);
+    const parts = a.parts || (a.part ? [a.part] : rig.order);
+    for (const p of parts) if (!rig.parts[p]) throw new Error(`derive: unknown part "${p}"`);
+    d.checkpoint('rig derive');
+    const r = deriveCells(rig, d, { parts, from: a.from, to, flip: !!a.flip, overwrite: !!a.overwrite });
+    d.touch?.();
+    this.changed(d, { op: 'rig', source, label: `rig ${a.name}: derived ${r.copied.length} cells from ${a.from}` });
+    return { rig: a.name, from: a.from, to, ...r, next: 'paint over the derived cells (turn, shade, foreshorten); art_rig consistency checks the views agree' };
+  },
+
+  /**
+   * Draw-order validation of clips: z-flicker (two overlapping parts swap order and swap back
+   * within `window` frames) and depth-rule violations (a part drawn under / over its reference
+   * against the depth model). -> pass/fail + per-frame order of the failing frames.
+   */
+  rig_zcheck(a) {
+    const { d, rig, def } = getRig(this, a.name);
+    const presets = a.clips || (a.preset ? [a.preset] : Object.keys(def.presets || {}));
+    for (const p of presets) if (!(def.presets || {})[p]) throw new Error(`zcheck: no preset "${p}" (presets: ${Object.keys(def.presets || {}).join(', ')})`);
+    const views = a.views || (a.view ? [a.view] : [...rig.views, ...Object.keys(rig.mirror)]);
+    const cache = new Map();
+    const ropts = a.variant ? { variant: a.variant } : {};
+    const issues = [];
+    let frames = 0, failed = 0;
+    for (const preset of presets) for (const view of views) {
+      const fp = framePoses(this, rig, def, { ...a, preset, view, animation: undefined, keys: undefined, frames: undefined });
+      const traces = fp.poses.map((P) => { const t = {}; renderPose(rig, d, P, view, cache, { ...ropts, sampling: 'nearest8', trace: t }); return t; });
+      const bad = new Map();
+      const add = (f, msg) => { if (!bad.has(f)) bad.set(f, []); bad.get(f).push(msg); };
+      for (const fl of findFlicker(traces, { window: a.window ?? 2, loop: fp.loop })) for (const f of fl.frames) add(f, `z-flicker: ${fl.pair[0]} / ${fl.pair[1]} swap order and swap back`);
+      if (rig.depth) fp.poses.forEach((P, f) => { for (const m of layerIssues(rig, traces[f], solvePose(rig, P, view).depth)) add(f, m); });
+      frames += fp.poses.length; failed += bad.size;
+      for (const [f, msgs] of [...bad.entries()].sort((x, y) => x[0] - y[0])) if (issues.length < (a.limit ?? 40)) issues.push({ clip: preset, view, frame: f, issues: msgs, order: orderOf(traces[f]) });
+    }
+    return {
+      rig: a.name, pass: failed === 0, frames_checked: frames, frames_failed: failed, depth_model: !!rig.depth,
+      summary: failed ? `FAIL: ${failed} of ${frames} frames have draw-order problems (first: ${issues[0].clip}/${issues[0].view} frame ${issues[0].frame}: ${issues[0].issues[0]})` : `PASS: ${frames} frames in ${presets.length} clips x ${views.length} views: no z-flicker${rig.depth ? ', order agrees with depth' : ''}`,
+      ...(issues.length ? { issues } : {}),
+      ...(failed && !rig.depth ? { next: 'art_rig update {depth:true} decides arm order from depth with hysteresis; or remove the alternating z keys' } : {}),
+    };
+  },
+
 };
 
 /**
@@ -479,7 +575,7 @@ function ikFromAnchors(engine, rig, spec, view) {
  * The pose pipeline of art_rig animate (and check): preset merge, ik_from, tweening, carry /
  * attach overrides, foot planting, secondary motion. -> {a (resolved args), view, loop, poses, notes, follow}
  */
-function framePoses(engine, rig, def, a) {
+export function framePoses(engine, rig, def, a) {
   if (a.preset) {
     const pr = (def.presets || {})[a.preset];
     if (!pr) throw new Error(`no preset "${a.preset}" (presets: ${Object.keys(def.presets || {}).join(', ') || 'none'}; add one with art_rig update {presets:{name:{keys,frames,fps,loop?,plant_feet?}}})`);
@@ -512,7 +608,9 @@ function framePoses(engine, rig, def, a) {
     if (!a.keys) a.keys = [{ parts: {} }];
   }
   const loop = a.loop !== false;
-  let poses = animatePoses(rig, { keys: a.carry !== undefined && Array.isArray(a.keys) ? a.keys.map((k) => ({ ...k, carry: a.carry })) : a.keys, frames: a.frames, loop });
+  // _poses: frames evaluated elsewhere (library clips with layers / additive / retargeting)
+  let poses = a._poses ? a._poses.map((P) => (a.carry !== undefined ? { ...structuredClone(P), carry: a.carry } : structuredClone(P)))
+    : animatePoses(rig, { keys: a.carry !== undefined && Array.isArray(a.keys) ? a.keys.map((k) => ({ ...k, carry: a.carry })) : a.keys, frames: a.frames, loop });
   if (follow) poses = poses.map((P, f) => {
     const Q = structuredClone(P);
     Q.views = Q.views || {};
@@ -535,11 +633,14 @@ function framePoses(engine, rig, def, a) {
     if (Object.keys(config).length) poses = simulateSecondary(rig, poses, view, { loop, config });
     else notes.push('secondary: the rig has no "secondary" parts (art_rig update {secondary:{cape:{stiffness:0.3, damping:0.2}}})');
   }
-  return { a, view, loop, poses, notes, follow };
+  // depth model: decide the draw order frame by frame (hysteresis: no flicker at a surface)
+  if (rig.depth && a.depth !== false) poses = depthPass(rig, poses, view, { loop });
+  const events = eventFrames(a.events, poses.length, loop);
+  return { a, view, loop, poses, notes, follow, events };
 }
 
 /** Composite of the parts canvas without the "cells" guide layer. */
-function artComposite(d) {
+export function artComposite(d) {
   const saved = d.layers;
   d.layers = saved.filter((l) => l.name !== 'cells');
   try { return d.composite(); } finally { d.layers = saved; }
@@ -629,21 +730,59 @@ function layerStack(rig, pose, view) {
   const sp = solvePose(rig, pose, view);
   const src = sp.src, W = rig.weapon;
   const weaponParts = W ? new Set([W.part, ...Object.values(W.attachments).map((x) => x.part)]) : new Set();
-  const order = [], hidden = [];
+  if (W?.mag) weaponParts.add(W.mag.part);
+  const order = [], hidden = [], why = {};
   rig.order.forEach((name, i) => {
-    const p = partIn(rig, name, src), v = sp.VP[name] || {};
-    if (p.hidden || v.hide) { hidden.push(name); return; }
+    const p = partIn(rig, name, src), v = poseOf(rig, sp.VP, name);
+    if (p.hidden || v.hide) {
+      hidden.push(name);
+      why[name] = p.hidden ? `hidden in view ${src}` : weaponParts.has(name) && sp.weapon?.s?.pl?.hidden >= 0.5 ? 'the carry state hides the weapon' : rig.parts[name].hide && sp.P?.[name]?.hide === undefined ? 'hidden until a pose shows it (hide:true)' : 'the pose hides it';
+      return;
+    }
     const z = v.z ?? p.z;
-    let reason = v.z !== undefined && v.z !== null ? 'pose z' : rig.parts[name].views?.[src]?.z !== undefined ? `view z (${src})` : 'part z';
+    const dp = sp.depth?.[name];
+    let reason = (sp.P?.[name]?.z ?? sp.P?.views?.[src]?.[name]?.z) !== undefined ? 'pose z (z keyframe)' : dp && (dp.z !== undefined || dp.split) ? `depth: ${dp.state}${dp.ref ? ` vs ${dp.ref} (${dp.depth}px)` : ''}` : v.z !== undefined && v.z !== null ? 'pose z' : rig.parts[name].views?.[src]?.z !== undefined ? `view z (${src})` : 'part z';
     if (weaponParts.has(name) && sp.weapon?.layer) reason = name === W.part ? sp.weapon.layer.reason : `rides on ${W.part}`;
-    order.push({ part: name, z: Math.round(z * 100) / 100, reason, i });
+    if (W && sp.weapon?.layer?.supportZ !== undefined && name === sp.weapon.s.roles.support) reason = 'support hand over a gun aimed at the camera';
+    order.push({ part: name, z: Math.round(z * 100) / 100, reason, i, parent: rig.parts[name].parent || null, ...(v.split ? { split: v.split } : {}) });
   });
   order.sort((x, y) => x.z - y.z || x.i - y.i);
-  return { order, hidden };
+  return { order, hidden, why };
+}
+
+/**
+ * Poses for the web UI's Layers view: tag "<preset>_<view>" (or a preset name) on an output
+ * canvas = the clip's frames through the full pipeline (plant, secondary, depth, weapon); else
+ * a stored pose or the rest pose. -> {view, poses, source}
+ */
+function uiPoses(engine, rig, def, a) {
+  const allViews = [...rig.views, ...Object.keys(rig.mirror)];
+  let view = a.view && allViews.includes(a.view) ? a.view : null;
+  const presets = def.presets || {};
+  let preset = a.preset && presets[a.preset] ? a.preset : null;
+  if (!preset && a.tag) {
+    if (presets[a.tag]) preset = a.tag;
+    else for (const p of Object.keys(presets)) for (const v of allViews) if (a.tag === `${p}_${v}`) { preset = p; view ||= v; }
+  }
+  view ||= rig.views[0];
+  if (preset) {
+    const n = a.canvas && a.tag ? engine.docs.get(a.canvas)?.animations?.[a.tag]?.frames.length : null;
+    const fp = framePoses(engine, rig, def, { preset, view, animation: undefined, ...(n ? { frames: n } : {}), ...(a.carry !== undefined ? { carry: a.carry } : {}) });
+    return { view, poses: fp.poses, source: `preset ${preset}` };
+  }
+  if (a.tag) return { view, poses: [{}], source: `rest pose (no preset for tag "${a.tag}")` };
+  return { view, poses: [a.pose !== undefined ? resolvePose(rig, { pose: a.pose }) : {}], source: a.pose !== undefined ? `pose ${a.pose}` : 'rest pose' };
+}
+
+/** One frame's stack in the UI shape (bottom first): {part, z, rule, order, hidden, why_hidden, parent}. */
+function uiStack(rig, pose, view) {
+  const st = layerStack(rig, pose, view);
+  return [...st.order.map((e) => ({ part: e.part, z: e.z, rule: e.reason + (e.split ? ` (split at row ${e.split.cut}: ${e.split.z.join(' / ')})` : ''), order: e.i, hidden: false, parent: e.parent })),
+    ...st.hidden.map((n) => ({ part: n, z: partIn(rig, n, rig.mirror[view] || view).z, rule: 'not drawn', order: rig.order.indexOf(n), hidden: true, why_hidden: st.why[n], parent: rig.parts[n].parent || null }))];
 }
 
 /** Row under the feet in the rest pose (the plant contact row + 1), or null for rigs without feet. */
-function feetGround(rig, view) {
+export function feetGround(rig, view) {
   if (!rig.feet?.length) return null;
   const src = rig.mirror[view] || view;
   const W = solvePose(rig, {}, view).world;

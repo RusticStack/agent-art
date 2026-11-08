@@ -197,11 +197,14 @@ test('complaint 3: front views keep the weapon readable (yaw cant + foreshorteni
   const e = new Engine({ home: tmp() });
   soldier(e, 'fv', { create: { weapon: { class: 'rifle' } } });
   const rig = rigOf(e, 'fv');
+  // carried toward the camera: canted outward with the length floor; aimed: short and canted inward
+  const low = solvePose(rig, { carry: 'ready_low' }, 'front');
+  assert.ok(low.weapon.canted !== 'inward' && low.weapon.L >= rig.weapon.foreshorten.floor - 1e-9, `ready_low length ${low.weapon.L}`);
   const front = solvePose(rig, { carry: 'aim' }, 'front');
-  assert.ok(front.weapon.canted, 'pointing at the camera: canted');
-  assert.ok(front.weapon.L >= rig.weapon.foreshorten.floor - 1e-9, `length ${front.weapon.L}`);
+  assert.equal(front.weapon.canted, 'inward', 'aimed at the camera: canted inward');
+  assert.ok(front.weapon.L >= rig.weapon.foreshorten.aim_floor - 1e-9 && front.weapon.L < rig.weapon.foreshorten.floor, `aim length ${front.weapon.L}`);
   const side = renderCount(e, 'fv', 'side'), fr = renderCount(e, 'fv', 'front');
-  assert.ok(fr >= side * 0.3, `front weapon pixels ${fr} vs side ${side}`);
+  assert.ok(fr >= side * 0.15, `front weapon pixels ${fr} vs side ${side}`);
   // floor off: the barrel collapses toward a dot
   e.run('rig_update', { name: 'fv', weapon: { class: 'rifle', foreshorten: false } });
   const off = solvePose(rigOf(e, 'fv'), { carry: 'aim' }, 'front');
@@ -306,12 +309,16 @@ test('carry states, muzzle discipline and animate constraints refuse / fix / war
   const e = new Engine({ home: tmp() });
   soldier(e, 'md', { create: { weapon: { class: 'rifle', states: { level: { base: 'ready_low', angle: 0, follow: 0 } } } } });
   const rig = rigOf(e, 'md');
-  for (const st of ['ready_low', 'sprint', 'reload', 'slung']) {
+  for (const st of ['ready_low', 'sprint', 'slung']) {
     const m = metrics(rig, { carry: st }, 'side');
     assert.equal(m.muzzle, null, `${st}: muzzle down / forward-low`);
     assert.ok(solvePose(rig, { carry: st }, 'side').weapon.s.theta > 10, `${st} points down`);
   }
-  assert.ok(solvePose(rig, { carry: 'ready_high' }, 'side').weapon.s.theta < -15, 'high ready: muzzle up');
+  // high ready and the reload (gun up at the chest, mag well to the support hand): muzzle up, never level
+  for (const st of ['ready_high', 'reload', 'reload_charge']) {
+    assert.equal(metrics(rig, { carry: st }, 'side').muzzle, null, `${st}: no muzzle flag`);
+    assert.ok(solvePose(rig, { carry: st }, 'side').weapon.s.theta < -15, `${st}: muzzle up`);
+  }
   assert.match(metrics(rig, { carry: 'level' }, 'side').muzzle, /level/);
   assert.throws(() => e.run('rig_animate', { name: 'md', preset: 'idle', view: 'side', carry: 'level', canvas: 'x1' }), /weapon constraints/);
   const fixed = e.run('rig_animate', { name: 'md', preset: 'idle', view: 'side', carry: 'level', canvas: 'x2', constraints: 'fix' });

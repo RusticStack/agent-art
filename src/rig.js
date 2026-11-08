@@ -6,6 +6,7 @@
 // Per frame: view overrides -> FK -> IK -> render (rotation sampled per rig "sampling" mode).
 import { upscale } from './pixelops.js';
 import { normalizeWeapon, solveHeld, lerpCarry, heldParts } from './weapon.js';
+import { normalizeDepth, applyDepth } from './depth.js';
 
 const NAME = /^[\w-]+$/;
 const GAP = 1;
@@ -48,13 +49,23 @@ export function normalizeRig(def) {
     if (!NAME.test(name)) throw new Error(`bad part name "${name}"`);
     if (RESERVED.has(name)) throw new Error(`"${name}" is reserved in poses (per-view overrides / IK); pick another part name`);
     const p = def.parts[name];
-    const w = Number(p.w), h = Number(p.h);
+    // art:"<part>" = draw another part's cell (a magazine in the hand, a prop handed over): no own cell
+    const share = p.art !== undefined ? def.parts[p.art] : null;
+    if (p.art !== undefined) {
+      if (!share || p.art === name) throw new Error(`part "${name}": art "${p.art}" must name another part`);
+      if (share.art !== undefined) throw new Error(`part "${name}": art "${p.art}" draws another part's cell itself; point at the part that owns the cell`);
+    }
+    const w = Number(p.w ?? share?.w), h = Number(p.h ?? share?.h);
     if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1) throw new Error(`part "${name}" needs integer w,h`);
-    const pivot = p.pivot ?? [Math.floor(w / 2), Math.floor(h / 2)];
+    const pivot = p.pivot ?? share?.pivot ?? [Math.floor(w / 2), Math.floor(h / 2)];
     parts[name] = {
       w, h, pivot: [Number(pivot[0]), Number(pivot[1])], parent: p.parent ?? null, at: p.at ? [Number(p.at[0]), Number(p.at[1])] : [0, 0],
-      z: Number(p.z ?? 0), variants: ['base', ...(p.variants || []).filter((v) => v !== 'base')], views: p.views || {},
+      z: Number(p.z ?? 0), variants: ['base', ...((share ? share.variants : p.variants) || []).filter((v) => v !== 'base')], views: { ...(p.views || {}) },
     };
+    if (share) { parts[name].art = p.art; parts[name].w = Number(share.w); parts[name].h = Number(share.h); }
+    if (p.hide) parts[name].hide = true;
+    // link:{<view>: "<drawn view>" | {view, flip?}} = this view draws the cell of another view
+    for (const [v, l] of Object.entries(p.link || {})) parts[name].views[v] = { ...(parts[name].views[v] || {}), link: l };
   }
   for (const name of order) {
     const par = parts[name].parent;
@@ -62,13 +73,20 @@ export function normalizeRig(def) {
     // cycle check
     let k = par, guard = 0;
     while (k) { if (k === name || guard++ > 64) throw new Error(`parent cycle at part "${name}"`); k = parts[k].parent; }
-    for (const v of Object.keys(parts[name].views)) if (!views.includes(v)) throw new Error(`part "${name}" has settings for unknown view "${v}"`);
+    for (const [v, o] of Object.entries(parts[name].views)) {
+      if (!views.includes(v)) throw new Error(`part "${name}" has settings for unknown view "${v}"`);
+      if (o?.link !== undefined) {
+        const lv = typeof o.link === 'string' ? o.link : o.link?.view;
+        if (!views.includes(lv) || lv === v) throw new Error(`part "${name}": link for view "${v}" must name another drawn view (${views.filter((x) => x !== v).join(', ')})`);
+      }
+    }
   }
   const roots = order.filter((n) => !parts[n].parent);
-  // layout: one column per (part, variant), one row band per view
+  // layout: one column per (part, variant), one row band per view; art-sharing parts have none
   const columns = [];
   let x = 0;
   for (const name of order) for (const variant of parts[name].variants) {
+    if (parts[name].art) continue;
     columns.push({ part: name, variant, x });
     x += parts[name].w + GAP;
   }
@@ -102,6 +120,8 @@ export function normalizeRig(def) {
     if (parts.carry) throw new Error('"carry" is reserved in poses of a rig with a weapon; rename that part');
     rig.weapon = normalizeWeapon(rig, def.weapon);
   }
+  // depth model (opt-in): per-frame draw order from a 3D proxy, z rules, split parts
+  if (def.depth) rig.depth = normalizeDepth(rig, def.depth);
   return rig;
 }
 
@@ -141,7 +161,8 @@ export function setVariant(rig, name, poseVariant, sets) {
 export function cellOf(rig, part, view, variant = 'base') {
   const vi = rig.views.indexOf(view);
   if (vi < 0) throw new Error(`unknown view "${view}" (drawn views: ${rig.views.join(', ')})`);
-  const col = rig.layout.columns.find((c) => c.part === part && c.variant === variant);
+  const owner = rig.parts[part]?.art || part;
+  const col = rig.layout.columns.find((c) => c.part === owner && c.variant === variant);
   if (!col) throw new Error(`part "${part}" has no variant "${variant}"`);
   const p = rig.parts[part];
   return { x: col.x, y: vi * rig.layout.rowH, w: p.w, h: p.h };
@@ -150,7 +171,9 @@ export function cellOf(rig, part, view, variant = 'base') {
 /** Per-view part settings (at, z, hidden, pivot) with fallbacks. */
 export function partIn(rig, name, view) {
   const p = rig.parts[name], o = p.views[view] || {};
-  return { ...p, at: o.at ? [Number(o.at[0]), Number(o.at[1])] : p.at, z: o.z ?? p.z, hidden: !!o.hidden, pivot: o.pivot ? [Number(o.pivot[0]), Number(o.pivot[1])] : p.pivot };
+  const out = { ...p, at: o.at ? [Number(o.at[0]), Number(o.at[1])] : p.at, z: o.z ?? p.z, hidden: !!o.hidden, pivot: o.pivot ? [Number(o.pivot[0]), Number(o.pivot[1])] : p.pivot };
+  if (o.link !== undefined) out.link = typeof o.link === 'string' ? { view: o.link, flip: false } : { view: o.link.view, flip: !!o.link.flip };
+  return out;
 }
 
 const ease = (t, kind) => (kind === 'linear' ? t : kind === 'step' ? 0 : t * t * (3 - 2 * t));
@@ -161,7 +184,9 @@ const ease = (t, kind) => (kind === 'linear' ? t : kind === 'step' ? 0 : t * t *
  */
 export function poseOf(rig, pose, name) {
   const v = (typeof pose === 'string' ? rig.poses[pose] : pose)?.[name] || {};
-  return { x: Number(v.x ?? 0), y: Number(v.y ?? 0), rot: Number(v.rot ?? 0), sx: Number(v.sx ?? 1) || 1, sy: Number(v.sy ?? 1) || 1, variant: v.variant ?? null, hide: !!v.hide, flipx: !!v.flipx, cell: v.cell ?? null, z: v.z ?? null };
+  // a part with hide:true in the rig (a magazine in the hand) is hidden until a pose sets hide:false
+  const hide = v.hide !== undefined ? !!v.hide : !!rig.parts[name]?.hide;
+  return { x: Number(v.x ?? 0), y: Number(v.y ?? 0), rot: Number(v.rot ?? 0), sx: Number(v.sx ?? 1) || 1, sy: Number(v.sy ?? 1) || 1, variant: v.variant ?? null, hide, flipx: !!v.flipx, cell: v.cell ?? null, z: v.z ?? null, split: v.split ?? null };
 }
 
 const asPose = (rig, p) => (typeof p === 'string' ? rig.poses[p] : p) || {};
@@ -237,6 +262,11 @@ export function resolvePose(rig, key) {
     for (const [v, o] of Object.entries(key.views)) p.views[v] = { ...(p.views[v] || {}), ...structuredClone(o) };
   }
   if (key.ik) p.ik = { ...(p.ik || {}), ...structuredClone(key.ik) };
+  // z keyframes: key.z = {part: z} (draw order for this key; steps at the tween midpoint)
+  if (key.z) for (const [n, z] of Object.entries(key.z)) {
+    if (!rig.parts[n]) throw new Error(`key z: unknown part "${n}"`);
+    p[n] = { ...(p[n] || {}), z: z === null ? null : Number(z) };
+  }
   if (rig.weapon) {
     // carry state: key > pose > weapon.poses mapping (by pose name) > weapon default
     if (key.carry !== undefined) p.carry = key.carry;
@@ -253,6 +283,8 @@ function lerpParts(rig, a, b, t) {
   for (const name of rig.order) {
     const pa = poseOf(rig, a, name), pb = poseOf(rig, b, name);
     out[name] = { x: lerp(pa.x, pb.x, t), y: lerp(pa.y, pb.y, t), rot: pa.rot + adiff(pa.rot, pb.rot) * t, sx: lerp(pa.sx, pb.sx, t), sy: lerp(pa.sy, pb.sy, t), variant: t < 0.5 ? pa.variant : pb.variant, hide: t < 0.5 ? pa.hide : pb.hide };
+    // z keyframes step at the midpoint (like variants): no in-between order that could flicker
+    if (pa.z !== null || pb.z !== null) { const z = t < 0.5 ? pa.z : pb.z; if (z !== null) out[name].z = z; }
   }
   return out;
 }
@@ -361,15 +393,16 @@ export function shiftFrame(data, w, h, dy) {
 }
 
 /** Cache of part cells: 1x block + 8x Scale2x upscale (for clean rotation sampling). */
-function partImage(cache, partsDoc, rig, name, view, variant) {
-  const key = `${name}|${view}|${variant}|${partsDoc.version ?? 0}`;
+function partImage(cache, partsDoc, rig, name, view, variant, rows = null) {
+  const key = `${rig.parts[name]?.art || name}|${view}|${variant}|${partsDoc.version ?? 0}${rows ? `|${rows[0]}-${rows[1]}` : ''}`;
   if (cache.has(key)) return cache.get(key);
   const c = cellOf(rig, name, view, variant);
   // art layers only: the "cells" guide layer must never leak into frames
   const comp = compositeArt(partsDoc, cache);
   const W = partsDoc.width;
   const block = new Uint8ClampedArray(c.w * c.h * 4);
-  for (let y = 0; y < c.h; y++) block.set(comp.subarray(((c.y + y) * W + c.x) * 4, ((c.y + y) * W + c.x + c.w) * 4), y * c.w * 4);
+  // rows [a, b): one piece of a split part (cell rows from the pivot end to the cut, or after it)
+  for (let y = 0; y < c.h; y++) if (!rows || (y >= rows[0] && y < rows[1])) block.set(comp.subarray(((c.y + y) * W + c.x) * 4, ((c.y + y) * W + c.x + c.w) * 4), y * c.w * 4);
   const big = upscale(block, c.w, c.h, 8).data;
   const img = { w: c.w, h: c.h, block, big, block32: new Uint32Array(block.buffer, block.byteOffset, c.w * c.h), big32: new Uint32Array(big.buffer, big.byteOffset, c.w * c.h * 64) };
   cache.set(key, img);
@@ -502,6 +535,15 @@ export function applyIK(rig, VP, src) {
  * overrides, then solves IK after FK. Returns {src, flip, VP (flat solved pose), world}.
  */
 export function solvePose(rig, pose, view) {
+  const r = solveCore(rig, pose, view);
+  // depth model: per-frame z from the 3D proxy (z rules, split parts); clips pass their decisions
+  // (with hysteresis) in pose._depth, a single pose is decided on its own
+  if (rig.depth) applyDepth(rig, r.P, r);
+  return r;
+}
+
+/** FK + IK (+ weapon handling) of a pose in a view, without the depth pass. */
+export function solveCore(rig, pose, view) {
   let src = view, flip = false;
   if (rig.mirror[view]) { src = rig.mirror[view]; flip = true; }
   if (!rig.views.includes(src)) throw new Error(`unknown view "${view}" (views: ${[...rig.views, ...Object.keys(rig.mirror)].join(', ')})`);
@@ -509,10 +551,10 @@ export function solvePose(rig, pose, view) {
   if (rig.weapon) {
     // weapon handling: weapon placement, locked hands, cheek weld, then the remaining pose IK
     const h = solveHeld(rig, P, src);
-    return { src, flip, VP: h.VP, world: worldOf(rig, h.VP, src), weapon: h.report };
+    return { src, flip, VP: h.VP, world: worldOf(rig, h.VP, src), weapon: h.report, P };
   }
   const VP = applyIK(rig, viewPose(rig, P, src), src);
-  return { src, flip, VP, world: worldOf(rig, VP, src) };
+  return { src, flip, VP, world: worldOf(rig, VP, src), P };
 }
 
 /**
@@ -592,30 +634,54 @@ function sampleRotated(img, p, k, px, py, cos, sin, sx, sy, x0, y0, bw, bh) {
  * around the root x. Parts are snapped to whole pixels; rotation sampling follows rig.sampling.
  */
 export function renderPose(rig, partsDoc, pose, view, cache = new Map(), opts = {}) {
-  const [FW, FH] = rig.frame;
+  const [RW, RH] = rig.frame;
+  // pad:[left, top, right, bottom] = a bigger frame around the rig frame (the root moves by left/top);
+  // a mirror view renders its source with left/right swapped, so the padding lands on the right side
+  const pad = opts.pad ? opts.pad.map((n) => Math.max(0, Math.round(Number(n) || 0))) : null;
+  const FW = RW + (pad ? pad[0] + pad[2] : 0), FH = RH + (pad ? pad[1] + pad[3] : 0);
   const { src, flip, VP, world } = solvePose(rig, pose, view);
+  const ox = pad ? (flip ? pad[2] : pad[0]) : 0, oy = pad ? pad[1] : 0;
   const out = new Uint8ClampedArray(FW * FH * 4);
   const out32 = new Uint32Array(out.buffer);
   const sets = opts.variant ? [].concat(opts.variant) : null;
   const sampling = opts.sampling ?? rig.sampling;
-  const list = rig.order.map((name, i) => ({ name, i, p: partIn(rig, name, src), v: poseOf(rig, VP, name) }))
-    .filter((e) => !e.p.hidden && !e.v.hide && (!opts.only || opts.only.includes(e.name)) && !(opts.hide && opts.hide.includes(e.name)))
-    .sort((a, b) => (a.v.z ?? a.p.z) - (b.v.z ?? b.p.z) || a.i - b.i);
-  for (const { name, p: pv, v } of list) {
+  const entries = [];
+  rig.order.forEach((name, i) => {
+    const p = partIn(rig, name, src), v = poseOf(rig, VP, name);
+    if (p.hidden || v.hide || (opts.only && !opts.only.includes(name)) || (opts.hide && opts.hide.includes(name))) return;
+    const z = v.z ?? p.z;
+    // split part: the rows from the pivot to the cut and the rest get their own z (one piece in
+    // front of the reference part, one behind it)
+    if (v.split && v.split.cut > 0 && v.split.cut < p.h) {
+      entries.push({ name, i, p, v, z: v.split.z[0], rows: [0, v.split.cut] });
+      entries.push({ name, i, p, v, z: v.split.z[1], rows: [v.split.cut, p.h] });
+    } else entries.push({ name, i, p, v, z, rows: null });
+  });
+  const list = entries.sort((a, b) => a.z - b.z || a.i - b.i);
+  const trace = opts.trace || null;
+  if (trace) { trace.order = []; trace.frame = [FW, FH]; }
+  for (const { name, p: pv, v, rows, z } of list) {
     const T = world[name];
-    // cell: draw another drawn view's cell (weapons projected from their side cell)
-    const cellView = v.cell && v.cell !== src && rig.views.includes(v.cell) ? v.cell : src;
-    const p = cellView === src ? pv : partIn(rig, name, cellView);
+    // cell: draw another drawn view's cell (weapons projected from their side cell; link: a view
+    // that reuses another view's drawing, optionally mirrored)
+    const linkTo = pv.link && rig.views.includes(pv.link.view) ? pv.link : null;
+    const cellView = v.cell && v.cell !== src && rig.views.includes(v.cell) ? v.cell : linkTo ? linkTo.view : src;
+    const p = cellView === src ? pv : { ...partIn(rig, name, cellView), z: pv.z };
     // equipment set (animate variant:"heavy"), then a pose variant; a variant the part no longer has draws the base cell
     const want = sets ? setVariant(rig, name, v.variant, sets) : v.variant;
     const variant = want && p.variants.includes(want) ? want : 'base';
-    const img = partImage(cache, partsDoc, rig, name, cellView, variant);
-    const px = Math.round(T.x), py = Math.round(T.y); // pixel-snapped pivot position
-    const rot = ((T.rot % 360) + 360) % 360;
+    const img = partImage(cache, partsDoc, rig, name, cellView, variant, rows);
+    const px = Math.round(T.x) + ox, py = Math.round(T.y) + oy; // pixel-snapped pivot position
+    // stable rotation: a drawing angle fixed by the caller (quantized with hysteresis across frames)
+    const wrot = opts.rot && opts.rot[name] !== undefined ? opts.rot[name] : T.rot;
+    const rot = ((wrot % 360) + 360) % 360;
     const rad = (-rot * Math.PI) / 180, cos = Math.cos(rad), sin = Math.sin(rad);
     // squash & stretch around the pivot; a flipped part (weapon facing left) mirrors its cell
-    const sx = (T.flip ? -1 : 1) * Math.max(0.05, v.sx), sy = Math.max(0.05, v.sy);
-    const exact = !T.flip && (Math.abs(rot) < 1e-6 || Math.abs(rot - 360) < 1e-6) && Math.abs(sx - 1) < 1e-6 && Math.abs(sy - 1) < 1e-6;
+    const mir = !!T.flip !== !!(linkTo && linkTo.flip && cellView === linkTo.view);
+    const sx = (mir ? -1 : 1) * Math.max(0.05, v.sx), sy = Math.max(0.05, v.sy);
+    const exact = !mir && (Math.abs(rot) < 1e-6 || Math.abs(rot - 360) < 1e-6) && Math.abs(sx - 1) < 1e-6 && Math.abs(sy - 1) < 1e-6;
+    const box = trace ? [Infinity, Infinity, -Infinity, -Infinity, 0] : null;
+    const mark = box ? (x, y) => { if (x < box[0]) box[0] = x; if (y < box[1]) box[1] = y; if (x > box[2]) box[2] = x; if (y > box[3]) box[3] = y; box[4]++; } : null;
     if (!exact && sampling !== 'nearest8') {
       // forward-transform the cell corners for a tight bbox
       const fc = Math.cos(rot * D2R), fs = Math.sin(rot * D2R);
@@ -632,36 +698,40 @@ export function renderPose(rig, partsDoc, pose, view, cache = new Map(), opts = 
         if (y < 0 || y >= FH) continue;
         for (let i = 0; i < bw; i++) {
           const x = bx + i, c = buf[j * bw + i];
-          if (c && x >= 0 && x < FW) out32[y * FW + x] = c;
+          if (c && x >= 0 && x < FW) { out32[y * FW + x] = c; if (mark) mark(x, y); }
         }
       }
-      continue;
-    }
-    const R = Math.ceil(Math.hypot(p.w, p.h) * Math.max(1, Math.abs(sx), sy)) + 1;
-    for (let y = py - R; y <= py + R; y++) for (let x = px - R; x <= px + R; x++) {
-      if (x < 0 || y < 0 || x >= FW || y >= FH) continue;
-      let c;
-      if (exact) {
-        const u = x - px + p.pivot[0], w2 = y - py + p.pivot[1];
-        if (u < 0 || w2 < 0 || u >= p.w || w2 >= p.h) continue;
-        const s = (w2 * p.w + u) * 4;
-        if (!img.block[s + 3]) continue;
-        c = img.block.subarray(s, s + 4);
-      } else {
-        // nearest8: inverse-rotate the destination pixel centre into the part's 8x space
-        const dx = x + 0.5 - px, dy = y + 0.5 - py;
-        const u = ((dx * cos - dy * sin) / sx + p.pivot[0]) * 8, w2 = ((dx * sin + dy * cos) / sy + p.pivot[1]) * 8;
-        const iu = Math.floor(u), iv = Math.floor(w2);
-        if (iu < 0 || iv < 0 || iu >= p.w * 8 || iv >= p.h * 8) continue;
-        const s = (iv * p.w * 8 + iu) * 4;
-        if (!img.big[s + 3]) continue;
-        c = img.big.subarray(s, s + 4);
+    } else {
+      const R = Math.ceil(Math.hypot(p.w, p.h) * Math.max(1, Math.abs(sx), sy)) + 1;
+      for (let y = py - R; y <= py + R; y++) for (let x = px - R; x <= px + R; x++) {
+        if (x < 0 || y < 0 || x >= FW || y >= FH) continue;
+        let c;
+        if (exact) {
+          const u = x - px + p.pivot[0], w2 = y - py + p.pivot[1];
+          if (u < 0 || w2 < 0 || u >= p.w || w2 >= p.h) continue;
+          const s = (w2 * p.w + u) * 4;
+          if (!img.block[s + 3]) continue;
+          c = img.block.subarray(s, s + 4);
+        } else {
+          // nearest8: inverse-rotate the destination pixel centre into the part's 8x space
+          const dx = x + 0.5 - px, dy = y + 0.5 - py;
+          const u = ((dx * cos - dy * sin) / sx + p.pivot[0]) * 8, w2 = ((dx * sin + dy * cos) / sy + p.pivot[1]) * 8;
+          const iu = Math.floor(u), iv = Math.floor(w2);
+          if (iu < 0 || iv < 0 || iu >= p.w * 8 || iv >= p.h * 8) continue;
+          const s = (iv * p.w * 8 + iu) * 4;
+          if (!img.big[s + 3]) continue;
+          c = img.big.subarray(s, s + 4);
+        }
+        out.set(c, (y * FW + x) * 4);
+        if (mark) mark(x, y);
       }
-      out.set(c, (y * FW + x) * 4);
     }
+    if (trace) trace.order.push({ part: name, z: Math.round(z * 1000) / 1000, ...(rows ? { piece: rows[0] === 0 ? 'pivot' : 'tip' } : {}), box: box[4] ? box.slice(0, 4) : null, px: box[4] });
   }
+  // mirror views flip about the root column (shifted by the padding on each side)
+  const fx = (x) => (rig.root[0] + ox) + (rig.root[0] + (pad ? pad[0] : 0)) - 1 - x;
+  if (trace && flip) for (const e of trace.order) if (e.box) e.box = [fx(e.box[2]), e.box[1], fx(e.box[0]), e.box[3]];
   if (flip) {
-    const fx = (x) => 2 * rig.root[0] - 1 - x;
     const m = new Uint8ClampedArray(out.length);
     for (let y = 0; y < FH; y++) for (let x = 0; x < FW; x++) {
       const sx = fx(x);
@@ -671,6 +741,41 @@ export function renderPose(rig, partsDoc, pose, view, cache = new Map(), opts = 
     return m;
   }
   return out;
+}
+
+/**
+ * Stable rotation for a clip: each part's drawing angle is quantized to `step` degrees and only
+ * moves on when the solved angle leaves the current step by more than hold x step (hysteresis),
+ * so slow limbs do not shimmer pixel by pixel and near-zero angles snap to the crisp exact blit.
+ * Joint positions stay exact. -> one {part: deg} map per frame (renderPose opts.rot)
+ */
+export function stableRotations(rig, poses, view, { step = 3, hold = 0.75 } = {}) {
+  const prev = {};
+  const st = Math.max(0.5, Number(step) || 3), h = Math.min(1.5, Math.max(0.5, Number(hold) || 0.75));
+  return poses.map((P) => {
+    const { world } = solvePose(rig, P, view);
+    const out = {};
+    for (const n of rig.order) {
+      const raw = world[n].rot;
+      let q = Math.round(raw / st) * st;
+      if (prev[n] !== undefined && Math.abs(adiff(prev[n], raw)) <= st * h) q = prev[n];
+      prev[n] = q;
+      out[n] = q;
+    }
+    return out;
+  });
+}
+
+/** Events {t (0..1) | frame, name} -> [{frame, name}] for n frames (loop: t * n, else t * (n - 1)). */
+export function eventFrames(events, n, loop) {
+  if (!events) return [];
+  if (!Array.isArray(events)) throw new Error('events must be [{t (0..1) | frame, name}]');
+  return events.map((e, i) => {
+    if (!e || typeof e.name !== 'string' || !e.name) throw new Error(`events[${i}] needs a name`);
+    const f = e.frame !== undefined ? Math.round(Number(e.frame)) : Math.round(Number(e.t ?? 0) * (loop ? n : n - 1));
+    if (!Number.isFinite(f)) throw new Error(`events[${i}] needs t (0..1) or frame`);
+    return { frame: loop ? ((f % n) + n) % n : Math.min(n - 1, Math.max(0, f)), name: e.name };
+  }).sort((a, b) => a.frame - b.frame);
 }
 
 /** Set fields of a part inside pose.views[view] (creating the override). */

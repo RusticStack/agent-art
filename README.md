@@ -114,10 +114,46 @@ Without constraints, generated sprites hold guns wrong: the support hand misses 
 - **Carry states:** long guns have `aim`, `ready_low`, `ready_high`, `hip`, `sprint`, `reload`, `slung`, `one_hand_low`, `drop` and `holster`. Pistols have `aim`, `compressed`, `low`, `reload`, `one_hand_low` and `holster`. Outside firing states the muzzle points down or forward-low, never at the character's own body. Set the state with `carry` on a pose or key, `weapon.poses` (by pose name), `weapon.carry` (the default) or `animate {carry}`, and add your own with `weapon.states`. The humanoid_hd presets come mapped: walk and idle use `ready_low`, run `sprint`, aim and shoot `aim`, reload `reload`, and throw `slung` (a pistol is holstered). The weapon stays visible unless it is holstered.
 - **Mirroring:** `mirror_pairs` swaps legs and free arms but keeps held hands and the weapon on their side. The key option `mirror_hands: true` deliberately swaps handedness.
 - **Front-view readability:** a barrel pointing at the camera is canted outward with a length floor (`foreshorten: {floor, cant, back_cant} | false`). In back-facing views the muzzle angles out past the silhouette on the weapon side.
-- **Layering:** the weapon is drawn over the torso when it is held in front of it and under it when behind, using projected depth. `weapon.layer: {above, below, pin}` overrides that. `layers {name, pose | preset + frame, view}` lists the draw order with the reason for each z, and `explain {part_a, part_b}` says why one part is drawn over another.
+- **Layering:** the weapon is drawn over the torso when it is held in front of it and under it when behind, using projected depth. `weapon.layer: {above, below, pin}` overrides that. `layers {name, pose | preset + frame, view}` lists the draw order with the reason for each z, and `explain {part_a, part_b}` says why one part is drawn over another. `debug_render` returns a frame as one layer per part; the web UI's Layers view uses both.
 - **Validation:** `check` measures every frame: hand-to-grip distance, limb over-extension, inverted elbows, weapon-body penetration, muzzle flags, layering and weapon visibility. `animate` runs the same checks and by default refuses to write a clip with a violating frame. `constraints: "fix"` auto-corrects instead (muzzle down, stronger cant, flipped elbows, draw order), and `"warn"` writes the frames and reports.
+- **Front aim and reload:** aimed at the camera, a long gun's barrel stays short and is canted inward, so the muzzle sits near the centre line. It is drawn over the forearms and the trigger hand and under the support hand, which is further forward on the handguard; a pistol's slide goes over both hands. The head tilts onto the stock. `humanoid_hd` with a weapon adds a `mag` part (draw it in the side row) and `mag_hand`, which draws the same cell in the support hand. The reload goes grab, strip (mag in the hand), chest pouch, seat, charging handle, with the events `mag_out`, `mag_pouch`, `mag_in`, `charge` and `ready`.
 
 The same system works for first-person `art_model` arms: see [Guns held by arms](#guns-held-by-arms-first-person). Skill: `weapon-handling`.
+
+
+#### Depth, draw order and linked cells
+
+- **Depth model:** `depth: true` on a rig decides the order of each arm chain against the chest frame by frame, using the weapon solver's 3D proxy. An arm in front of the chest's front surface goes over it, one behind its back surface goes under it, and in between the authored order stays. Clips decide with hysteresis, so a limb that hovers at the surface does not flicker. A bone that crosses the surface is split into two pieces with their own z (a forearm reaching across the chest). Rules: `depth: {rules: [{part, ref, chain?, split?, views?}], margin?}`.
+- **z keyframes:** a key `{pose, z: {forearm_b: 9}}` sets the order for that key. It steps at the tween midpoint, and a pose z wins over the depth model.
+- **zcheck:** `zcheck {name, clips?, views?, window?}` finds z-flicker (two overlapping parts that swap order and swap back within `window` frames) and depth violations. `animate` stores each frame's order from bottom to top, and spritesheet JSON writes it as `frames[].order` (with `frames[].events`).
+- **Linked and shared cells:** `parts.p.link: {back_side: "side"}` (or `{view, flip}`) draws another view's cell, so it is not drawn twice. `parts.p.art: "mag"` draws another part's cell. `hide: true` keeps a part hidden until a pose sets `hide: false`.
+- **Cross-view checks:** `consistency {name}` compares every part across views: empty cells, palette drift, bone length drift, pivots and joints off the drawing, and rest silhouette height. `derive {name, from: "side", to: ["front_side"], parts?, flip?}` copies cells as a start to paint over.
+- **Stable rotation:** `animate {stable: true}` quantizes each part's drawing angle in 3° steps with hysteresis, so slow limbs do not shimmer. Joint positions stay exact.
+
+### Animation library: `art_anim`
+
+Author motion once per skeleton and render it on every character. A skeleton is a rig definition without art, with named proportions and masks. Clips belong to a skeleton. A skin is a drawn rig bound to a skeleton. `batch` renders skins × loadouts × clips × views straight into game strips and a manifest.
+
+```jsonc
+{ "action": "skeleton", "name": "hd", "template": "humanoid_hd", "frame": [128, 192], "weapon": { "class": "rifle" },
+  "proportions": { "heavy": { "width": 1.15, "spine": 1.04 }, "lean": { "width": 0.9, "legs": 1.04 } } }
+{ "action": "skin", "name": "mec", "skeleton": "hd", "proportions": "heavy",
+  "equipment": { "pack": { "part": "gear_back" } }, "loadouts": { "light": { "equip": [] }, "heavy": { "equip": ["pack"] } } }
+// draw the cells of rig "mec" (art_rig consistency checks the views agree), then
+{ "action": "clip", "skeleton": "hd", "name": "limp", "layers": [{ "clip": "walk" }, { "clip": "flinch", "additive": true }] }
+{ "action": "batch", "skins": ["mec", "sev"], "loadouts": "all", "out": "C:/game/public/assets", "front": "auto" }
+```
+
+- **Skeletons:** a skeleton is made from a template, from an existing rig (`from_rig`) or from parts. The template presets become the clip library, plus `walk_aim` (walk legs with the aim upper body as a masked layer), `flinch` (an additive upper-body hit) and `walk_hit`. The masks `lower`, `upper`, `arms`, `head` and `all` are built in; add your own with `masks`. The depth model is on by default.
+- **Clips:** keys (named poses or inline parts, `carry`, `z`), `frames`, `fps`, `loop`, `events: [{t, name}]`, `plant` and `secondary`, plus `layers: [{clip, mask?, weight?, additive?}]`. An override layer blends the masked parts toward the layer (IK ends included). An additive layer adds its offset from its first frame or its `ref` pose.
+- **Skins:** `skin` creates a rig with cells sized for the proportions, or binds an existing rig (`rig`, `map`). Clips retarget to the skin's proportions automatically. `equipment` maps items to parts or variants, and `loadouts` pick items and sets.
+- **Retargeting:** `retarget {clip, from, to, map?}` copies a clip to another skeleton. Named poses are inlined (keeping their carry state), translations scale with hip height, frame-pixel IK targets move with the root, and rotations carry over.
+- **Batch:** writes `characters/<set>/<clip>_<view>.png` as horizontal strips. `front: "auto" | [parts]` adds `__front` strips with the parts drawn over the weapon. It also merges `sprites.<set>` into `manifest/characters.json`: `frame`, `anchor` (the ground point), `pad`, `skeleton`, `skin`, `loadout`, `class`, and per anim `file`, `front`, `frames`, `fps`, `loop`, `events` and the draw `order` (only where it changes). `pad: "auto"` (the default) grows the set's frame symmetrically until every frame fits, for example a rifle barrel past the 128 px side frame, and records the padding. The engine anchors on `anchor`. Stable rotation is on by default.
+- **glTF:** `gltf {skin, clips?, path?}` exports a skinned cutout mesh: one quad per part from the base-view cells, one joint per part, and the rest pose as the bind pose. Each clip becomes an animation, a hidden part is scaled to 0, and events go in the animation extras.
+
+Skill: `anim-library`. `art_help {topic:"library"}` has every option.
+
+**Export paths:** an absolute path is used as is, and `./x` or `../x` resolves against the MCP server's working directory. A bare relative path goes to the workspace `exports` folder, and the reply now says so. `art_animation export {layout: "files"}` writes one horizontal strip (and JSON) per tag; the default `rows` stacks one row per tag and says so in the reply.
 
 ### 3D environments and props (HD-2D): `art_model`
 

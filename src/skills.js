@@ -81,13 +81,24 @@ Armed characters: use the "weapon-handling" skill (hands on grips in every frame
    art_rig ${J({ action: 'create', name: 'soldier', frame: [128, 192], template: 'humanoid_hd', weapon: { class: 'rifle', attachments: { vgrip: 'vertical_grip' } } })}
 2. Draw the weapon and att_vgrip in the SIDE row only, pointing right (stock left, pistol grip ~30% in, handguard / muzzle right). The other views project that cell (canted outward with a length floor where the barrel points at the camera).
 3. Check the hold: art_rig ${J({ action: 'preview', name: 'soldier', pose: 'idle_exhale', carry: 'aim' })} then art_rig ${J({ action: 'check', name: 'soldier' })} (every preset x 8 views: hands on grips, reach, elbows, penetration, muzzle, layering, visibility).
-4. Animate as usual: presets carry the weapon (walk = ready_low, run = sprint, aim / shoot = aim with cheek weld, reload = support hand to the pouch and magazine, throw = slung, death drops it). Per call: carry:"ready_high", attach:[] (no attachment), variant:"heavy" (equipment set). animate refuses violating frames by default; constraints:"fix" auto-corrects, "warn" writes and reports.
+4. Animate as usual: presets carry the weapon (walk = ready_low, run = sprint, aim / shoot = aim with cheek weld (front view: short barrel canted toward the centre line), reload = mag out -> chest pouch -> mag in -> charging handle with events (draw the "mag" cell in the side row too), throw = slung, death drops it). Per call: carry:"ready_high", attach:[] (no attachment), variant:"heavy" (equipment set). animate refuses violating frames by default; constraints:"fix" auto-corrects, "warn" writes and reports.
 5. Tune: weapon.points {grip_main:{at:[x,y], angle}, grip_support, stock, muzzle, optic, mag} in weapon-cell px; weapon.states {name:{base:"ready_low", angle:30}}; weapon.layer {pin:{side:"front"}} for draw order; art_rig ${J({ action: 'layers', name: 'soldier', preset: 'walk', frame: 3, view: 'side' })} / explain {part_a:"chest", part_b:"weapon"} to see why.
 6. Left-handed beat or shoulder switch: key mirror_hands:true. mirror_pairs keeps the held hands on their side.
 First-person (art_model):
 1. art_model ${J({ action: 'create', name: 'ar', template: 'fp_rifle', weapon: { attach: ['vertical_grip'] } })} and create {name:"arms", template:"fp_arms"}.
 2. art_model ${J({ action: 'render', name: 'arms', canvas: 'arms_aim', size: [160, 120], camera: 'fp', hold: { weapon: 'ar', carry: 'aim' } })} (hands on the grips, optic on the eye line); render the gun layer with hold:{arms:"arms", carry:"aim"} so both layers match.
 3. art_model ${J({ action: 'check', name: 'arms', hold: { weapon: 'ar' } })} validates every clip x carry state; animate {name:"arms", clip:"reload_empty", hold:{weapon:"ar", carry:"reload", bake_weapon:"reload_empty_held"}} bakes held clips for glTF.`,
+  },
+  'anim-library': {
+    title: 'Animation library: one skeleton + clip library, many skins, batch render to game strips + manifest',
+    when: 'Several characters (factions, armour sets, body types) sharing the same motion set, or rendering a whole character roster for a game manifest.',
+    body: `1. Skeleton (rig definition + the standard clips): art_anim ${J({ action: 'skeleton', name: 'hd', template: 'humanoid_hd', frame: [128, 192], weapon: { class: 'rifle' }, proportions: { heavy: { width: 1.15, spine: 1.04 }, lean: { width: 0.9, legs: 1.04 } } })}
+2. One skin per character: art_anim ${J({ action: 'skin', name: 'mec', skeleton: 'hd', proportions: 'heavy' })} creates rig "mec" with cells sized for its proportions. Draw the cells (art_rig info {name:"mec"} lists them). Linked cells save work: parts.<p>.link:{back_side:"side"}; art_rig derive {name:"mec", from:"side", to:["front_side"]} copies a view to paint over.
+3. Check the drawing before rendering: art_rig ${J({ action: 'consistency', name: 'mec' })} (views agree: palette, bone lengths, joints, silhouette) and art_rig ${J({ action: 'zcheck', name: 'mec' })} (no z-flicker, arm order agrees with depth).
+4. New motion once for everyone: art_anim clip {skeleton:"hd", name:"walk_aim", layers:[{clip:"walk"}, {clip:"aim", mask:"upper"}]} (layers + masks), {name:"limp", layers:[{clip:"walk"}, {clip:"flinch", additive:true}]} (additive), events:[{t:0.5, name:"step"}]. Preview on a skin: art_anim ${J({ action: 'render', skin: 'mec', clip: 'walk_aim', view: 'front' })}.
+5. Equipment: skin {equipment:{helmet:{variant:"helmet"}, pack:{part:"gear_back"}}, loadouts:{light:{equip:["helmet"]}, heavy:{equip:["helmet","pack"]}}}.
+6. Ship it: art_anim ${J({ action: 'batch', skins: ['mec', 'sev'], loadouts: 'all', out: 'C:/game/public/assets', front: 'auto' })} -> characters/<set>/<clip>_<view>.png (+ __front), manifest/characters.json (frame grown by pad:"auto" to fit the barrel, anchor, events, per-frame draw order).
+7. Other engines: art_anim gltf {skin:"mec", clips:["walk","reload"]} (skinned cutout mesh + animations). Another skeleton: art_anim retarget {clip:"walk", from:"hd", to:"hd_small"}.`,
   },
   'walk-cycle': {
     title: 'Walk cycle without a rig (frame-by-frame)',

@@ -21,12 +21,12 @@ const log = (...a) => process.stderr.write(`[agent-art] ${a.join(' ')}\n`);
 
 export const INSTRUCTIONS = `Agent Art: pixel-art editor for agents (sprites, tiles, textures, icons, UI, animations, 2.5D scenes, game assets). The user watches live in a web UI (art_open_ui).
 Workflow: palette ramps first (art_palette ramp) -> flat silhouettes -> shade (auto form shading) -> outline -> hand detail (grid) -> art_critique -> fix -> art_view.
-Multi-asset work: art_project create (shared palette + style notes), review with art_sheet. Any character/creature with more than one view or frame: use art_rig (template:"humanoid"|"humanoid_hd" (detailed 64x96+)|"blob"|"flyer" is fastest; templates are only defaults) instead of hand-drawing frames, so every frame stays the same asset.
+Multi-asset work: art_project create (shared palette + style notes), review with art_sheet. Any character/creature with more than one view or frame: use art_rig (template:"humanoid"|"humanoid_hd" (detailed 64x96+)|"blob"|"flyer" is fastest; templates are only defaults) instead of hand-drawing frames, so every frame stays the same asset. Several characters sharing motion: art_anim (skeleton + clip library + skins + batch to game strips).
 3D (HD-2D maps, props -> .glb): art_model.
 Audio (SFX, music, mixing; you cannot hear, so read analyze/critique reports): art_audio.
 The user leaves review notes on assets in the web UI: art_review list (replies say when the asset you touch has open notes).
 Orient yourself with art_graph (summary / query: what is part of what, a few hundred chars) instead of art_info on everything; record relations with art_graph link / group / tag / note.
-Details on demand: art_help {topic: workflow|textures|characters|animation|rig|scenes|hires|minecraft|3d|audio|music|mixing|perception|graph} or {op:"<draw command>"}.`;
+Details on demand: art_help {topic: workflow|textures|characters|animation|rig|library|scenes|hires|minecraft|3d|audio|music|mixing|perception|graph} or {op:"<draw command>"}.`;
 
 const S = {
   canvas: { type: 'string' },
@@ -129,7 +129,7 @@ export const TOOLS = [
   },
   {
     name: 'art_help',
-    description: 'Docs on demand: {op:"shade"} full options + example for a draw command; {topic} guides: workflow, textures, characters, animation, rig, scenes, hires, minecraft, 3d, audio, music, mixing, perception, graph; {skill} step-by-step recipes.',
+    description: 'Docs on demand: {op:"shade"} full options + example for a draw command; {topic} guides: workflow, textures, characters, animation, rig, library, scenes, hires, minecraft, 3d, audio, music, mixing, perception, graph; {skill} step-by-step recipes.',
     inputSchema: {
       type: 'object',
       properties: { op: { type: 'string' }, topic: { type: 'string', enum: ['index', 'ops', ...Object.keys(TOPICS)] }, skill: { type: 'string', enum: Object.keys(SKILLS) } },
@@ -220,7 +220,7 @@ export const TOOLS = [
   },
   {
     name: 'art_animation',
-    description: 'Frame strip animation. list; tag {name, from,to|frames, duration|durations|fps, loop?, direction?}; untag; insert {at?, count?, copy_from?}; duplicate {frame, to?}; move {frame, to}; delete {frame|frames}; set_frame_size; filmstrip {animation?} (image of all frames); export {format: gif|spritesheet|frames, animation?, scale?, path?, json?:false (no sidecar)}.',
+    description: 'Frame strip animation. list; tag {name, from,to|frames, duration|durations|fps, loop?, direction?}; untag; insert {at?, count?, copy_from?}; duplicate {frame, to?}; move {frame, to}; delete {frame|frames}; set_frame_size; filmstrip {animation?} (image of all frames); export {format: gif|spritesheet|frames, animation?, scale?, path? (absolute, ./ = server cwd, bare = workspace exports), layout?: rows (one row per tag) | strip | files (one strip per tag), json?:false}.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -229,7 +229,7 @@ export const TOOLS = [
         frame: { type: 'integer' }, at: { type: 'integer' }, count: { type: 'integer' }, copy_from: { type: 'integer' },
         duration: { type: 'integer' }, durations: { type: 'array', items: { type: 'integer' } }, fps: { type: 'number' }, loop: { type: 'boolean' },
         direction: { type: 'string', enum: ['forward', 'reverse', 'pingpong'] }, frame_height: { type: 'integer' }, animation: { type: 'string' },
-        onion: { type: 'integer' }, scale: { type: 'integer' }, format: { type: 'string', enum: ['gif', 'spritesheet', 'frames'] }, path: { type: 'string' }, layout: { type: 'string', enum: ['rows', 'strip'] }, json: { type: 'boolean' },
+        onion: { type: 'integer' }, scale: { type: 'integer' }, format: { type: 'string', enum: ['gif', 'spritesheet', 'frames'] }, path: { type: 'string' }, layout: { type: 'string', enum: ['rows', 'strip', 'files'] }, json: { type: 'boolean' },
       },
       required: ['canvas', 'action'],
     },
@@ -241,11 +241,12 @@ export const TOOLS = [
   },
   {
     name: 'art_rig',
-    description: 'Rigs: parts drawn once per view, poses tweened into frames, so a character stays identical across views and animations. Fastest: create {name, frame, template:"humanoid"|"humanoid_hd" (64x96+, 8 directions, IK)|"blob"|"flyer"} (override/add/remove parts, views, poses, presets), draw the cells, animate {preset, view}. Custom: create {name, frame, views?, mirror?, parts:{p:{w,h,pivot,parent?,at?,z?,variants?,views?:{view:{at,z,hidden,pivot}}}}, root?, sampling?, secondary?:{part:{stiffness,damping}}, scale_children?}; info; update; templates; pose {pose, parts:{p:{x,y,rot,sx,sy,variant,hide}}, views?:{view:{p:{..}}}, ik?:{end:{target:[x,y]|{part,at},bend?,rot?}}, from?}; preview; turnaround; animate {preset} or {animation, view, keys:[{pose|parts,t?,ease?,mirror_pairs?}], frames, fps, loop?, plant?, secondary?, plant_feet?, canvas?, only?/hide?, variant?}. Held weapons: weapon:{class, attachments?} (carry states, hands locked on grips; animate carry?/constraints?; check = validate every clip+view; layers/explain = draw order). info/create/update reply in summary (full:true). art_help {topic:"rig"}.',
+    description: 'Rigs: parts drawn once per view, poses tweened into frames, so a character stays identical across views and animations. Fastest: create {name, frame, template:"humanoid"|"humanoid_hd" (64x96+, 8 directions, IK)|"blob"|"flyer"} (override/add/remove parts, views, poses, presets), draw the cells, animate {preset, view}. Custom: create {name, frame, views?, mirror?, parts:{p:{w,h,pivot,parent?,at?,z?,variants?,views?:{view:{at,z,hidden,pivot}}}}, root?, sampling?, secondary?:{part:{stiffness,damping}}, scale_children?}; info; update; templates; pose {pose, parts:{p:{x,y,rot,sx,sy,variant,hide}}, views?:{view:{p:{..}}}, ik?:{end:{target:[x,y]|{part,at},bend?,rot?}}, from?}; preview; turnaround; animate {preset} or {animation, view, keys:[{pose|parts,t?,ease?,mirror_pairs?}], frames, fps, loop?, plant?, secondary?, plant_feet?, canvas?, only?/hide?, variant?}. Held weapons: weapon:{class, attachments?} (carry states, hands locked on grips; animate carry?/constraints?; check = validate every clip+view; layers/explain = draw order; debug_render = per-part atlas of a frame). depth:true = arm order from depth per frame (split parts, z keys {z:{part:n}}); zcheck = flicker/order; consistency = views agree; derive {from, to} copies cells; animate stable?, events?. info/create/update reply in summary (full:true). Library (skeletons/clips/skins/batch): art_anim. art_help {topic:"rig"}.',
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['create', 'info', 'update', 'pose', 'preview', 'animate', 'turnaround', 'templates', 'check', 'layers', 'explain'] }, name: { type: 'string' }, part_a: { type: 'string' }, part_b: { type: 'string' },
+        action: { type: 'string', enum: ['create', 'info', 'update', 'pose', 'preview', 'animate', 'turnaround', 'templates', 'check', 'layers', 'explain', 'debug_render', 'consistency', 'derive', 'zcheck'] }, tag: { type: 'string' }, all_frames: { type: 'boolean' }, name: { type: 'string' }, part_a: { type: 'string' }, part_b: { type: 'string' },
+        depth: { type: ['boolean', 'object'] }, stable: { type: ['boolean', 'object'] }, events: { type: 'array', items: { type: 'object' } }, to: { type: ['array', 'string'] }, flip: { type: 'boolean' },
         weapon: { type: ['object', 'boolean'] }, carry: { type: ['string', 'object'] }, attach: { type: 'array', items: { type: 'string' } },
         variant: { type: ['string', 'array'] }, variant_sets: { type: 'object' }, constraints: { enum: ['refuse', 'fix', 'warn', 'off'] }, clips: { type: 'array', items: { type: 'string' } }, visibility: { type: 'boolean' }, full: { type: 'boolean' }, fields: { type: 'array', items: { type: 'string' } },
         template: { type: 'string', enum: ['humanoid', 'humanoid_hd', 'blob', 'flyer'] }, preset: { type: 'string' }, presets: { type: 'object' }, poses: { type: 'object' }, plant_feet: { type: 'boolean' }, plant: { type: ['boolean', 'array'] }, secondary: { type: ['boolean', 'object'] }, ik: { type: 'object' }, sampling: { type: 'string', enum: ['nearest8', 'rotsprite', 'smooth'] }, scale_children: { type: 'boolean' }, feet: { type: 'array' }, only: { type: 'array', items: { type: 'string' } }, hide: { type: 'array', items: { type: 'string' } },
@@ -260,8 +261,30 @@ export const TOOLS = [
     },
     run: async (call, a) => {
       const r = await call(`rig_${a.action}`, a);
+      // debug_render: the per-part atlas as an image, not base64 text
+      if (a.action === 'debug_render' && r?.atlas) { const { atlas, ...rest } = r; return { ...rest, image: Buffer.from(atlas, 'base64') }; }
       return ['info', 'create', 'update'].includes(a.action) ? compactRig(a.action, r, a) : r;
     },
+  },
+  {
+    name: 'art_anim',
+    description: 'Animation library: author motion once per skeleton, render many skins. skeleton {name, template:"humanoid_hd", frame, weapon?, proportions?} (+ standard clips); clip {skeleton, name, keys?|layers?:[{clip, mask?, weight?, additive?}], frames, fps, events?}; skin {name, skeleton, proportions?, equipment?, loadouts?} (creates the rig to draw); retarget {clip, from, to}; render {skin, clip, view}; batch {skins, clips?, views?, out, pad?:"auto", front?:"auto"} = game strips + manifest; gltf {skin}; list; info. art_help {topic:"library"}.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['skeleton', 'clip', 'skin', 'retarget', 'render', 'batch', 'gltf', 'list', 'info'] }, name: { type: 'string' },
+        skeleton: { type: 'string' }, template: { type: 'string' }, frame: { type: 'array', items: { type: 'integer' } }, weapon: { type: ['object', 'boolean'] }, from_rig: { type: 'string' }, preset: { type: 'string' },
+        proportions: { type: ['object', 'string'] }, masks: { type: 'object' }, depth: { type: ['boolean', 'object'] }, clips: { type: ['array', 'string', 'boolean'] },
+        keys: { type: 'array', items: { type: 'object' } }, frames: { type: 'integer' }, fps: { type: 'number' }, loop: { type: 'boolean' }, events: { type: 'array', items: { type: 'object' } },
+        layers: { type: 'array', items: { type: 'object' } }, mask: { type: ['string', 'array', 'object'] }, additive: { type: 'boolean' }, ref: { type: 'object' }, plant: { type: ['boolean', 'array'] }, secondary: { type: ['boolean', 'object'] }, carry: { type: ['string', 'object'] }, delete: { type: 'boolean' },
+        skin: { type: 'string' }, skins: { type: 'array', items: { type: 'string' } }, rig: { type: 'string' }, parts: { type: 'object' }, variant_sets: { type: 'object' }, equipment: { type: 'object' }, loadouts: { type: ['object', 'array', 'string'] }, loadout: { type: 'string' },
+        clip: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, map: { type: 'object' }, view: { type: 'string' }, views: { type: ['array', 'string'] }, canvas: { type: 'string' },
+        out: { type: 'string' }, manifest: { type: 'string' }, pad: { type: ['string', 'number', 'array'] }, front: { type: ['string', 'array'] }, stable: { type: ['boolean', 'object'] }, max_width: { type: 'integer' }, order: { type: 'boolean' },
+        path: { type: 'string' }, full: { type: 'boolean' }, overwrite: { type: 'boolean' }, project: { type: 'string' },
+      },
+      required: ['action'],
+    },
+    run: (call, a) => call(`anim_${a.action}`, a),
   },
   {
     name: 'art_model',

@@ -11,6 +11,7 @@ import { encodeGIF } from './gif.js';
 import { critiqueImage, critiqueFrames } from './critique.js';
 import { RIG_OPS } from './rigops.js';
 import { MODEL_OPS } from './modelops.js';
+import { LIB_OPS } from './libops.js';
 import { AUDIO_OPS } from './audio/ops.js';
 import { Activity } from './activity.js';
 import { Graph, GRAPH_OPS } from './graph.js';
@@ -40,9 +41,12 @@ export function packFormatFor(version) {
 }
 
 export class Engine extends EventEmitter {
-  constructor({ home }) {
+  constructor({ home, cwd }) {
     super();
     this.home = path.resolve(home);
+    // "./x" and "../x" export paths resolve against this directory (the MCP server's working
+    // directory: the user's project), bare relative paths against the workspace exports folder
+    this.cwd = path.resolve(cwd ?? process.cwd());
     this.canvasDir = path.join(this.home, 'canvases');
     this.exportDir = path.join(this.home, 'exports');
     this.packDir = path.join(this.home, 'packs');
@@ -168,7 +172,15 @@ export class Engine extends EventEmitter {
 
   resolvePath(p, baseDir) {
     if (!p) return null;
-    return path.isAbsolute(p) ? p : path.join(baseDir, p);
+    if (path.isAbsolute(p)) return p;
+    if (/^\.\.?([\\/]|$)/.test(p)) return path.resolve(this.cwd, p);
+    return path.join(baseDir, p);
+  }
+
+  /** Reply note for a bare relative export path (it went to the workspace exports folder). */
+  pathNote(p, file) {
+    if (!p || path.isAbsolute(p) || /^\.\.?([\\/]|$)/.test(p)) return {};
+    return { note: `relative path "${p}" was written under the workspace exports folder (${file}); use an absolute path, or "./${p.replace(/^[\\/]+/, '')}" for the server's working directory (${this.cwd})` };
   }
 
   /**
@@ -428,7 +440,7 @@ const OPS = {
       const loop = a.animation ? d.animations[a.animation].loop : true;
       const gif = encodeGIF(d.width * scale, fh * scale, imgs, { loop });
       fs.writeFileSync(base + '.gif', gif);
-      return { file: base + '.gif', frames: frames.length, bytes: gif.length };
+      return { file: base + '.gif', frames: frames.length, bytes: gif.length, ...this.pathNote(a.path, base + '.gif') };
     }
     if (format === 'frames') {
       const { frames } = d.playback(a.animation);
@@ -438,7 +450,16 @@ const OPS = {
         fs.writeFileSync(file, encodePNG(img.width, img.height, img.data));
         return file;
       });
-      return { files };
+      return { files, ...this.pathNote(a.path, path.dirname(base)) };
+    }
+    if (format === 'spritesheet' && a.layout === 'files') {
+      // one horizontal strip (+ json) per animation tag: <base>_<tag>.png (game engines that load
+      // one strip per animation)
+      const tags = a.animation ? [a.animation] : Object.keys(d.animations);
+      if (!tags.length) throw new Error(`canvas "${d.name}" has no animation tags (layout:"files" writes one strip per tag; use layout:"strip")`);
+      const stemBase = a.animation ? base.replace(new RegExp(`_${a.animation}$`), '') : base;
+      const files = tags.map((t) => this.run('export_animation', { ...a, layout: 'rows', animation: t, path: `${stemBase}_${t}`, _inner: true }));
+      return { files: files.map((f) => f.png), json: a.json !== false ? files.map((f) => f.json) : undefined, layout: 'files', strips: files.length, ...this.pathNote(a.path, stemBase) };
     }
     if (format === 'spritesheet') {
       // one row per animation tag (or one row of all frames), plus an Aseprite-compatible JSON
@@ -458,7 +479,9 @@ const OPS = {
           const img = frameImage(d, f, scale, { tint });
           for (let y = 0; y < fhh; y++) sheet.set(img.data.subarray(y * fw * 4, (y + 1) * fw * 4), ((ri * fhh + y) * W + ci * fw) * 4);
           const an = r.name && d.meta?.anchors?.[r.name]?.[ci];
-          json.frames[`${d.name}${r.name ? '_' + r.name : ''}_${ci}`] = { frame: { x: ci * fw, y: ri * fhh, w: fw, h: fhh }, sourceFrame: f, duration: r.durations[ci], ...(an ? { anchors: Object.fromEntries(Object.entries(an).map(([k, [x, y, rot]]) => [k, { x: x * scale, y: y * scale, rot }])) } : {}) };
+          const ord = r.name && d.meta?.order?.[r.name]?.[ci];
+          const evs = r.name ? (d.meta?.events?.[r.name] || []).filter((e) => e.frame === ci).map((e) => e.name) : [];
+          json.frames[`${d.name}${r.name ? '_' + r.name : ''}_${ci}`] = { frame: { x: ci * fw, y: ri * fhh, w: fw, h: fhh }, sourceFrame: f, duration: r.durations[ci], ...(an ? { anchors: Object.fromEntries(Object.entries(an).map(([k, [x, y, rot]]) => [k, { x: x * scale, y: y * scale, rot }])) } : {}), ...(ord ? { order: ord } : {}), ...(evs.length ? { events: evs } : {}) };
           k++;
         });
         if (r.name) json.meta.frameTags.push({ name: r.name, from: start, to: k - 1, direction: r.tag.direction, loop: r.tag.loop, row: ri });
@@ -472,7 +495,9 @@ const OPS = {
       // json:false = png only (no Aseprite-style sidecar)
       const writeJson = a.json !== false;
       if (writeJson) fs.writeFileSync(base + '.json', JSON.stringify(json, null, 2));
-      return { png: base + '.png', json: writeJson ? base + '.json' : undefined, size: `${W}x${H}`, rows: uniqueRows.length, frames: k };
+      // say how the sheet is laid out: several tags stack as rows unless asked otherwise
+      const layoutNote = !a._inner && uniqueRows.length > 1 ? { layout: 'rows', layout_note: `${uniqueRows.length} tags exported as ${uniqueRows.length} rows (one per tag); layout:"files" writes one horizontal strip per tag, layout:"strip" puts every frame in one row` } : {};
+      return { png: base + '.png', json: writeJson ? base + '.json' : undefined, size: `${W}x${H}`, rows: uniqueRows.length, frames: k, ...layoutNote, ...(a._inner ? {} : this.pathNote(a.path, base + '.png')) };
     }
     throw new Error('format must be gif, spritesheet or frames');
   },
@@ -808,7 +833,7 @@ const OPS = {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const png = d.toPNG({ scale: a.scale ?? 1, frame: a.frame, layer: a.layer, tile: a.tile ?? 1 });
     fs.writeFileSync(file, png);
-    return { file, bytes: png.length, size: `${d.width * (a.scale ?? 1)}x${(a.frame !== undefined && d.frameHeight ? d.frameHeight : d.height) * (a.scale ?? 1)}` };
+    return { file, bytes: png.length, size: `${d.width * (a.scale ?? 1)}x${(a.frame !== undefined && d.frameHeight ? d.frameHeight : d.height) * (a.scale ?? 1)}`, ...this.pathNote(a.path, file) };
   },
 
   // ---------- Minecraft resource packs ----------
@@ -956,5 +981,5 @@ const OPS = {
   },
 };
 
-Object.assign(OPS, RIG_OPS, MODEL_OPS, AUDIO_OPS, GRAPH_OPS, REVIEW_OPS);
+Object.assign(OPS, RIG_OPS, MODEL_OPS, AUDIO_OPS, GRAPH_OPS, REVIEW_OPS, LIB_OPS);
 export const OP_NAMES = Object.keys(OPS);

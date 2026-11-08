@@ -1,6 +1,6 @@
 // Layer stack + debug render data for the web UI's Layers view (rigs and their clips).
-// Uses the engine's rig_layers / rig_debug_render ops when they exist; until then it derives the
-// same information from the rig definition: per frame and view, the parts in draw order with their
+// Uses the engine's rig_layers (all_frames / tag) and rig_debug_render ops, which solve every frame
+// (depth model, weapon layer, z keys, split parts); if they fail it derives a static order from the rig definition: per frame and view, the parts in draw order with their
 // z, the rule that placed them (part z, per-view z override, declaration order) and visibility,
 // plus one RGBA layer per part so the UI can tint, solo and hit-test them.
 import { normalizeRig, viewPose, resolvePose, animatePoses, renderPose } from './rig.js';
@@ -56,7 +56,7 @@ function stackOf(rig, pose, view) {
 export function rigLayers(engine, name, q = {}) {
   if (hasOp('rig_layers')) {
     // only when the op answers in this endpoint's shape (per-frame stacks); art_rig layers (0.7) reports one frame's draw order
-    try { const r = engine.peek('rig_layers', { name, ...q }); if (Array.isArray(r?.frames) && r.frames.every((f) => Array.isArray(f?.stack))) return { ...r, source: 'rig_layers' }; } catch { /* use the fallback */ }
+    try { const r = engine.peek('rig_layers', { name, ...q, all_frames: true }); if (Array.isArray(r?.frames) && r.frames.every((f) => Array.isArray(f?.stack))) return { ...r, source: r.source || 'rig_layers' }; } catch { /* use the fallback */ }
   }
   const { def, rig } = rigOf(engine, name);
   const { view, poses, source } = posesFor(engine, rig, def, q);
@@ -67,7 +67,7 @@ export function rigLayers(engine, name, q = {}) {
 /** One frame as per-part layers (atlas PNG, one frame-sized cell per part in draw order). */
 export function rigDebugRender(engine, name, q = {}) {
   if (hasOp('rig_debug_render')) {
-    try { const r = engine.peek('rig_debug_render', { name, ...q }); if (Array.isArray(r?.stack) && typeof r?.atlas === 'string') return { ...r, source: 'rig_debug_render' }; } catch { /* fallback */ }
+    try { const r = engine.peek('rig_debug_render', { name, ...q }); if (Array.isArray(r?.stack) && typeof r?.atlas === 'string') return { ...r, source: r.source || 'rig_debug_render' }; } catch { /* fallback */ }
   }
   const { d, def, rig } = rigOf(engine, name);
   const { view, poses, source } = posesFor(engine, rig, def, q);

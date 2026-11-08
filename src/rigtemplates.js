@@ -133,7 +133,12 @@ export function projectPose(parts, pose, view) {
 // weapon cell sizes per class (body units at the 98-unit figure height) and attachment cells
 const WEAPON_CELL = { pistol: [14, 9], revolver: [15, 9], handgun: [14, 9], smg: [26, 10], dmr: [42, 11], sniper: [46, 11], lmg: [42, 13] };
 const ATT_CELL = { vertical_grip: [5, 8, 'top'], angled_grip: [8, 6, 'top'], bipod: [5, 10, 'top'], suppressor: [11, 4, 'left'], optic: [10, 5, 'bottom'], light: [7, 4, 'top'] };
-const LONG_MAP = { run_contact: 'sprint', run_down: 'sprint', run_pass: 'sprint', aim: 'aim', recoil: 'aim', reload_low: 'reload', reload_hip: 'reload', reload_insert: 'reload', reload_slap: 'reload', throw_windup: 'slung', throw_release: 'slung', throw_follow: 'slung', death_buckle: 'ready_low', death_kneel: 'drop', death_ground: 'drop' };
+const LONG_MAP = {
+  run_contact: 'sprint', run_down: 'sprint', run_pass: 'sprint', aim: 'aim', recoil: 'aim', reload_low: 'reload', reload_hip: 'reload', reload_insert: 'reload', reload_slap: 'reload',
+  reload_grab: 'reload', reload_strip: 'reload', reload_pouch: 'reload', reload_seat: 'reload', reload_in: 'reload', reload_charge: 'reload_charge', reload_pull: 'reload_charge',
+  throw_windup: 'slung', throw_release: 'slung', throw_follow: 'slung', death_buckle: 'ready_low', death_kneel: 'drop', death_ground: 'drop',
+};
+const pistolKind = (w) => w.kind === 'pistol' || ['pistol', 'handgun', 'revolver'].includes(w.class);
 const PISTOL_MAP = { ...LONG_MAP, death_buckle: 'low', run_contact: 'low', run_down: 'low', run_pass: 'low', throw_windup: 'holster', throw_release: 'holster', throw_follow: 'holster' };
 /** humanoid_hd weapon handling defaults: carry states per template pose, attachment cells. */
 export function hdWeaponConfig(weapon) {
@@ -198,6 +203,11 @@ function humanoidHD([W, H], opts = {}) {
       const pivot = mount === 'top' ? [Math.floor(w / 2), 0] : mount === 'bottom' ? [Math.floor(w / 2), h - 1] : [0, Math.floor(h / 2)];
       parts[a.part ?? `att_${n}`] = { w, h, pivot, parent: 'weapon', views: pv(null, [7.6, 7.6, 6.1, -1.9, -1.9]) };
     }
+    // magazine: rides in the mag well; mag_hand draws the same cell (art:"mag", side drawing in
+    // every view) in the support hand while the reload carries it
+    const [mw, mh] = pistolKind(wcfg) ? [3, 6] : [5, 9];
+    parts.mag = { w: Wd(mw), h: L(mh), pivot: [Math.floor(Wd(mw) / 2), 0], parent: 'weapon', views: pv(null, [7.45, 7.45, 5.95, -2.05, -2.05]) };
+    parts.mag_hand = { art: 'mag', pivot: [Math.floor(Wd(mw) / 2), Math.floor(L(mh) / 2)], parent: 'hand_b', at: [0, L(5)], hide: true, link: Object.fromEntries(HD_VIEWS.slice(1).map((v) => [v, 'side'])), views: pv(null, [-6.05, -5.05, 5.45, -5.05, 5.95]) };
   }
   // side-view pose authoring: x/y in body units (scaled to the frame), rot in degrees
   const S = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, { ...v, ...(v.x !== undefined ? { x: U(v.x) } : {}), ...(v.y !== undefined ? { y: U(v.y) } : {}) }]));
@@ -279,6 +289,23 @@ function humanoidHD([W, H], opts = {}) {
     throw_release: pose({ pelvis: { x: 2, y: 3 }, torso: { rot: 14 }, chest: { rot: 10 }, head: { rot: -4 }, upper_arm_f: { rot: -110 }, forearm_f: { rot: -15 }, hand_f: { rot: -20 }, upper_arm_b: { rot: 20 }, forearm_b: { rot: -40 }, thigh_f: { rot: 22 }, shin_f: { rot: 25 }, foot_f: { rot: -5 }, thigh_b: { rot: -28 }, shin_b: { rot: 22 }, foot_b: { rot: 6 }, ...NOGUN }),
     throw_follow: pose({ pelvis: { x: 2.5, y: 3 }, torso: { rot: 20 }, chest: { rot: 14 }, head: { rot: -6 }, upper_arm_f: { rot: -40 }, forearm_f: { rot: -20 }, upper_arm_b: { rot: 30 }, forearm_b: { rot: -60 }, thigh_f: { rot: 22 }, shin_f: { rot: 25 }, foot_f: { rot: -5 }, thigh_b: { rot: -28 }, shin_b: { rot: 22 }, foot_b: { rot: 6 }, ...NOGUN }),
   };
+  if (wcfg) {
+    // weapon reload, readable in every view: grab the mag -> strip it (mag in the hand) -> chest
+    // pouch -> new mag to the well -> seat it -> charging handle -> back to aim (events in the preset)
+    const handTo = (pt, dy, dx = 0) => (v) => ({ hand_b: { target: { weapon: pt, at: [U(dx), U(dy)] }, bend: bendB(v) } });
+    const pouchAt = { side: [10, -9], front_side: [5, -9], front: [3, -9], back_side: [-3, -9], back: [-3, -9] };
+    const pouch = (v) => ({ hand_b: { target: { part: 'chest', at: [U(pouchAt[v][0]), U(pouchAt[v][1])] }, bend: bendB(v) } });
+    const IN_HAND = { mag: { hide: true }, mag_hand: { hide: false } };
+    Object.assign(poses, {
+      reload_grab: pose({ ...aimLegs, head: { rot: 16 } }, handTo('mag', 1)),
+      reload_strip: pose({ ...aimLegs, head: { rot: 18 }, ...IN_HAND }, handTo('mag', 13)),
+      reload_pouch: pose({ ...aimLegs, chest: { rot: -2 }, head: { rot: 10 }, ...IN_HAND }, pouch),
+      reload_seat: pose({ ...aimLegs, head: { rot: 16 }, ...IN_HAND }, handTo('mag', 7)),
+      reload_in: pose({ ...aimLegs, head: { rot: 14 } }, handTo('mag', 1)),
+      reload_charge: pose({ ...aimLegs, head: { rot: 8 } }, handTo('charge', 0)),
+      reload_pull: pose({ ...aimLegs, head: { rot: 8 } }, handTo('charge', 0, -6)),
+    });
+  }
   const cycle = (names, tStep) => [...names.map((p, i) => ({ pose: p, t: r1(i * tStep) })), ...names.map((p, i) => ({ pose: p, t: r1(0.5 + i * tStep), mirror_pairs: true }))];
   const presets = {
     idle: { keys: [{ pose: 'idle_exhale' }, { pose: 'idle_inhale', t: 0.45 }, { pose: 'idle_exhale', t: 0.85 }], frames: 12, fps: 8, plant: true, secondary: true },
@@ -292,6 +319,12 @@ function humanoidHD([W, H], opts = {}) {
     hurt: { keys: [{ pose: 'idle_exhale' }, { pose: 'hurt_hit', t: 0.2, ease: 'linear' }, { pose: 'hurt_recover', t: 0.55 }, { pose: 'idle_exhale', t: 1 }], frames: 8, fps: 16, loop: false, plant: true, secondary: true },
     death: { keys: [{ pose: 'idle_exhale' }, { pose: 'hurt_hit', t: 0.12, ease: 'linear' }, { pose: 'death_buckle', t: 0.35 }, { pose: 'death_kneel', t: 0.55 }, { pose: 'death_ground', t: 1 }], frames: 20, fps: 16, loop: false, secondary: true },
     throw: { keys: [{ pose: 'idle_exhale' }, { pose: 'throw_windup', t: 0.35 }, { pose: 'throw_release', t: 0.55, ease: 'linear' }, { pose: 'throw_follow', t: 0.75 }, { pose: 'idle_exhale', t: 1 }], frames: 12, fps: 16, loop: false, plant: true, secondary: true },
+  };
+  if (wcfg) presets.reload = {
+    keys: [{ pose: 'aim' }, { pose: 'reload_grab', t: 0.12 }, { pose: 'reload_strip', t: 0.22 }, { pose: 'reload_pouch', t: 0.38 }, { pose: 'reload_pouch', t: 0.46 }, { pose: 'reload_seat', t: 0.6 }, { pose: 'reload_in', t: 0.68 }, { pose: 'reload_charge', t: 0.78 }, { pose: 'reload_pull', t: 0.85, ease: 'linear' }, { pose: 'reload_charge', t: 0.9, ease: 'linear' }, { pose: 'aim', t: 1 }],
+    frames: 24, fps: 16, loop: false, plant: true, secondary: true,
+    // the mag leaves the gun where the strip key takes over (tween midpoint) and is seated where reload_in does
+    events: [{ t: 0.17, name: 'mag_out' }, { t: 0.42, name: 'mag_pouch' }, { t: 0.64, name: 'mag_in' }, { t: 0.85, name: 'charge' }, { t: 1, name: 'ready' }],
   };
   const guide = 'humanoid_hd: side = facing RIGHT; *_f = the near side in that view (draw *_b darker). Spine: pelvis (root, hip-joint pivot), torso (abdomen) and chest (pivots near their bottom), neck, head (neck pivot at the bottom; "head:blink" = eyes closed). Limbs: upper_arm/forearm/hand and thigh/shin/foot, pivots at the top joint (shoulder, elbow, wrist, hip, knee, ankle); foot pivot = ankle, toes point right in "side". Limb cells overlap their joints a few px so bent elbows and knees stay closed. Optional slots (leave empty or remove with null): weapon (in hand_f, drawn pointing right with the grip on the pivot; shown in aim/shoot/reload), gear_back, gear_hip (swings), cape (secondary motion). Views: side, front_side (3/4 toward camera), front, back_side (3/4 away), back; side_left/front_side_left/back_side_left are mirrors (8 directions).';
   return {
@@ -325,6 +358,8 @@ export function mergeTemplate(t, a) {
     return out;
   };
   const parts = merge(t.parts, a.parts, true);
+  // a part that draws a removed part's cell (mag_hand without mag) goes with it
+  for (const [k, p] of Object.entries(parts)) if (p.art && !parts[p.art]) delete parts[k];
   for (const p of Object.values(parts)) if (p.parent && !parts[p.parent]) { p.at = p.at || [0, 0]; delete p.parent; }
   const views = a.views || t.views;
   for (const p of Object.values(parts)) if (p.views) p.views = Object.fromEntries(Object.entries(p.views).filter(([v]) => views.includes(v)));

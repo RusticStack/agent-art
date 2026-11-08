@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Animation library (`art_anim`) and 2D rotated-sprite tooling
+
+- New tool `art_anim`:
+  - `skeleton`: a rig definition with named proportions and masks; template presets become the clip library, plus the standard `walk_aim`, `flinch` and `walk_hit`.
+  - `clip`: keys, events, and `layers` with masks, weights and additive layers.
+  - `skin`: creates a rig sized for the proportions, or binds an existing one; equipment and loadouts.
+  - `retarget`, `render` and `list` / `info`.
+  - `batch`: skins × loadouts × clips × views written as game strips with `__front` splits, merged into a manifest with frame, anchor, padding, events and draw order.
+  - `gltf`: a skinned cutout mesh with the clips as animations.
+- `art_rig`:
+  - `depth` model: per-frame arm order from a 3D proxy, with hysteresis and split parts.
+  - z keyframes (`key.z`).
+  - New actions: `zcheck` (z-flicker and depth violations), `consistency` (cross-view checks) and `derive` (copy cells between views).
+  - Part options `link` (draw another view's cell), `art` (draw another part's cell) and `hide` (hidden by default).
+  - `animate` options `stable` (quantized drawing angles with hysteresis) and `events`. `animate` stores per-frame order and events in the canvas meta and the spritesheet JSON.
+- Weapon handling:
+  - Front-view aim: a short barrel canted inward toward the centre line, drawn over the forearms and under the hands, with a head tilt onto the stock (`foreshorten.aim_floor`, `aim_cant`, `weld_tilt`).
+  - New weapon point `charge` (charging handle) and state `reload_charge`. The `reload` carry is now muzzle-up at the chest instead of muzzle-down.
+  - `humanoid_hd` with a weapon adds `mag` and `mag_hand` parts and a reload preset (grab, strip, pouch, seat, charge) with events.
+- Export fixes:
+  - `./` and `../` paths resolve against the server's working directory, and bare relative paths report that they went to the workspace exports folder.
+  - `art_animation export {layout: "files"}` writes one strip per tag, and the default `rows` layout says it stacked several tags.
+- Web UI Layers view: `/api/rig/<name>/layers` and `/debug` are now served by `art_rig layers {tag | all_frames}` (every frame's stack with the rule that placed each part: depth model, weapon layer, z keys, split parts, hidden reasons) and the new `art_rig debug_render` (per-part atlas), instead of the static order derived from the rig definition.
+- Skill `anim-library`; help topic `library`.
+
 ## 0.7.0
 
 ### Weapon handling (`art_rig`, `art_model`)
