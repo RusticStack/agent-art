@@ -11,6 +11,10 @@
 import { hash3, mulberry32 } from './util.js';
 import { triangulate, pointInPoly, polySDF, contour, simplifyLoop, simplifyPath, nestLoops, triangulateShape, area2 } from './poly2d.js';
 import { applyCTM, cellIndex, ctmTileFor, faceBasis, tileUV } from './ctm.js';
+import { sweep } from './sweep.js';
+import { greeble } from './greeble.js';
+import { normPBR, pbrKey, normBump, bumpKey, bumpNormal, mrTexture, normTrim, trimStrips } from './surface.js';
+import { booleanMesh, mergeMesh } from './csg.js';
 
 // ---------- vector / matrix ----------
 const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
@@ -167,19 +171,31 @@ export function weld(g) {
   const map = new Map(), pos = [], nrm = [], uv = [], uv0 = [], alpha = [], remap = new Uint32Array(g.pos.length / 3);
   const q = (v) => Math.round(v * 1e5);
   const ov = !!g.overlay;
+  // optional per-vertex data (baked AO, AO lightmap UVs, morph targets) joins the key only when present
+  const hasAO = !ov && !!g.ao, hasUV1 = !ov && !!g.uv1, morphs = !ov && g.morphs ? g.morphs : null;
+  const ao = [], uv1 = [], mpos = morphs ? morphs.map(() => []) : null, mnrm = morphs ? morphs.map(() => []) : null;
   for (let i = 0; i < g.pos.length / 3; i++) {
     let key = `${q(g.pos[i * 3])},${q(g.pos[i * 3 + 1])},${q(g.pos[i * 3 + 2])},${q(g.nrm[i * 3])},${q(g.nrm[i * 3 + 1])},${q(g.nrm[i * 3 + 2])},${q(g.uv[i * 2])},${q(g.uv[i * 2 + 1])}`;
     if (ov) key += `,${q(g.uv0[i * 2])},${q(g.uv0[i * 2 + 1])},${q(g.alpha[i])}`;
+    if (hasAO) key += `,a${q(g.ao[i])}`;
+    if (hasUV1) key += `,l${q(g.uv1[i * 2])},${q(g.uv1[i * 2 + 1])}`;
+    if (morphs) for (const t of morphs) key += `,m${q(t.pos[i * 3])},${q(t.pos[i * 3 + 1])},${q(t.pos[i * 3 + 2])}`;
     let j = map.get(key);
     if (j === undefined) {
       j = pos.length / 3; map.set(key, j);
       pos.push(g.pos[i * 3], g.pos[i * 3 + 1], g.pos[i * 3 + 2]); nrm.push(g.nrm[i * 3], g.nrm[i * 3 + 1], g.nrm[i * 3 + 2]); uv.push(g.uv[i * 2], g.uv[i * 2 + 1]);
       if (ov) { uv0.push(g.uv0[i * 2], g.uv0[i * 2 + 1]); alpha.push(g.alpha[i]); }
+      if (hasAO) ao.push(g.ao[i]);
+      if (hasUV1) uv1.push(g.uv1[i * 2], g.uv1[i * 2 + 1]);
+      if (morphs) morphs.forEach((t, k) => { mpos[k].push(t.pos[i * 3], t.pos[i * 3 + 1], t.pos[i * 3 + 2]); mnrm[k].push(t.nrm[i * 3], t.nrm[i * 3 + 1], t.nrm[i * 3 + 2]); });
     }
     remap[i] = j;
   }
   const out = { tex: g.tex, pos: new Float32Array(pos), nrm: new Float32Array(nrm), uv: new Float32Array(uv), idx: Uint32Array.from(g.idx, (i) => remap[i]) };
   if (ov) Object.assign(out, { overlay: true, uv0: new Float32Array(uv0), alpha: new Float32Array(alpha) });
+  if (hasAO) out.ao = new Float32Array(ao);
+  if (hasUV1) out.uv1 = new Float32Array(uv1);
+  if (morphs) out.morphs = morphs.map((t, k) => ({ name: t.name, pos: new Float32Array(mpos[k]), nrm: new Float32Array(mnrm[k]) }));
   return out;
 }
 
@@ -264,7 +280,7 @@ function bevelBoxFaces(m, min, max, e, ft, tile = true) {
   const c = [0, 1, 2].map((k) => (min[k] + max[k]) / 2), h = [0, 1, 2].map((k) => (max[k] - min[k]) / 2);
   const mode = tile ? 1 : 0;
   const pt = (v) => add(c, v);
-  const emit = (P, n) => { const t = ft(n); m.face(t, P, n, uvFace(P, n, t, tile), n, mode); };
+  const emit = (P, n) => { const t = ft(n); return m.face(t, P, n, uvFace(P, n, t, tile), n, mode); };
   for (let k = 0; k < 3; k++) for (const s of [-1, 1]) {
     const i = (k + 1) % 3, j = (k + 2) % 3, P = [];
     for (const [si, sj] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { const v = [0, 0, 0]; v[k] = s * h[k]; v[i] = si * (h[i] - e); v[j] = sj * (h[j] - e); P.push(pt(v)); }
@@ -276,12 +292,12 @@ function bevelBoxFaces(m, min, max, e, ft, tile = true) {
     const at = (ai, aj, sl) => { const v = [0, 0, 0]; v[i] = si * ai; v[j] = sj * aj; v[l] = sl * (h[l] - e); return pt(v); };
     const P = [at(h[i], h[j] - e, -1), at(h[i], h[j] - e, 1), at(h[i] - e, h[j], 1), at(h[i] - e, h[j], -1)];
     const n = [0, 0, 0]; n[i] = si; n[j] = sj;
-    emit(P, norm(n));
+    emit(P, norm(n)).edge = true;
   }
   for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) {
     const S = [sx, sy, sz];
     const P = [0, 1, 2].map((k) => pt(S.map((s, q) => s * (q === k ? h[q] : h[q] - e))));
-    emit(P, norm(S));
+    emit(P, norm(S)).edge = true;
   }
 }
 
@@ -362,7 +378,7 @@ function insetBoxFaces(m, w, h, d, y0, ft, insets, ctx, tile = true) {
       const edges = [[[u, v], [u + pw, v], fr.dn.map((x) => -x)], [[u + pw, v], [u + pw, v + ph], fr.r], [[u + pw, v + ph], [u, v + ph], fr.dn], [[u, v + ph], [u, v], fr.r.map((x) => -x)]];
       for (const [[ua, va], [ub, vb], out] of edges) {
         const W = [fr.at(ua, va, 0), fr.at(ub, vb, 0), fr.at(ub, vb, k), fr.at(ua, va, k)], n = out.map((x) => x * sg);
-        m.face(st, W, n, uvFace(W, n, st, true), null, 1);
+        m.face(st, W, n, uvFace(W, n, st, true), null, 1).edge = true;
       }
     }
   }
@@ -735,6 +751,26 @@ function texSize(a, ctx) {
 }
 const isVoxel = (a) => a.style === 'voxel' || a.voxel === true;
 
+/**
+ * greeble / greebles:[{face?:"top", ...greeble options}] on a box-like piece: the pieces are
+ * scattered over that face (the inset frame: top-left as seen from outside) and stand out of it.
+ */
+function faceGreebles(m, a, ctx, w, h, d, y0, bevel = 0) {
+  const list = [].concat(a.greebles ?? [], a.greeble ? [a.greeble === true ? {} : a.greeble] : []);
+  for (const spec of list) {
+    if (!spec || typeof spec !== 'object') throw new Error('greeble must be {face?, seed?, density?, size?, kinds?, ...}');
+    const face = spec.face ?? 'top';
+    const fr = boxFaceFrame(face, w, h, d, y0);
+    const tex = spec.texture ?? a.faces?.[face] ?? a[face] ?? a.texture ?? a.color;
+    const g = greeble({ ...spec, w: fr.fw, d: fr.fh, margin: spec.margin ?? Math.max(1, bevel), texture: tex }, ctx);
+    const o = fr.at(fr.fw / 2, fr.fh / 2), r = fr.r, n = fr.n, dn = fr.dn;
+    const M = [r[0], n[0], dn[0], o[0], r[1], n[1], dn[1], o[1], r[2], n[2], dn[2], o[2]];
+    if (g.gpu) m.gpu = [...(m.gpu || []), ...g.gpu.map((p) => ({ ...p, mats: p.mats.map((x) => matMul(M, x)) }))];
+    else m.add(g.transform(M));
+    m.greebleStats = m.greebleStats ? { pieces: m.greebleStats.pieces + g.greebleStats.pieces, coverage: g.greebleStats.coverage, kinds: [...new Set([...m.greebleStats.kinds, ...g.greebleStats.kinds])] } : g.greebleStats;
+  }
+}
+
 /** Box-like kit pieces: box, wall, floor/slab, ledge. Ruins (broken/holes) = smooth polygon outlines. */
 function block(defaults) {
   return (a, ctx) => {
@@ -758,6 +794,7 @@ function block(defaults) {
         bevelBoxFaces(m, [-w / 2, y0, -d / 2], [w / 2, y0 + h, d / 2], e, ft, tile);
       } else if (insets.length) insetBoxFaces(m, w, h, d, y0, ft, insets, ctx, tile);
       else boxFaces(m, [-w / 2, y0, -d / 2], [w / 2, y0 + h, d / 2], ft, tile);
+      if (a.greeble || a.greebles) faceGreebles(m, a, ctx, w, h, d, y0, bevel);
       return m;
     }
     const plane = a.plane ?? (h <= d && h <= w ? 'xz' : 'xy');
@@ -1073,6 +1110,7 @@ export const BUILDERS = {
   ledge: block({ w: 32, h: 4, d: 12, color: '#a8a296' }),
   pillar: pillar(false),
   column: pillar(true),
+  sweep, tube: sweep, greeble,
 };
 BUILDERS.prism = (a, ctx) => cylinder({ segments: 6, flat: true, ...a }, ctx);
 BUILDERS.cone = (a, ctx) => cylinder({ r_top: 0, ...a }, ctx);
@@ -1103,10 +1141,13 @@ export const PART_DOCS = {
   loft: 'shape with scale_end (default 0.5): points,d,plane?,scale_end?:[sx,sy],shift_end?,about? (default bbox centre); e.g. a hull narrowing toward the nose',
   extrude: 'canvas,frame?,layer?,region?,depth?:4,center?:true, depth_map?:<canvas> (luminance = thickness, voxel relief), levels?, invert?, min_depth?:1, mode?:voxel',
   lathe: 'canvas (right-half profile),axis?:0,segments?:12,smooth?,simplify?:0.75 px (0 = exact pixel steps),texture?,wrap?,cap?',
+  tube: 'path:[[x,y,z],..] | from+to (+sag px = hanging cable), curve?:linear|catmull|bezier, segments?:6, r?:2, r_end? (taper), sides?:8, profile?:[[x,y],..] (custom section, x side, y up), twist? deg, caps?:true|start|end|false, closed?, up?, texture (u around x wrap?, v world px along) | trim:"sheet:strip"',
+  sweep: 'same as tube (profile sweeps: conduits, railings, rails, hoses)',
+  greeble: 'w?:64,d?:64 region on y=0 facing +y, seed?, density?:0.45 (0..1 covered), size?:[3,12] px, height?:[1,4], kinds?:[panel vent pipe conduit antenna bolts hatch heatsink nozzle dome cables tank block | "model:<name>"] or {kind:weight}, grid? px (snap), align?:grid|free, gap?:1, margin?:1, avoid?:<mask canvas>|[[u,v,w,h]], texture|color, dark?, accent?, textures?:{<kind>|main|dark|accent}, drop_lod?:auto (<= 2 px tall at LOD 1, else 2), instanced? (GPU instancing). On box/wall/floor/slab/ledge: greeble:{face, ...} | greebles:[..]',
   model: 'model:"<other model>" = place another model (layouts / dioramas)',
 };
 export const PART_TYPES = [...Object.keys(BUILDERS), 'model'];
-export const PART_COMMON = 'at?:[x,y,z]|cell?:[gx,gy,gz]|turn?|rotate?:[x,y,z] (deg, X then Y then Z about the part origin)|pivot?:[x,y,z] (rotate/scale about this local point)|scale?|mirror?:x|y|z|[..] (adds mirrored copies)|array?:{count,step|cell_step,rotate?,turn?,about?:[x,y,z]}|opacity?:0..1|glass?|double_sided?|overlays?:[{texture,where,map,scale,falloff,amount}]|ctm_tag?';
+export const PART_COMMON = 'at?:[x,y,z]|cell?:[gx,gy,gz]|turn?|rotate?:[x,y,z] (deg, X then Y then Z about the part origin)|pivot?:[x,y,z] (rotate/scale about this local point)|scale?|mirror?:x|y|z|[..] (adds mirrored copies)|array?:{count,step|cell_step,rotate?,turn?,about?:[x,y,z]}|opacity?:0..1|glass?|double_sided?|overlays?:[{texture,where,map,scale,falloff,amount}]|ctm_tag?|material?:preset|{metal,rough}|bump?|trim?:"sheet:strip"|boolean?:subtract|union|intersect + target?|id?|cast_shadow?|receive_shadow?';
 
 // ---------- world UVs (after placement) ----------
 /** Recompute UVs of world-tiled faces from their final positions: seamless across pieces. */
@@ -1122,7 +1163,37 @@ export function worldUV(mesh) {
           g.uv[v * 2] = dot(p, t) / W; g.uv[v * 2 + 1] = -dot(p, b) / H;
         }
       } else if (f.mode === 2) for (let v = f.v; v < f.v + f.vc; v++) g.uv[v * 2 + 1] = -g.pos[v * 3 + 1] / H;
+      else if (f.mode === 3) trimUV(g, f);
     }
+  }
+}
+/**
+ * Trim-sheet face (mode 3): u runs along the face's longest edge at world scale (1 texel = scale
+ * px, seamless along a run), v spans the face's width fitted into the strip rows [y, y + h).
+ */
+function trimUV(g, f) {
+  const { y0, h, W, H, scale, flip } = f.trim;
+  let best = null, bl = 0;
+  for (let k = 0; k < f.vc; k++) {
+    const a = f.v + k, b = f.v + ((k + 1) % f.vc);
+    const e = [g.pos[b * 3] - g.pos[a * 3], g.pos[b * 3 + 1] - g.pos[a * 3 + 1], g.pos[b * 3 + 2] - g.pos[a * 3 + 2]], l = len(e);
+    if (l > bl + 1e-6) { bl = l; best = e; }
+  }
+  if (!best) return;
+  // along: the longest edge, signed so runs read the same way (+x, +z, then +y first)
+  let al = norm(best);
+  const lead = Math.abs(al[0]) > 1e-3 ? al[0] : Math.abs(al[2]) > 1e-3 ? al[2] : al[1];
+  if (lead < 0) al = al.map((v) => -v);
+  const ac = norm(cross(f.n, al));
+  let c0 = Infinity, c1 = -Infinity;
+  for (let v = f.v; v < f.v + f.vc; v++) { const c = dot([g.pos[v * 3], g.pos[v * 3 + 1], g.pos[v * 3 + 2]], ac); c0 = Math.min(c0, c); c1 = Math.max(c1, c); }
+  const e = 0.02;
+  for (let v = f.v; v < f.v + f.vc; v++) {
+    const p = [g.pos[v * 3], g.pos[v * 3 + 1], g.pos[v * 3 + 2]];
+    let s = (dot(p, ac) - c0) / (c1 - c0 || 1);
+    if (flip) s = 1 - s;
+    g.uv[v * 2] = dot(p, al) / (W * scale);
+    g.uv[v * 2 + 1] = (y0 + e + s * (h - 2 * e)) / H;
   }
 }
 
@@ -1373,6 +1444,96 @@ function applyMaterial(mesh, p, ctx) {
   return mesh;
 }
 
+// ---------- part surfaces: PBR material / bump (normal map) variants, trim-sheet faces ----------
+/** material:"glass" (or {preset:"glass"}) = the glass:true translucent material. */
+function partForSpec(p) {
+  const m = p.material;
+  const glassPreset = m === 'glass' || (m && typeof m === 'object' && m.preset === 'glass');
+  return glassPreset && p.glass === undefined ? { ...p, glass: true } : p;
+}
+/** Re-key a built part's base groups onto PBR / bump variants of their textures (no-op without material / bump). */
+function applySurface(mesh, p, ctx) {
+  const pbr = p.material === undefined ? null : normPBR(p.material);
+  const bump = p.bump === undefined ? null : normBump(p.bump);
+  if (!pbr && !bump) return mesh;
+  const cache = ctx.surfCache || (ctx.surfCache = new Map());
+  const groups = new Map();
+  for (const [k, g] of mesh.groups) {
+    if (g.overlay) { groups.set(k, g); continue; }
+    const base = g.tex;
+    const key = `${base.key}|s:${pbr ? pbrKey(pbr) : ''}|${bump ? bumpKey(bump) : ''}`;
+    if (!cache.has(key)) {
+      const ik = base.imageKey ?? base.key;
+      const v = { ...base, key, name: `${base.name || base.key}${pbr ? `_${pbr.preset || `m${Math.round(pbr.metal * 100)}r${Math.round(pbr.rough * 100)}`}` : ''}${bump ? '_bump' : ''}`, imageKey: ik };
+      if (pbr) {
+        v.pbr = { metal: pbr.metal, rough: pbr.rough };
+        if (base.metalData || base.roughData) { v.mr = mrTexture(base.width, base.height, base.metalData, base.roughData, pbr); v.mrKey = `${ik}#mr${pbrKey(pbr)}`; }
+        if (pbr.emissive && !base.emissive) { v.emissive = base.data; v.emissiveKey = `${ik}#self`; }
+      }
+      if (bump && base.width * base.height > 1) {
+        const n = bumpNormal(base, bump);
+        if (n) { v.normal = n; v.normalKey = `${ik}#n${bumpKey(bump)}`; }
+      }
+      cache.set(key, v);
+    }
+    g.tex = cache.get(key);
+    groups.set(cache.get(key).key, g);
+  }
+  mesh.groups = groups;
+  return mesh;
+}
+/** Move the faces pick(g, f) of a mesh into the group of texture tex (mutate(f) adjusts each moved face). */
+export function moveFaces(mesh, pick, tex, mutate) {
+  const moved = new Mesh();
+  for (const g of [...mesh.groups.values()]) {
+    if (!g.faces || g.tex === tex) continue;
+    const take = new Set(g.faces.filter((f) => pick(g, f)));
+    if (!take.size) continue;
+    const tg = moved.group(tex);
+    for (const f of take) {
+      const base = tg.pos.length / 3, i0 = tg.idx.length;
+      for (let v = f.v; v < f.v + f.vc; v++) { tg.pos.push(g.pos[v * 3], g.pos[v * 3 + 1], g.pos[v * 3 + 2]); tg.nrm.push(g.nrm[v * 3], g.nrm[v * 3 + 1], g.nrm[v * 3 + 2]); tg.uv.push(g.uv[v * 2], g.uv[v * 2 + 1]); }
+      for (let i = f.i; i < f.i + f.ic; i++) tg.idx.push(g.idx[i] - f.v + base);
+      const nf = { ...f, n: f.n.slice(), v: base, i: i0 };
+      if (mutate) mutate(nf);
+      tg.faces.push(nf);
+    }
+    rebuildGroup(g, take);
+    if (!g.idx.length) for (const [k, x] of mesh.groups) if (x === g) mesh.groups.delete(k);
+  }
+  return mesh.add(moved);
+}
+/**
+ * trim:"sheet:strip": faces of the part sample one strip of a trim-sheet canvas (u along the face
+ * at world scale, v across the strip). faces "auto" = bevel chamfers + inset walls + thin faces
+ * (narrower than the strip height, or trim.max px), "edges" = thin faces only, "all" = every face.
+ */
+function applyTrim(mesh, p, ctx) {
+  const tr = normTrim(p.trim);
+  if (!tr || p.type === 'sweep' || p.type === 'tube') return mesh;
+  const sheet = ctx.tex(tr.sheet);
+  const strips = trimStrips({ trim: sheet.trim }, sheet.width, sheet.height, tr.sheet);
+  const st = strips[tr.strip];
+  if (!st) throw new Error(`trim sheet "${tr.sheet}" has no strip "${tr.strip}" (strips: ${Object.keys(strips).join(', ')})`);
+  const maxW = tr.max ?? Math.max(2, st[1] * tr.scale);
+  const thin = (g, f) => {
+    const { t, b } = faceBasis(f.n);
+    let s0 = Infinity, s1 = -Infinity, q0 = Infinity, q1 = -Infinity;
+    for (let v = f.v; v < f.v + f.vc; v++) { const P = [g.pos[v * 3], g.pos[v * 3 + 1], g.pos[v * 3 + 2]], s = dot(P, t), q = dot(P, b); s0 = Math.min(s0, s); s1 = Math.max(s1, s); q0 = Math.min(q0, q); q1 = Math.max(q1, q); }
+    return Math.min(s1 - s0, q1 - q0) <= maxW + 1e-6;
+  };
+  // greeble pieces keep their own textures (their small faces are not trim edges)
+  const pick = tr.faces === 'all' ? (g, f) => f.greeble === undefined : tr.faces === 'edges' ? (g, f) => f.greeble === undefined && thin(g, f) : (g, f) => f.greeble === undefined && (!!f.edge || thin(g, f));
+  return moveFaces(mesh, pick, sheet, (f) => { f.mode = 3; f.trim = { y0: st[0], h: st[1], W: sheet.width, H: sheet.height, scale: tr.scale, flip: tr.flip }; });
+}
+/** GPU-instanced pieces (greeble instanced:true) merged back into the mesh (nested builds, rig nodes). */
+function flattenGpu(m) {
+  if (!m.gpu) return m;
+  for (const p of m.gpu) for (const M of p.mats) m.add(p.mesh.clone().transform(M));
+  delete m.gpu;
+  return m;
+}
+
 // ---------- transforms + assembly ----------
 const vec3 = (v, d = 0) => (v === undefined || v === null ? [d, d, d] : typeof v === 'number' ? [v, v, v] : [Number(v[0] ?? d), Number(v[1] ?? d), Number(v[2] ?? d)]);
 
@@ -1445,6 +1606,35 @@ export function originShift(def, mesh, firstTex) {
 }
 
 /**
+ * boolean:"subtract"|"union"|"intersect" on a part: it cuts / joins its target (target: part
+ * index, id or name; default the nearest earlier non-boolean part) after both are placed, and is
+ * not emitted itself. Applied in part order.
+ */
+function applyBooleans(def, placed, parts, mesh) {
+  const find = (k, i) => {
+    if (k === undefined || k === null) { for (let j = i - 1; j >= 0; j--) if (placed[j] && !(def.parts[j].boolean)) return j; throw new Error(`part ${i}: boolean needs an earlier part to cut (or target)`); }
+    if (typeof k === 'number' || /^\d+$/.test(String(k))) return Number(k);
+    const j = def.parts.findIndex((p) => p && (p.id === k || p.name === k));
+    if (j < 0) throw new Error(`part ${i}: boolean target "${k}" is not a part index, id or name`);
+    return j;
+  };
+  def.parts.forEach((p, i) => {
+    if (!p || p.boolean === undefined || p.boolean === null || p.hidden || !placed[i]) return;
+    const op = p.boolean;
+    if (!['subtract', 'union', 'intersect'].includes(op)) throw new Error(`part ${i}: boolean must be subtract, union or intersect`);
+    const t = find(p.target, i);
+    if (t === i || !placed[t]) throw new Error(`part ${i}: boolean target ${t} is not a placed part (instanced models and consumed cutters cannot be targets)`);
+    const before = placed[t].triangles;
+    placed[t] = booleanMesh(op, placed[t], placed[i]);
+    placed[i] = null;
+    parts[parts.findIndex((x) => x.i === i)].boolean = { op, target: t };
+    const pt = parts.find((x) => x.i === t);
+    if (pt) { pt.triangles = placed[t].triangles; pt.boolean_result = { before, after: placed[t].triangles }; }
+  });
+  for (const m of placed) if (m) mesh.add(m);
+}
+
+/**
  * Build a model definition -> { mesh (px, origin applied), parts:[{i,type,triangles}], origin,
  * instances:[{model, matrix, mesh}] when ctx.instances (model parts are then not merged), baked }.
  * ctx: { tex(ref), getModel(name), stack?, nested?, instances? }. Nested builds stay raw (no
@@ -1460,7 +1650,12 @@ export function buildModel(def, ctx) {
   // rig: named parts (or rig.merge:false) become glTF nodes; faces remember their node
   const layout = ctx.nested ? null : rigLayout(def);
   let firstTex = null;
-  def.parts.forEach((p, i) => {
+  // booleans: parts are kept apart until the cutters are applied (only when a part asks for one)
+  const useBool = def.parts.some((p) => p && p.boolean !== undefined && p.boolean !== null && !p.hidden);
+  const placed = useBool ? [] : null;
+  const gpu = new Map(), partBounds = [];
+  def.parts.forEach((p0, i) => {
+    const p = p0 && p0.material !== undefined ? partForSpec(p0) : p0;
     const type = p.type;
     try {
       if (!type) throw new Error(`missing "type" (one of ${PART_TYPES.join(', ')})`);
@@ -1487,38 +1682,70 @@ export function buildModel(def, ctx) {
         }
         local = buildModel(sub, subCtx).mesh;
         applyMaterial(local, p, ctx);
+        applySurface(local, p, ctx);
         if (partOv.length) for (const { f } of local.faces) f.ov = [...(f.ov || []), ...partOv];
+        if (p.cast_shadow !== undefined || p.receive_shadow !== undefined) for (const { f } of local.faces) { if (p.cast_shadow !== undefined) f.cs = !!p.cast_shadow; if (p.receive_shadow !== undefined) f.rs = !!p.receive_shadow; }
       } else {
         const b = BUILDERS[type];
         if (!b) throw new Error(`unknown part type "${type}" (one of ${PART_TYPES.join(', ')})`);
         local = b(p, ctx);
+        if (local.gpu && (ctx.nested || (layout && layout.nodeOf[i] !== null) || useBool)) flattenGpu(local);
         applyMaterial(local, p, ctx);
-        local.tagFaces({ pid: ids.n++, tag: p.ctm_tag ?? p.tag, ov: partOv.length ? partOv : undefined });
+        applySurface(local, p, ctx);
+        if (p.trim !== undefined) applyTrim(local, p, ctx);
+        local.tagFaces({ pid: ids.n++, tag: p.ctm_tag ?? p.tag, ov: partOv.length ? partOv : undefined, cs: p.cast_shadow === undefined ? undefined : !!p.cast_shadow, rs: p.receive_shadow === undefined ? undefined : !!p.receive_shadow });
+        if (local.gpu) for (const pr of local.gpu) { applyMaterial(pr.mesh, p, ctx); applySurface(pr.mesh, p, ctx); pr.mesh.tagFaces({ pid: ids.n++, tag: p.ctm_tag ?? p.tag, cs: p.cast_shadow === undefined ? undefined : !!p.cast_shadow, rs: p.receive_shadow === undefined ? undefined : !!p.receive_shadow }); }
         if (!firstTex && (type === 'extrude' || type === 'lathe')) firstTex = ctx.tex(p.canvas ? imageRef(p) : p.profile ?? p.texture);
       }
       if (layout && layout.nodeOf[i] !== null) for (const { f } of local.faces) f.node = layout.nodeOf[i];
+      const into = useBool ? (placed[i] = new Mesh()) : mesh;
+      let pb = null;
       for (const [k, mm] of mats.entries()) {
         const c = mats.length > 1 ? local.clone() : local;
         if (k > 0 && type !== 'model') for (const { f } of c.faces) f.pid = ids.n++;
-        c.transform(mm); mesh.add(c); tris += c.triangles;
+        c.transform(mm); into.add(c); tris += c.triangles;
+        const b = c.bounds();
+        pb = pb ? { min: pb.min.map((v, q) => Math.min(v, b.min[q])), max: pb.max.map((v, q) => Math.max(v, b.max[q])) } : b;
       }
-      parts.push({ i, type, triangles: tris, ...(mats.length > 1 ? { copies: mats.length } : {}) });
+      if (local.gpu) {
+        for (const pr of local.gpu) {
+          if (!gpu.has(pr.mesh)) gpu.set(pr.mesh, { key: pr.key, mesh: pr.mesh, mats: [], part: i });
+          for (const mm of mats) for (const x of pr.mats) gpu.get(pr.mesh).mats.push(matMul(mm, x));
+          tris += pr.mesh.triangles * pr.mats.length * mats.length;
+        }
+      }
+      partBounds[i] = pb;
+      parts.push({ i, type, triangles: tris, ...(mats.length > 1 ? { copies: mats.length } : {}), ...(local.greebleStats ? { greebles: local.greebleStats } : {}), ...(local.gpu ? { gpu_instances: local.gpu.reduce((s, pr) => s + pr.mats.length * mats.length, 0) } : {}) });
     } catch (e) {
       const sig = PART_DOCS[type];
       throw new Error(`part ${i} (${type}): ${e.message}${sig ? `\nusage: ${type} {${sig}} + ${PART_COMMON}` : ''}`);
     }
   });
+  if (useBool) applyBooleans(def, placed, parts, mesh);
+  let merged = null;
+  if (def.merge) {
+    const mo = def.merge === true ? {} : def.merge;
+    if (typeof mo !== 'object') throw new Error('merge must be true or {weld?:0.01 px, internal?:true}');
+    const r = mergeMesh(mesh, { weld: Number(mo.weld ?? 0.01), internal: mo.internal !== false });
+    merged = { welded: r.welded, dropped_triangles: r.dropped };
+  }
   if (modelOv.length) for (const { f } of mesh.faces) f.ov = [...(f.ov || []), ...modelOv];
   let baked = null;
   if (!ctx.nested) {
     const uo = def.uv_origin ?? [grid / 2, 0, grid / 2];
     baked = finalize(mesh, ctx, uo);
     for (const m of instMeshes.values()) finalize(m, ctx, uo);
+    for (const it of gpu.values()) finalize(it.mesh, ctx, [0, 0, 0]);
   }
   const all = instances.length ? instances.reduce((acc, it) => acc.add(it.mesh.clone().transform(it.matrix)), mesh.clone()) : mesh;
   const { mode, shift } = originShift(def, all, firstTex);
   if (shift.some((v) => v)) { mesh.transform(mT(...shift)); for (const it of instances) it.matrix = matMul(mT(...shift), it.matrix); }
-  return { mesh, parts, origin: mode, instances, grid, baked, shift, layout };
+  const gpuList = [...gpu.values()];
+  if (shift.some((v) => v)) for (const it of gpuList) it.mats = it.mats.map((M) => matMul(mT(...shift), M));
+  const out = { mesh, parts, origin: mode, instances, grid, baked, shift, layout, partBounds };
+  if (gpuList.length) out.gpu = gpuList;
+  if (merged) out.merged = merged;
+  return out;
 }
 
 // ---------- rigs: named parts = nodes (joint = pivot), parent links ----------

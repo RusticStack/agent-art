@@ -140,7 +140,7 @@ test('mcp: help tool, prompts and compact tool list', async () => {
   assert.ok(replies.get(1).result.capabilities.prompts);
   const tools = replies.get(2).result.tools;
   const size = JSON.stringify(tools).length;
-  assert.ok(size < 23350, `tool list ${size} chars`); // 21800 before art_model rigs/clips/render + art_rig ik_from (+~1.57k, 23157 measured); 17000 before art_model (+~2k), 19000 before art_audio (+~1.4k), 20560 before the ship kit part schema (+~0.5k), 21100 before canvas options (commands_file, keep_visible, json) and sfx fx/reverb/target/loop/tail/names (+~0.4k) and rig hd params (+~180)
+  assert.ok(size < 24400, `tool list ${size} chars`); // 23350 before the 0.7 surface / render-cost options (art_model trim action, bake_ao, lods, impostor, collision, occluder, stats, preview ao/lod/morph, merge/morphs/cull: +~1k over 23157, 24127 measured); 21800 before art_model rigs/clips/render + art_rig ik_from (+~1.57k, 23157 measured); 17000 before art_model (+~2k), 19000 before art_audio (+~1.4k), 20560 before the ship kit part schema (+~0.5k), 21100 before canvas options (commands_file, keep_visible, json) and sfx fx/reverb/target/loop/tail/names (+~0.4k) and rig hd params (+~180)
   assert.ok(tools.some((t) => t.name === 'art_critique'));
   assert.match(replies.get(3).result.content[0].text, /^cells \{/);
   assert.ok(replies.get(4).result.prompts.length >= 5);

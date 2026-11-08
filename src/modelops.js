@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseColor, toHex } from './color.js';
-import { buildModel, PART_DOCS } from './model3d.js';
+import { buildModel, PART_DOCS, rigLayout } from './model3d.js';
 import { generateCTM, CTM_METHODS } from './ctm.js';
 import { Doc, MAX_SIZE } from './doc.js';
 import { writeGLB } from './glb.js';
@@ -13,6 +13,8 @@ import { packImages } from './sheet.js';
 import { BAYER4 } from './util.js';
 import { rigInfo, rigSummary, rigScene, rigMeta, resolveOffsets, clipKeys, sampleClip, posedWorld, angleMatrix, subtree } from './modelrig.js';
 import { MODEL_TEMPLATES } from './modeltemplates.js';
+import { normPBR, normBump, bumpNormal, mrTexture, heightFromData } from './surface.js';
+import { exportExtras, previewExtras, wantsExtras, MODEL_EXTRA_OPS } from './modelexport.js';
 
 const NAME_RE = /^[A-Za-z0-9_\-.]{1,64}$/;
 
@@ -58,8 +60,12 @@ const crop = (data, W, H, [x, y, w, h]) => {
  * Texture references: "canvas" | "#rrggbb" | {color} | {canvas, frame?, layer?, region?:[x,y,w,h], overlay?:<canvas>}.
  * Emissive = the canvas's layer named "emissive" or a "<canvas>_emissive" canvas; normal (opt-in)
  * = a "<canvas>_n" canvas (art_canvas normal_map). Pivot = canvas meta.pivot.
+ * Surface data layers (left out of the colour): "height" (-> normal map, bump from meta.bump),
+ * "metal" / "rough" (-> glTF metallicRoughness texture); canvas meta.material = PBR preset or
+ * {metal, rough}; meta.trim = trim sheet strips. bump (export / preview option) = default bump for
+ * canvases with a height source (height layer or a <canvas>_h canvas).
  */
-export function texResolver(engine, { normal = false } = {}) {
+export function texResolver(engine, { normal = false, bump = null } = {}) {
   const cache = new Map(), used = new Set();
   const resolve = (ref) => {
     if (ref === null || ref === undefined || ref === false) return null;
@@ -80,8 +86,11 @@ export function texResolver(engine, { normal = false } = {}) {
     if (d.frameHeight && (f < 0 || f >= d.frames)) throw new Error(`canvas "${d.name}" has frames 0..${d.frames - 1}`);
     const W = d.width, H = d.frameHeight || d.height;
     const grab = (doc, layer, exclude) => (doc.frameHeight ? doc.frameData(f, { layer, exclude }) : doc.composite({ layer, exclude }));
-    // the emissive layer only feeds the emissive texture, never the colour (albedo) texture
-    let data = grab(d, ref.layer, ['emissive']);
+    // the emissive layer only feeds the emissive texture, never the colour (albedo) texture; the
+    // surface data layers (height, metal, rough) never reach the colour either
+    const has = (n) => (ref.layer === undefined || ref.layer === null) && d.layers.some((l) => l.name === n);
+    let data = grab(d, ref.layer, ['emissive', 'height', 'metal', 'rough']);
+    let heightData = has('height') ? grab(d, 'height') : null, metalData = has('metal') ? grab(d, 'metal') : null, roughData = has('rough') ? grab(d, 'rough') : null;
     let emissive = null, nmap = null;
     if ((ref.layer === undefined || ref.layer === null) && d.layers.some((l) => l.name === 'emissive')) emissive = grab(d, 'emissive');
     const ed = engine.docs.get(`${d.name}_emissive`);
@@ -107,6 +116,9 @@ export function texResolver(engine, { normal = false } = {}) {
       data = c.data; w = c.w; h = c.h;
       if (emissive) emissive = crop(emissive, W, H, region).data;
       if (nmap) nmap = crop(nmap, W, H, region).data;
+      if (heightData) heightData = crop(heightData, W, H, region).data;
+      if (metalData) metalData = crop(metalData, W, H, region).data;
+      if (roughData) roughData = crop(roughData, W, H, region).data;
       if (pivot) pivot = [pivot[0] - region[0], pivot[1] - region[1]];
     }
     if (ref.overlay) {
@@ -123,18 +135,48 @@ export function texResolver(engine, { normal = false } = {}) {
     // CTM tileset (art_model ctm): faces using it get a tile per world cell from their neighbours
     const ctm = !region && d.meta?.ctm ? d.meta.ctm : null;
     const t = { key, canvas: d.name, name, width: w, height: h, data, emissive, normal: nmap, pivot, ctm };
+    surfaceOf(t, d, { heightData, metalData, roughData, region, f, bump });
     cache.set(key, t);
     return t;
   };
   resolve.used = used;
+  /** Height source of a canvas texture: the "height" layer, else a same-size <canvas>_h canvas. */
+  const surfaceOf = (t, d, { heightData, metalData, roughData, region, f, bump: defBump }) => {
+    const meta = d.meta || {};
+    if (meta.trim) t.trim = meta.trim;
+    if (!heightData && !metalData && !roughData && meta.material === undefined && meta.bump === undefined && !defBump && !engine.docs.has(`${d.name}_h`)) return;
+    t.heightOf = () => {
+      if (heightData) return heightFromData(heightData, t.width, t.height);
+      const hd = engine.docs.get(`${d.name}_h`);
+      if (!hd || hd.width !== d.width || (hd.frameHeight || hd.height) !== (d.frameHeight || d.height)) return null;
+      let hdat = hd.frameHeight ? hd.frameData(Math.min(f, hd.frames - 1)) : hd.composite();
+      if (region) hdat = crop(hdat, d.width, d.frameHeight || d.height, region).data;
+      return heightFromData(hdat, t.width, t.height);
+    };
+    if (meta.material !== undefined) {
+      const pbr = normPBR(meta.material);
+      if (pbr) { t.pbr = { metal: pbr.metal, rough: pbr.rough }; if (pbr.emissive && !t.emissive) t.emissive = t.data; }
+    }
+    if (metalData || roughData) { t.metalData = metalData; t.roughData = roughData; t.mr = mrTexture(t.width, t.height, metalData, roughData, t.pbr || { metal: 0, rough: 1 }); }
+    // height layer: always a normal map; <canvas>_h / derived height only when a bump is asked for
+    const spec = meta.bump !== undefined ? normBump(meta.bump) : defBump ? normBump(defBump) : heightData ? normBump(true) : null;
+    if (spec && t.width * t.height > 1) { const n = bumpNormal(t, spec); if (n) t.normal = n; }
+  };
   return resolve;
 }
 
+/** Models registered as greeble pieces (greeble_kind:"<kind>"). */
+const greebleKinds = (engine) => Object.fromEntries([...models(engine).values()].filter((m) => typeof m.greeble_kind === 'string').map((m) => [m.greeble_kind, m.name]));
 function build(engine, def, opts = {}) {
   const tex = opts.tex || texResolver(engine, opts);
-  const r = buildModel(def, { tex, getModel: (n) => getModel(engine, n), instances: opts.instances });
+  const r = buildModel(def, { tex, getModel: (n) => getModel(engine, n), instances: opts.instances, greebleKinds: () => greebleKinds(engine) });
+  // GPU-instanced greebles stay separate only for export (EXT_mesh_gpu_instancing); previews,
+  // renders and summaries see them merged
+  if (r.gpu && !opts.keepGpu) { for (const it of r.gpu) for (const M of it.mats) r.mesh.add(it.mesh.clone().transform(M)); delete r.gpu; }
   return { ...r, tex };
 }
+/** Variant model for a morph / preview: {model:"other"} or {set:{part:{..}}} patched over def. */
+const variantOf = (engine, def) => (spec) => (spec.model ? getModel(engine, spec.model) : applyPatch(def, { set: spec.set }));
 
 const r4 = (v) => +v.toFixed(3);
 function summary(def, built) {
@@ -191,7 +233,9 @@ function clipSamples(def, info, clipName, n, fps) {
 
 function previewImage(engine, def, a) {
   const t0 = performance.now();
-  const built = build(engine, def);
+  const built = build(engine, def, a.bump !== undefined ? { bump: a.bump } : {});
+  const ex = previewExtras(def, built, a, { variantDef: variantOf(engine, def), buildDef: (d) => build(engine, d, { tex: built.tex }) });
+  if (ex) return ex;
   if (a.clip !== undefined || a.pose !== undefined || a.parts) {
     const info = rigOf(def, built, true);
     const filter = { only: a.only, hide: a.hide };
@@ -328,12 +372,12 @@ function placeFrames(engine, outName, FW, FH, tag, imgs, { durations, loop, proj
 }
 
 /** Model-level options kept on create/update (besides name and parts). */
-export const MODEL_KEYS = ['grid', 'scale', 'origin', 'notes', 'project', 'overlays', 'uv_origin', 'rig', 'sockets', 'poses', 'clips'];
+export const MODEL_KEYS = ['grid', 'scale', 'origin', 'notes', 'project', 'overlays', 'uv_origin', 'rig', 'sockets', 'poses', 'clips', 'merge', 'morphs', 'cull', 'greeble_kind'];
 
 /** Part index from a number or a part name. */
 function partIndex(parts, k, what) {
   if (/^\d+$/.test(String(k))) return Number(k);
-  const i = parts.findIndex((p) => p && p.name === k);
+  const i = parts.findIndex((p) => p && (p.name === k || p.id === k));
   if (i < 0) throw new Error(`${what}: no part ${JSON.stringify(k)} (indices 0..${parts.length - 1} or part names: ${parts.filter((p) => p?.name).map((p) => p.name).join(', ') || 'none'})`);
   return i;
 }
@@ -626,7 +670,8 @@ export const MODEL_OPS = {
       const probe = build(this, def);
       for (const c of probe.tex.used) if (!this.docs.has(`${c}_n`) && !/_n$/.test(c)) this.run('normal_map', { canvas: c }, 'agent');
     }
-    const built = build(this, def, { normal, instances: !!a.instances });
+    const keepGpu = !(rigLayout(def) || def.sockets || def.clips);
+    const built = build(this, def, { normal, instances: !!a.instances, keepGpu, ...(a.bump !== undefined ? { bump: a.bump } : {}) });
     const info = rigOf(def, built);
     let meshes = [], nodes = [], animations, rigClips;
     if (info) {
@@ -655,8 +700,12 @@ export const MODEL_OPS = {
     const ctmNames = Object.keys(ctm);
     let extras = ctmNames.length ? { ctm: { file: path.basename(file).replace(/\.glb$/i, '.ctm.json'), tilesets: ctmNames } } : undefined;
     if (info) extras = { ...(extras || {}), rig: { nodes: info.nodes.length, sockets: info.sockets.map((s) => s.name), clips: Object.keys(rigClips) } };
-    const { glb, stats } = writeGLB({ meshes, nodes, animations }, { scale, up: a.up, atlas: !!a.atlas, name: def.name, extras });
+    // surface / render-cost extras (only when asked for: plain exports are unchanged)
+    const ext = wantsExtras(def, built, a) ? exportExtras(this, def, built, a, { scale, file, info, meshes, nodes, writeGLB, variantDef: variantOf(this, def), buildDef: (d) => build(this, d, { tex: built.tex, normal, keepGpu }) }) : null;
+    if (ext) ({ meshes, nodes } = ext);
+    const { glb, stats } = writeGLB({ meshes, nodes, animations }, { scale, up: a.up, atlas: !!a.atlas, name: def.name, extras, ...(ext ? ext.glbOpts : {}) });
     fs.writeFileSync(file, glb);
+    if (ext) ext.after();
     let ctmFile;
     if (ctmNames.length) {
       // runtime CTM: tilesets + rules (faces are already baked; this is for re-tiling in the engine)
@@ -672,9 +721,11 @@ export const MODEL_OPS = {
       parts: built.parts, baked: built.baked || undefined, ctm: ctmFile ? path.basename(ctmFile) : undefined,
       ...(info ? { rig: { ...rigMeta(info, scale), clips: rigClips } } : {}),
       materials_note: 'NEAREST filters + REPEAT wrap; alphaMode MASK (cutoff 0.5) where the texture has transparency; BLEND (baseColorFactor alpha = opacity, extras.depthWrite false) for parts with opacity < 1 or glass, doubleSided for glass / double_sided; emissive from layer "emissive" / <canvas>_emissive; overlay materials (name overlay_*) sample TEXCOORD_1, strength = COLOR_0 alpha',
+      ...(ext ? ext.meta : {}),
     };
     const metaFile = file.replace(/\.glb$/i, '.meta.json');
     fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2));
-    return { file, meta: metaFile, ...(ctmFile ? { ctm: ctmFile } : {}), bytes: glb.length, triangles: stats.triangles, vertices: stats.vertices, materials: stats.materials, nodes: stats.nodes, bounds_units: stats.bounds, atlased: stats.atlased, ...(info ? { animations: Object.keys(rigClips), sockets: info.sockets.map((s) => s.name) } : {}) };
+    return { file, meta: metaFile, ...(ctmFile ? { ctm: ctmFile } : {}), bytes: glb.length, triangles: stats.triangles, vertices: stats.vertices, materials: stats.materials, nodes: stats.nodes, bounds_units: stats.bounds, atlased: stats.atlased, ...(info ? { animations: Object.keys(rigClips), sockets: info.sockets.map((s) => s.name) } : {}), ...(ext ? ext.result : {}) };
   },
+  ...MODEL_EXTRA_OPS,
 };
