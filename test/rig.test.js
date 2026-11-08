@@ -445,3 +445,13 @@ test('rig hd input validation: feet, plant as a string, non-numeric IK targets',
   assert.equal(A('str'), A('arr'));
   assert.notEqual(A('str'), A('all'));
 });
+
+test('tweens keep the 0.3 direction for a rotation difference of exactly -180 degrees', async () => {
+  const { lerpPose } = await import('../src/rig.js');
+  const rig = normalizeRig({ frame: [16, 16], parts: { a: { w: 2, h: 2 } } });
+  const mid = (x, y) => lerpPose(rig, { a: { rot: x } }, { a: { rot: y } }, 0.5).a.rot;
+  assert.equal(mid(0, -180), -90);
+  assert.equal(mid(90, -90), 0);
+  assert.equal(mid(-90, 90), 0);
+  assert.equal(mid(0, 540), 90);
+});

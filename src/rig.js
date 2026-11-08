@@ -13,8 +13,8 @@ export const SAMPLING = ['nearest8', 'rotsprite', 'smooth'];
 const D2R = Math.PI / 180;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const lerp = (a, b, t) => a + (b - a) * t;
-/** Shortest signed angle difference b - a in degrees (-180..180]. */
-const adiff = (a, b) => { let d = (b - a) % 360; if (d > 180) d -= 360; if (d <= -180) d += 360; return d; };
+/** Shortest signed angle difference b - a in degrees [-180..180]; exactly -180 stays -180 (the 0.3 tween direction). */
+const adiff = (a, b) => { let d = (b - a) % 360; if (d > 180) d -= 360; if (d < -180) d += 360; return d; };
 
 /** Validate secondary-motion settings: {part: {stiffness 0..1, damping 0..1, gravity?, inertia?}}. */
 export function normalizeSecondary(parts, sec) {
