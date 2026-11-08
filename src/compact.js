@@ -72,7 +72,7 @@ export function compactRig(action, r, a = {}) {
   const out = { ...r };
   if (out.cells) out.cells = compactCells(out.cells);
   if (action === 'info') {
-    if (out.parts) out.parts = Object.fromEntries(Object.entries(out.parts).map(([n, p]) => [n, { w: p.w, h: p.h, pivot: p.pivot, ...(p.parent ? { parent: p.parent } : {}), ...(p.variants?.length ? { variants: p.variants } : {}) }]));
+    if (out.parts) out.parts = Object.fromEntries(Object.entries(out.parts).map(([n, p]) => [n, { w: p.w, h: p.h, pivot: p.pivot, ...(p.parent ? { parent: p.parent } : {}), ...(p.variants?.length ? { variants: p.variants } : {}), ...(p.bone ? { bone: true } : {}) }]));
     if (out.poses && !Array.isArray(out.poses)) out.poses = Object.keys(out.poses);
     if (out.presets) out.presets = Object.fromEntries(Object.entries(out.presets).map(([k, p]) => [k, { frames: p.frames ?? p.keys?.length, fps: p.fps, ...(p.loop === false ? { loop: false } : {}) }]));
     if (out.secondary) out.secondary = Object.keys(out.secondary);

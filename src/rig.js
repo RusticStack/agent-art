@@ -7,10 +7,12 @@
 import { upscale } from './pixelops.js';
 import { normalizeWeapon, solveHeld, lerpCarry, heldParts } from './weapon.js';
 import { normalizeDepth, applyDepth } from './depth.js';
+import { normalizeSkin, skinView, drawSkin } from './skin2d.js';
+import { normalizeConstraints, applyConstraints, solveCCD, ccdChain } from './chain2d.js';
 
 const NAME = /^[\w-]+$/;
 const GAP = 1;
-const RESERVED = new Set(['views', 'ik']);
+const RESERVED = new Set(['views', 'ik', 'shapes', 'targets']);
 export const SAMPLING = ['nearest8', 'rotsprite', 'smooth'];
 const D2R = Math.PI / 180;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -64,6 +66,8 @@ export function normalizeRig(def) {
     };
     if (share) { parts[name].art = p.art; parts[name].w = Number(share.w); parts[name].h = Number(share.h); }
     if (p.hide) parts[name].hide = true;
+    // bone:true = a bone without a drawing (a skinned sprite's elbow, a cable segment): never drawn
+    if (p.bone) parts[name].bone = true;
     // link:{<view>: "<drawn view>" | {view, flip?}} = this view draws the cell of another view
     for (const [v, l] of Object.entries(p.link || {})) parts[name].views[v] = { ...(parts[name].views[v] || {}), link: l };
   }
@@ -122,6 +126,10 @@ export function normalizeRig(def) {
   }
   // depth model (opt-in): per-frame draw order from a 3D proxy, z rules, split parts
   if (def.depth) rig.depth = normalizeDepth(rig, def.depth);
+  // 2D skinning (opt-in): drawn sprites bound to the bones as deforming meshes
+  if (def.skin && Object.keys(def.skin).length) rig.skin = normalizeSkin(rig, def.skin);
+  // constraints / joint limits (opt-in): aim, look_at, copy_rotation, limits (CCD respects them)
+  if (def.constrain?.length || (def.limits && Object.keys(def.limits).length)) rig.constrain = normalizeConstraints(rig, def.constrain, def.limits);
   return rig;
 }
 
@@ -248,6 +256,8 @@ function swapPairs(rig, p, all = false) {
     return r;
   };
   const out = parts(p);
+  if (p.shapes) out.shapes = p.shapes;
+  if (p.targets) out.targets = p.targets;
   if (p.views) out.views = Object.fromEntries(Object.entries(p.views).map(([v, o]) => [v, parts(o || {})]));
   return out;
 }
@@ -262,6 +272,9 @@ export function resolvePose(rig, key) {
     for (const [v, o] of Object.entries(key.views)) p.views[v] = { ...(p.views[v] || {}), ...structuredClone(o) };
   }
   if (key.ik) p.ik = { ...(p.ik || {}), ...structuredClone(key.ik) };
+  // deform shape weights {shape: 0..1} and named constraint targets {name: [x,y] | {part, at}}
+  if (key.shapes) p.shapes = { ...(p.shapes || {}), ...structuredClone(key.shapes) };
+  if (key.targets) p.targets = { ...(p.targets || {}), ...structuredClone(key.targets) };
   // z keyframes: key.z = {part: z} (draw order for this key; steps at the tween midpoint)
   if (key.z) for (const [n, z] of Object.entries(key.z)) {
     if (!rig.parts[n]) throw new Error(`key z: unknown part "${n}"`);
@@ -310,6 +323,7 @@ function lerpIK(A, B, t) {
     const ea = A?.[end], eb = B?.[end];
     if (ea && eb) {
       const r = { target: lerpTarget(ea.target, eb.target, t), bend: t < 0.5 ? ea.bend : eb.bend, plane: t < 0.5 ? ea.plane : eb.plane, weight: lerp(w(ea), w(eb), t) };
+      if (ea.chain !== undefined || eb.chain !== undefined) r.chain = ea.chain ?? eb.chain;
       if (ea.rot !== undefined && eb.rot !== undefined) { r.rot = ea.rot + adiff(ea.rot, eb.rot) * t; r.rot_weight = lerp(rw(ea), rw(eb), t); }
       else if (ea.rot !== undefined) { r.rot = ea.rot; r.rot_weight = rw(ea) * (1 - t); }
       else if (eb.rot !== undefined) { r.rot = eb.rot; r.rot_weight = rw(eb) * t; }
@@ -320,12 +334,28 @@ function lerpIK(A, B, t) {
   return out;
 }
 
+/** Blend shape weights (a shape missing on one side is 0 there). */
+function lerpShapes(A, B, t) {
+  const out = {};
+  for (const k of new Set([...Object.keys(A || {}), ...Object.keys(B || {})])) out[k] = lerp(Number(A?.[k] ?? 0), Number(B?.[k] ?? 0), t);
+  return out;
+}
+
+/** Blend named constraint targets (one side only: held). */
+function lerpTargets(A, B, t) {
+  const out = {};
+  for (const k of new Set([...Object.keys(A || {}), ...Object.keys(B || {})])) out[k] = A?.[k] === undefined ? B[k] : B?.[k] === undefined ? A[k] : lerpTarget(A[k], B[k], t);
+  return out;
+}
+
 /** Blend two poses at t (0..1) per part, per view override and per IK end. Variants/hide switch at the midpoint. */
 export function lerpPose(rig, a, b, t) {
   const A = asPose(rig, a), B = asPose(rig, b);
   const out = lerpParts(rig, A, B, t);
   const ik = lerpIK(A.ik, B.ik, t);
   if (ik) out.ik = ik;
+  if (A.shapes || B.shapes) out.shapes = lerpShapes(A.shapes, B.shapes, t);
+  if (A.targets || B.targets) out.targets = lerpTargets(A.targets, B.targets, t);
   if (rig.weapon) {
     const c = lerpCarry(A.carry, B.carry, t);
     if (c !== undefined) out.carry = c;
@@ -438,7 +468,7 @@ export function worldOf(rig, VP, src) {
 }
 
 /** World point of an IK target: [x,y] (frame px of the drawn view) | {part, at?:[dx,dy]} (in that part's rotated frame). */
-function targetPoint(rig, t, W) {
+export function targetPoint(rig, t, W) {
   if (Array.isArray(t)) {
     const p = [Number(t[0]), Number(t[1])];
     if (t.length !== 2 || !p.every(Number.isFinite)) throw new Error(`ik target [x,y] needs two numbers (got ${JSON.stringify(t)})`);
@@ -479,6 +509,8 @@ export function applyIK(rig, VP, src) {
     if (!e) continue;
     const w = clamp(Number(e.weight ?? 1), 0, 1);
     if (!(w > 0)) continue;
+    // chain > 2: CCD over that many ancestors (tails, cables, straps); joint limits respected
+    if (Number(e.chain) > 2) { solveCCD(rig, VP, src, end, e); if (e.rot !== undefined && e.rot !== null) { const W2 = worldOf(rig, VP, src); set(end, 'rot', poseOf(rig, VP, end).rot + clamp(Number(e.rot_weight ?? 1), 0, 1) * w * adiff(W2[end].rot, Number(e.rot))); } continue; }
     const [A, B] = ikChain(rig, end);
     let W = worldOf(rig, VP, src);
     const T = targetPoint(rig, e.target, W);
@@ -551,9 +583,11 @@ export function solveCore(rig, pose, view) {
   if (rig.weapon) {
     // weapon handling: weapon placement, locked hands, cheek weld, then the remaining pose IK
     const h = solveHeld(rig, P, src);
+    if (rig.constrain) applyConstraints(rig, h.VP, src, P);
     return { src, flip, VP: h.VP, world: worldOf(rig, h.VP, src), weapon: h.report, P };
   }
   const VP = applyIK(rig, viewPose(rig, P, src), src);
+  if (rig.constrain) applyConstraints(rig, VP, src, P);
   return { src, flip, VP, world: worldOf(rig, VP, src), P };
 }
 
@@ -639,8 +673,10 @@ export function renderPose(rig, partsDoc, pose, view, cache = new Map(), opts = 
   // a mirror view renders its source with left/right swapped, so the padding lands on the right side
   const pad = opts.pad ? opts.pad.map((n) => Math.max(0, Math.round(Number(n) || 0))) : null;
   const FW = RW + (pad ? pad[0] + pad[2] : 0), FH = RH + (pad ? pad[1] + pad[3] : 0);
-  const { src, flip, VP, world } = solvePose(rig, pose, view);
+  const { src, flip, VP, world, P } = solvePose(rig, pose, view);
   const ox = pad ? (flip ? pad[2] : pad[0]) : 0, oy = pad ? pad[1] : 0;
+  // skinned meshes replace their host part (+ absorbed parts) in the views they are drawn in
+  const skin = rig.skin ? skinView(rig, partsDoc, src, cache) : null;
   const out = new Uint8ClampedArray(FW * FH * 4);
   const out32 = new Uint32Array(out.buffer);
   const sets = opts.variant ? [].concat(opts.variant) : null;
@@ -650,6 +686,11 @@ export function renderPose(rig, partsDoc, pose, view, cache = new Map(), opts = 
     const p = partIn(rig, name, src), v = poseOf(rig, VP, name);
     if (p.hidden || v.hide || (opts.only && !opts.only.includes(name)) || (opts.hide && opts.hide.includes(name))) return;
     const z = v.z ?? p.z;
+    if (p.bone) return;
+    if (skin && skin.replaced.has(name)) {
+      for (const b of skin.meshes) if (b.host === name) entries.push({ name, i, p, v, z: b.z ?? z, rows: null, skin: b });
+      return;
+    }
     // split part: the rows from the pivot to the cut and the rest get their own z (one piece in
     // front of the reference part, one behind it)
     if (v.split && v.split.cut > 0 && v.split.cut < p.h) {
@@ -657,10 +698,18 @@ export function renderPose(rig, partsDoc, pose, view, cache = new Map(), opts = 
       entries.push({ name, i, p, v, z: v.split.z[1], rows: [v.split.cut, p.h] });
     } else entries.push({ name, i, p, v, z, rows: null });
   });
+  if (skin) skin.meshes.forEach((b, k) => { if (!b.host && (!opts.only || opts.only.includes(b.name)) && !(opts.hide && opts.hide.includes(b.name))) entries.push({ name: b.name, i: rig.order.length + k, p: null, v: null, z: b.z, rows: null, skin: b }); });
   const list = entries.sort((a, b) => a.z - b.z || a.i - b.i);
   const trace = opts.trace || null;
   if (trace) { trace.order = []; trace.frame = [FW, FH]; }
-  for (const { name, p: pv, v, rows, z } of list) {
+  for (const { name, p: pv, v, rows, z, skin: sb } of list) {
+    if (sb) {
+      const box = trace ? [Infinity, Infinity, -Infinity, -Infinity, 0] : null;
+      const mark = box ? (x, y) => { if (x < box[0]) box[0] = x; if (y < box[1]) box[1] = y; if (x > box[2]) box[2] = x; if (y > box[3]) box[3] = y; box[4]++; } : null;
+      drawSkin(rig, sb, VP, world, P, skin.bind, out32, FW, FH, ox, oy, { sampling: opts.sampling === 'nearest8' ? 'nearest8' : undefined, mark, layerMask: opts.skinBones || null });
+      if (trace) trace.order.push({ part: name, z: Math.round(z * 1000) / 1000, skin: sb.name, box: box[4] ? box.slice(0, 4) : null, px: box[4] });
+      continue;
+    }
     const T = world[name];
     // cell: draw another drawn view's cell (weapons projected from their side cell; link: a view
     // that reuses another view's drawing, optionally mirrored)

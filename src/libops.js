@@ -12,7 +12,7 @@ import { encodePNG } from './png.js';
 import { writeSkinGLB } from './gltfskin.js';
 import { compactCells } from './compact.js';
 
-const RIG_OPTS = ['sampling', 'secondary', 'feet', 'scale_children', 'weapon', 'variant_sets', 'depth'];
+const RIG_OPTS = ['sampling', 'secondary', 'feet', 'scale_children', 'weapon', 'variant_sets', 'depth', 'skin', 'constrain', 'limits'];
 const libDir = (e, ...p) => path.join(e.home, 'library', ...p);
 const checkName = (n, what) => { if (!LIB_NAME.test(n || '')) throw new Error(`${what} needs a "name" of 1-58 letters, digits, _ - .`); return n; };
 const readJSON = (f) => JSON.parse(fs.readFileSync(f, 'utf8'));

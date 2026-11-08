@@ -176,6 +176,17 @@ export function startServer(engine, { port, host = '127.0.0.1' }) {
         const name = decodeURIComponent(s[1]);
         return sendJSON(res, 200, s[2] === 'layers' ? rigLayers(engine, name, q) : rigDebugRender(engine, name, q));
       }
+      s = p.match(/^\/api\/rig\/([^/]+)\/weights\.png$/);
+      if (s) {
+        // 2D skin: the drawing + lattice | a bone's heat map (Skin view)
+        const q = url.searchParams;
+        const a = { name: decodeURIComponent(s[1]) };
+        for (const k of ['mesh', 'view', 'bone']) if (q.get(k)) a[k] = q.get(k);
+        if (q.get('scale')) a.scale = Math.max(1, Math.min(12, Number(q.get('scale')) || 4));
+        const r = engine.peek('rig_weights', a);
+        if (!r.image) return sendJSON(res, 404, { ok: false, error: 'no mesh drawing to show (pick a mesh / view)' });
+        return sendBin(res, 'image/png', r.image);
+      }
       s = p.match(/^\/api\/rig\/([^/]+)(\/preview\.png)?$/);
       if (s) {
         const name = decodeURIComponent(s[1]);

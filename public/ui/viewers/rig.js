@@ -11,7 +11,9 @@ export class RigViewer {
     this.mode = 'clip';
     this.playing = true;
     this.modeSel = el('select', { on: { change: () => { this.mode = this.modeSel.value; this.show(); } } },
-      el('option', { value: 'clip', text: 'Clip + skeleton' }), el('option', { value: 'pose', text: 'Pose (all views)' }), el('option', { value: 'parts', text: 'Parts sheet' }));
+      el('option', { value: 'clip', text: 'Clip + skeleton' }), el('option', { value: 'pose', text: 'Pose (all views)' }), el('option', { value: 'parts', text: 'Parts sheet' }), this.skinOpt = el('option', { value: 'skin', text: 'Skin mesh + weights' }));
+    this.meshSel = el('select', { on: { change: () => { this.fillBones(); this.show(); } } });
+    this.boneSel = el('select', { on: { change: () => this.show() } });
     this.poseSel = el('select', { on: { change: () => this.show() } });
     this.viewSel = el('select', { on: { change: () => this.show() } });
     this.clipSel = el('select', { on: { change: () => this.show() } });
@@ -22,6 +24,7 @@ export class RigViewer {
       this.poseG = el('div.group', {}, el('span.muted', { text: 'Pose' }), this.poseSel),
       this.viewG = el('div.group', {}, el('span.muted', { text: 'View' }), this.viewSel),
       this.clipG = el('div.group', {}, el('span.muted', { text: 'Clip' }), this.clipSel, this.playBtn, el('label.toggle', {}, this.boneCb, ' Skeleton')),
+      this.skinG = el('div.group', {}, el('span.muted', { text: 'Mesh' }), this.meshSel, el('span.muted', { text: 'Bone' }), this.boneSel),
       el('div.spacer'),
       this.editBtn = el('button.btn', { text: 'Edit parts', title: 'Open the parts canvas in the editor', on: { click: () => this.ctx.app.open({ kind: 'canvas', name: `${this.name}_parts` }) } })));
     this.stage = el('div.rig-stage');
@@ -58,6 +61,10 @@ export class RigViewer {
       for (const t of Object.keys(info.animations || {})) clips.push(`${o}/${t}`);
     }
     fill(this.clipSel, clips, null);
+    // 2D skin: mesh / bone pickers for the weights view
+    this.skinOpt.hidden = !this.rig.skin;
+    if (this.rig.skin) { fill(this.meshSel, Object.keys(this.rig.skin), null); this.fillBones(); }
+    else if (this.mode === 'skin') this.mode = 'pose';
     if (target.clip && clips.includes(target.clip)) this.clipSel.value = target.clip;
     if (!clips.length && this.mode === 'clip') { this.mode = 'pose'; }
     if (target.mode) this.mode = target.mode;
@@ -65,9 +72,18 @@ export class RigViewer {
     this.parent = Object.fromEntries(Object.entries(this.rig.parts).map(([n, p]) => [n, p.parent]));
     await this.show();
   }
+  fillBones() {
+    const bones = this.rig.skin?.[this.meshSel.value]?.bones || [];
+    const cur = this.boneSel.value;
+    this.boneSel.innerHTML = '';
+    this.boneSel.append(el('option', { value: '', text: 'dominant bone' }));
+    for (const b of bones) this.boneSel.append(el('option', { value: b, text: b }));
+    if (bones.includes(cur)) this.boneSel.value = cur;
+  }
   async show() {
     this.poseG.hidden = this.mode !== 'pose';
-    this.viewG.hidden = this.mode !== 'pose';
+    this.viewG.hidden = this.mode !== 'pose' && this.mode !== 'skin';
+    this.skinG.hidden = this.mode !== 'skin';
     this.clipG.hidden = this.mode !== 'clip';
     this.pv?.destroy(); this.pv = null;
     this.stage.innerHTML = '';
@@ -80,6 +96,15 @@ export class RigViewer {
       this.pv = new PixelView(host, { editable: false });
       this.pv.setImage(await loadBitmap(`/api/canvas/${enc(this.name + '_parts')}/png?t=${Date.now()}`));
       this.status.textContent = `${base} · parts canvas ${this.name}_parts (red dot = pivot)`;
+      return;
+    }
+    if (this.mode === 'skin') {
+      const q = new URLSearchParams({ mesh: this.meshSel.value, t: Date.now() });
+      if (this.boneSel.value) q.set('bone', this.boneSel.value);
+      if (this.viewSel.value) q.set('view', this.viewSel.value);
+      const img = el('img.pose-img', { src: `/api/rig/${enc(this.name)}/weights.png?${q}`, alt: 'skin weights' });
+      this.stage.append(el('div.center-scroll', {}, img));
+      this.status.textContent = `${base} · skin ${this.meshSel.value}: drawing + lattice | ${this.boneSel.value ? `weight of ${this.boneSel.value} (blue 0 .. red 1)` : 'dominant bone per pixel'}`;
       return;
     }
     if (this.mode === 'pose') {
