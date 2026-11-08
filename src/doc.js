@@ -70,9 +70,12 @@ export class Doc {
       palette: { ...this.palette },
       animations: JSON.parse(JSON.stringify(this.animations)),
       layers: this.layers.map((l) => l.clone()),
+      // crop / rotate {expand} move rig anchors, so undo and failed batches must restore them
+      anchors: this.meta?.anchors ? JSON.parse(JSON.stringify(this.meta.anchors)) : undefined,
     };
   }
   restore(s) {
+    if (s.anchors) this.meta = { ...this.meta, anchors: JSON.parse(JSON.stringify(s.anchors)) };
     this.width = s.width;
     this.height = s.height;
     this.frameHeight = s.frameHeight;

@@ -229,6 +229,11 @@ test('crop on a frame strip crops every frame and keeps frames, animations and a
   assert.deepEqual(info.animations.run.frames, [0, 1, 2]);
   for (let f = 0; f < 3; f++) assert.equal(px(e, 'cs', 1 + f, 1, f), '#ff0000', `frame ${f} content moved by the crop offset`);
   assert.deepEqual(e.get('cs').meta.anchors.run[0].hand, [3, 3, 0]);
+  // undo restores the anchors with the pixels
+  e.run('undo', { canvas: 'cs' });
+  assert.deepEqual(e.get('cs').meta.anchors.run[0].hand, [4, 5, 0]);
+  e.run('undo', { canvas: 'cs', redo: true });
+  assert.deepEqual(e.get('cs').meta.anchors.run[0].hand, [3, 3, 0]);
   // export still sees 3 frames
   const sh = e.run('export_animation', { canvas: 'cs', format: 'spritesheet', animation: 'run' });
   assert.equal(decodePNG(fs.readFileSync(sh.png)).width, 15);
