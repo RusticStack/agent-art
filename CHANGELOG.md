@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Planets and space (`art_planet`)
+
+- New tool `art_planet`: `planet` (presets ice, toxic, bloom, lava, desert, gas, barren; biome rules, fbm / ridged / billow noise with domain warp, continents, craters, canyons, emissive seams, night lights, clouds, rings, atmosphere) writes equirect and cube-face maps (albedo, height, height16, normal, roughness, emissive, night, clouds), a cube-sphere `.glb` with LODs, a cloud shell, an atmosphere shell with shader parameters and a ring annulus, quadtree tiles with a `.tiles.json` index, an octahedral impostor and a disc sprite. All textures are pixel-art palette ramps with ordered dither and at most 1024 px.
+- `system` generates an original star system of 4 to 8 bodies with distinct biomes, plus a palette strip.
+- `terrain` builds a landing zone sampled from a planet: chunk `.glb`s with LODs, skirts and collision meshes, an RGBA splat map, a tileset, `heightfield.json`, GPU-instanced rocks, crystals and grass, arches, and colony anchors.
+- `rocks` (boulders, slabs, shards, crystals, grass cards, mesas, buttes, spires, arches), `asteroids` (shapes, LODs, belt / ring / cluster fields), `skybox` (nebula and starfield cube faces plus an equirect) and `fx` (sun, flare, debris, dust storm, lightning).
+- `art_help {topic:"planets"}` and the `planets-space` skill, with three.js snippets for the atmosphere, night lights, quadtree streaming, far-planet impostors and terrain loading. Demo renders are in `docs/planets/`.
+- Existing `art_model` exports are unchanged byte for byte (tested).
+
 ## 0.7.0
 
 ### Weapon handling (`art_rig`, `art_model`)

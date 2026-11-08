@@ -416,6 +416,34 @@ art_audio { action:"sfx", name:"zap", layers:[{ kind:"glide", pts:[[0,2400],[0.2
 
 `art_help {topic:"music"}` has the full worked "gothic cathedral doom" track; topics `audio`, `mixing` and `perception` cover the rest.
 
+### Planets, ground terrain and space backdrops: `art_planet`
+
+Planets you can see from orbit and land on, with pixel-art textures (palette ramps, ordered dither, NEAREST, every texture at most 1024 px) for a browser three.js game, and kept portable to Roblox. Each planet comes from one seeded field (3D noise on the unit sphere). The orbit maps, cube faces, mesh LODs, quadtree tiles and ground patches all sample that same field, so they agree.
+
+![six-world system strip](docs/planets/system_strip.png)
+
+- **Planets** (`planet`): presets `ice`, `toxic`, `bloom`, `lava`, `desert`, `gas` (latitude bands, storms, rings) and `barren`. Any preset field can be overridden. Biome rules (`where: {water, height, lat, moisture}` select a palette `ramp`, mapped `by` height, moisture, latitude, noise or depth), noise (`fbm`, `ridged`, `billow`, domain warp), continents, craters, canyons, emissive seams (lava rivers, ice crevasses), night-side city lights, `hue`, and `palette` (quantise to a list or `"project:<name>"`).
+- **Maps:** equirect (three.js `equirectUv`) and cube faces (`px nx py ny pz nz`, OpenGL / `CubeTextureLoader` order). Each set has albedo, height (8-bit and 16-bit packed), tangent-space normal, roughness (glTF metallicRoughness), emissive glow, night lights, and a cloud layer with alpha. Rings come as a banded alpha strip.
+- **Meshes:** a cube-sphere on an integer lattice, so shared face edges are bit-identical and every LOD is watertight. The `.glb` holds a root node carrying the axial tilt, with `<name>_lods` (LOD0..n with switch distances), a cloud shell, an atmosphere shell (shader parameters in `extras`) and a ring annulus. A quadtree tile set (`tiles/<face>/<level>/<x>_<y>.glb` plus `<name>.tiles.json` with bounds, geometric error, children and skirt depth) lets an engine stream detail near the camera. For far LODs there is an octahedral impostor atlas (#7 `bakeImpostor`) and a pre-lit disc sprite.
+- **Systems** (`system`): an original star with 4 to 8 bodies (distinct biomes, orbits, moons and names), written as `.system.json` with a palette strip render.
+- **Ground** (`terrain {planet, lat, lon}`): a landing-zone patch in a local frame (+X east, +Z south, metres). Its base elevation and biome come from the planet field, and ground detail noise, mesas and escarpments are added on top. Output: chunk `.glb`s (LOD steps, skirts, hidden collision mesh), an RGBA splat map (ground / rock / low / accent, chosen by slope, height and biome; the bytes always sum to 255), the pixel tileset, `heightfield.json` for physics, GPU-instanced rocks, crystals and grass cards (`EXT_mesh_gpu_instancing`), rock arches, and colony `anchors` (landing pad, mesa tops, arches).
+- **Kits:** `rocks` (chunky low-poly boulders, rocks, slabs, shards and pebbles, plus crystals, grass cards and the `mesa`, `butte`, `spire` and `arch` formations, each with LODs from #7's simplifier) and `asteroids` (potato, contact-binary, shard and cratered shapes; a belt, ring or cluster field exported as instance transforms with spin, plus an instanced `.glb`).
+- **Backdrops:** `skybox` (layered, domain-warped nebula gas, dust lanes, an optional galaxy band, star classes and bright-star sprites; 6 faces plus an equirect, 512 to 1024 px) and `fx` (a sun with corona, a lens-flare sheet, a debris card, dust-storm frames and lightning frames).
+
+```js
+art_planet { action:"system", seed:2251, count:6 }
+art_planet { action:"planet", name:"phalo", preset:"bloom", seed:<from the system json>, rings:{ inner:1.45, outer:2.25 } }
+art_planet { action:"terrain", planet:"phalo", lat:14, lon:32, size:512 }
+art_planet { action:"skybox", name:"ember_sky", preset:"ember", size:512 }
+art_planet { action:"asteroids", name:"belt", field:{ shape:"belt", count:1200 } }
+```
+
+| Orbit (atmosphere, clouds, rings) | Landing zone | Nebula skybox | Asteroid belt |
+| --- | --- | --- | --- |
+| ![orbit](docs/planets/orbit.png) | ![landing zone](docs/planets/landing_zone.png) | ![skybox](docs/planets/skybox_preview.png) | ![belt](docs/planets/asteroid_field.png) |
+
+`art_help {topic:"planets"}` lists every option. The `planets-space` skill has the reference three.js snippets: the atmosphere shader (fresnel rim and day/night terminator), night lights, quadtree tile streaming, the far-planet sphere-on-quad impostor and terrain loading. `node docs/planets/build-demos.mjs` rebuilds the renders and `docs/planets/demo-stats.json`.
+
 ### Canvas op options worth knowing
 
 - `art_canvas crop` keeps every frame, animation and tag of a frame strip, with the rect given in frame coordinates. `rotate {angle, expand:true}` grows the canvas so rotated content is not cut off.
@@ -436,6 +464,7 @@ art_audio { action:"sfx", name:"zap", layers:[{ kind:"glide", pts:[[0,2400],[0.2
 | `art_rig` | Multi-view, multi-animation characters from parts and poses (templates incl. `humanoid_hd`, presets, tweening, IK, foot planting, secondary motion, equipment sets, `ik_from` to follow rendered anchors). Held weapons: `weapon` with carry states; `check` validates every clip and view, `layers` lists the draw order with reasons, `explain` says why one part is over another. Compact replies (`full`, `fields`) |
 | `art_model` | 3D: modular HD-2D kit pieces, ruins, extruded/lathed props, ships and vehicles, and dioramas, previewed from the game camera, exported to `.glb`. Rigid-part rigs with `pose`, `animate` (glTF clips) and sockets, FP templates (`fp_rifle`, `fp_pistol`, `fp_arms`), `render` to pixel sprite frames. `hold` puts the arms on a gun in `render` / `animate`, and `check` validates it. Hard-surface: greebles, tubes, trim sheets (`trim`), PBR, height normals, booleans, morphs; export baked AO, LODs, impostors, collision/occluder proxies, cull data |
 | `art_audio` | Sound effects, music, mixing and mastering; analysis images, listener reports and critiques; WAV/mp3/ogg/opus export |
+| `art_planet` | Planets (orbit maps, cube-sphere LODs, quadtree tiles, clouds, rings, atmosphere, impostors), original star systems, matching landing-zone terrain with splat maps, instanced props and colony anchors, rock and asteroid kits, nebula skyboxes and space FX sprites |
 | `art_read` | Exact pixels as text rows plus a legend, in the format `grid` accepts |
 | `art_palette` | Named colors per canvas or project. `ramp` builds shading ramps |
 | `art_project` / `art_sheet` | Group assets with a shared palette and notes; contact sheets to check consistency |
@@ -456,7 +485,7 @@ Every command takes `layer`, `frame`, `mask` (opaque / transparent / a colour / 
 The recipes behind `art_help {skill}` are also served as MCP prompts and can be installed as agent skills:
 
 ```sh
-npx @rusticstack/agent-art skills --out ~/.claude/skills   # tileable-texture, sprite, rig, rig-hd, weapon-handling, walk-cycle, iso-scene, hd2d-scene, 3d-kit, ship-model, hard-surface, fp-weapon, prop-rig, ui-icons, minecraft-pack, sfx-pack, music-track
+npx @rusticstack/agent-art skills --out ~/.claude/skills   # tileable-texture, sprite, rig, rig-hd, weapon-handling, walk-cycle, iso-scene, hd2d-scene, 3d-kit, ship-model, hard-surface, fp-weapon, prop-rig, ui-icons, minecraft-pack, sfx-pack, music-track, planets-space
 ```
 
 ## CLI (no MCP needed)
