@@ -598,7 +598,12 @@ export function light(a, ctx) {
   if (bulb) { const s = typeof bulb === 'number' ? bulb : 2; const t = glowTex(ctx, color); boxFaces(m, [-s / 2, -s / 2, -s / 2], [s / 2, s / 2, s / 2], () => t, true); }
   const data = { type: kind, color, intensity: num(a.intensity, 1, 'intensity'), range: pos(a.range, 128, 'range') };
   if (kind === 'spot') { data.angle = num(a.angle ?? a.cone, 45, 'angle'); }
-  if (kind === 'area' && Array.isArray(a.size)) data.size = a.size.map(Number);
+  if (kind === 'area') {
+    // same default and check as the baked-lighting light (model3d placeLight)
+    const sz = a.size ?? [16, 16];
+    if (!Array.isArray(sz) || sz.length !== 2 || !sz.every((v) => typeof v === 'number' && v > 0 && Number.isFinite(v))) throw new Error('area light size must be [w, h] px');
+    data.size = sz.slice();
+  }
   if (a.shadow !== undefined) data.shadow = !!a.shadow;
   m.markers = [{ kind: 'light', pos: [0, 0, 0], dir: kind === 'point' ? null : norm(v3(a.dir, [0, -1, 0], 'dir')), data }];
   return m;

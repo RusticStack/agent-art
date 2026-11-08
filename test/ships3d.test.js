@@ -348,3 +348,18 @@ test('docs: art_help 3d lists the kit, the skill exists', () => {
   for (const k of ['SHIPS + STRUCTURES', 'hull {length', 'landing_gear {', 'engine_room {', 'market_stall {', 'generate {kind:"interior"', 'budget {name', 'mood']) assert.ok(t.includes(k), k);
   assert.ok(SKILLS['ships-structures']);
 });
+
+test('area light markers export their size (units) in extras.light; the schema lists clips once', async () => {
+  const e = new Engine({ home: tmp() });
+  e.run('model_create', { name: 'lit', scale: 32, parts: [{ type: 'box', w: 32, h: 4, d: 32, color: '#334' }, { type: 'light', kind: 'area', size: [32, 16], at: [0, 30, 0], dir: [0, -1, 0] }, { type: 'light', kind: 'area', at: [0, 20, 0] }] });
+  const r = e.run('model_export', { name: 'lit' }), buf = fs.readFileSync(r.file);
+  const json = JSON.parse(buf.toString('utf8', 20, 20 + buf.readUInt32LE(12)));
+  const ls = json.nodes.filter((n) => n.extras?.light).map((n) => n.extras.light);
+  assert.deepEqual(ls.map((l) => l.size), [[1, 0.5], [0.5, 0.5]]);
+  assert.throws(() => e.run('model_create', { name: 'bad', parts: [{ type: 'light', kind: 'area', size: [0, 'x'] }] }), /area light size/);
+  const { TOOLS } = await import('../src/mcp.js');
+  const src = fs.readFileSync(new URL('../src/mcp.js', import.meta.url), 'utf8');
+  const block = src.slice(src.indexOf("name: 'art_model'"), src.indexOf("name: 'art_audio'"));
+  assert.equal(block.match(/\bclips: \{/g).length, 1, 'clips declared once in art_model');
+  assert.deepEqual(TOOLS.find((t) => t.name === 'art_model').inputSchema.properties.clips.type, ['object', 'array']);
+});

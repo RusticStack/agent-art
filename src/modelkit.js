@@ -60,7 +60,7 @@ export function markerNodes(markers, scale, rig = null) {
     const i = counts[kind] = (counts[kind] ?? -1) + 1;
     const name = kind === 'light' ? `light_${i}` : `${k.data?.socket ? `socket_${k.data.socket}` : `${kind}_${i}`}`;
     const extras = kind === 'light'
-      ? { light: { type: k.data.type, color: k.data.color, intensity: k.data.intensity, range: f6(k.data.range / scale), ...(k.data.angle !== undefined ? { angle: k.data.angle } : {}), ...(k.dir ? { dir: k.dir.map(f6) } : {}), ...(k.data.shadow !== undefined ? { shadow: k.data.shadow } : {}), ...(k.data.neon ? { neon: true } : {}) } }
+      ? { light: { type: k.data.type, color: k.data.color, intensity: k.data.intensity, range: f6(k.data.range / scale), ...(k.data.angle !== undefined ? { angle: k.data.angle } : {}), ...(Array.isArray(k.data.size) ? { size: k.data.size.map((v) => f6(v / scale)) } : {}), ...(k.dir ? { dir: k.dir.map(f6) } : {}), ...(k.data.shadow !== undefined ? { shadow: k.data.shadow } : {}), ...(k.data.neon ? { neon: true } : {}) } }
       : { marker: kind, ...Object.fromEntries(Object.entries(k.data || {}).map(([a, b]) => [a, typeof b === 'number' && ['w', 'h', 'd', 'r', 'len'].includes(a) ? f6(b / scale) : b])), ...(k.dir ? { dir: k.dir.map(f6) } : {}) };
     let parent = null, t = k.pos;
     if (rig && k.node && rig.info.byName.has(k.node)) {

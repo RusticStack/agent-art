@@ -297,11 +297,11 @@ export const TOOLS = [
       type: 'object',
       properties: {
         action: { type: 'string', enum: ['create', 'update', 'info', 'list', 'delete', 'preview', 'export', 'ctm', 'pose', 'animate', 'render', 'check', 'trim', 'skeleton', 'skin', 'weights', 'material', 'boolean', 'remesh', 'decimate', 'cluster_lod', 'visibility', 'kit', 'livery', 'generate', 'budget', 'walk_check'] }, name: { type: 'string' },
-        weapon: { type: ['object', 'boolean'] }, arms: { type: 'object' }, hold: { type: 'object', description: '{weapon|arms, carry?, attach?, clip?, both?, fix?}' }, clips: { type: 'array', items: { type: 'string' } }, carries: { type: 'array', items: { type: 'string' } },
+        weapon: { type: ['object', 'boolean'] }, arms: { type: 'object' }, hold: { type: 'object', description: '{weapon|arms, carry?, attach?, clip?, both?, fix?}' }, carries: { type: 'array', items: { type: 'string' } },
         parts: { type: ['array', 'object'], items: MODEL_PART },
         add: { type: 'array', items: { type: 'object' } }, set: { type: 'object' }, remove: { type: 'array', items: { type: ['integer', 'string'] } },
         template: { type: 'string', enum: ['fp_arms', 'fp_rifle', 'fp_pistol', 'gunship', 'fighter', 'dropship', 'hauler', 'capital_ring'] }, textures: { type: ['object', 'string'] },
-        rig: { type: 'object' }, sockets: { type: 'object' }, poses: { type: 'object' }, clips: { type: 'object' },
+        rig: { type: 'object' }, sockets: { type: 'object' }, poses: { type: 'object' }, clips: { type: ['object', 'array'], description: 'create / update: {<clip>: {keys, loop?, duration?}}; hold_check: clip names' },
         pose: { type: 'string' }, base: { type: 'string' }, clip: { type: 'string' }, keys: { type: ['array', 'null'] }, loop: { type: 'boolean' }, events: { type: 'array' }, duration: { type: 'number' }, ease: { enum: ['linear', 'smooth', 'step'] }, delete: { type: 'boolean' },
         canvas: { type: 'string' }, animation: { type: 'string' }, frames: { type: 'integer' }, fps: { type: 'number' }, view: { type: ['string', 'object'] }, camera: { type: ['string', 'object'] }, fov: { type: 'number' }, zoom: { type: 'number' },
         angles: { type: 'array' }, sweep: { type: 'object' }, pivot: { type: 'array' }, light: { type: 'object' }, outline: { type: 'string' },
