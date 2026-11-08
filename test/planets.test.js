@@ -315,6 +315,16 @@ test('art_planet ops: files, glb validity, texture limits, scatter counts, ancho
   assert.throws(() => e.run('planet_terrain', { planet: 'gg' }), /gas giant/);
   assert.throws(() => e.run('planet_terrain', { planet: 'nope' }), /No planet "nope"/);
   assert.throws(() => e.run('planet_create', { name: 'x', preset: 'plasma' }), /preset must be one of/);
+  // bad numbers fail fast with a readable message (no NaN output, no huge render before the size check)
+  const lz = { planet: 'kethra', grid: 32, chunks: 2, preview_size: 32 };
+  for (const [op, a, re] of [
+    ['planet_terrain', { ...lz, lon: 'abc' }, /lon/], ['planet_terrain', { ...lz, grid: 0, chunks: 1 }, /grid/], ['planet_terrain', { ...lz, grid: -8 }, /grid/],
+    ['planet_terrain', { ...lz, detail: { wavelength: 0 } }, /detail/], ['planet_terrain', { ...lz, skirt: 'x' }, /skirt/], ['planet_terrain', { ...lz, tile_px: 100000 }, /tile_px/],
+    ['planet_terrain', { ...lz, preview_size: 50000 }, /preview_size/], ['planet_create', { name: 'x', preset: 'desert', preview_size: 50000 }, /preview_size/],
+    ['planet_create', { name: 'x', preset: 'desert', real_radius_km: 0 }, /real_radius_km/], ['planet_create', { name: 'x', preset: 'desert', hue: 'x' }, /hue/],
+    ['planet_asteroids', { field: { count: 10, inner: 'x' } }, /inner/], ['planet_asteroids', { field: { count: 10, size: 5 } }, /field.size/], ['planet_asteroids', { field: { count: 10 }, preview_size: 1e5 }, /preview_size/],
+    ['planet_system', { count: 4, cell: 0 }, /cell/], ['planet_skybox', { size: 16, stars: { count: 1e9 } }, /stars/],
+  ]) assert.throws(() => e.run(op, a), re, `${op} ${JSON.stringify(a)}`);
 });
 
 test('existing exports stay byte-identical (no art_planet features used)', () => {

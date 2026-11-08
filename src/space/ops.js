@@ -25,6 +25,12 @@ import { sunSprite, flareSheet, debrisCard, dustStorm, lightning, SUN_COLORS } f
 const NAME_RE = /^[A-Za-z0-9_\-.]{1,64}$/;
 const f6 = (v) => +(+v).toFixed(6);
 const SCREEN = { height: 720, fov: 70, px: 1 };
+/** Checked preview size (before any rendering: no huge allocation or long render on bad input). */
+function previewSize(v, def) {
+  const s = Math.round(Number(v ?? def));
+  if (!(s >= 16 && s <= MAX_TEX)) throw new Error(`preview_size must be 16..${MAX_TEX} px`);
+  return s;
+}
 
 // ---------- helpers ----------
 function outDir(engine, a, name) {
@@ -129,6 +135,7 @@ function planetCreate(a, source) {
   const name = a.name;
   if (!NAME_RE.test(name || '')) throw new Error('planet "name" must be 1-64 chars of letters, digits, _ - .');
   const T = timer();
+  const ps = previewSize(a.preview_size, 256);
   const args = { ...a };
   for (const k of ['action', 'path', 'canvas', 'preview_size']) delete args[k];
   const P = normPlanet(args);
@@ -269,7 +276,6 @@ function planetCreate(a, source) {
     tiles = { file: `${name}.tiles.json`, count: list.length, max_level: maxL, segments: n, tile_px: tpx, triangles_per_tile: Math.round(ttris / list.length) };
   }
   // ---- preview (orbit view with atmosphere, clouds, rings)
-  const ps = Math.round(Number(a.preview_size ?? 256));
   const view = renderPlanet(P, eq, { size: ps, spin: a.spin ?? 25 });
   W.png(`${name}_orbit.png`, ps, ps, view.data);
   T.lap('preview');
@@ -336,6 +342,7 @@ function planetSystem(a, source) {
   if (!NAME_RE.test(name)) throw new Error('system "name" must be 1-64 chars of letters, digits, _ - .');
   const dir = outDir(this, a, name), W = writer(dir);
   const cellPx = Math.round(Number(a.cell ?? 128));
+  if (!(cellPx >= 16 && cellPx <= 512)) throw new Error('cell must be 16..512 px');
   const items = [];
   for (const b of sys.bodies) {
     const P = normPlanet({ preset: b.preset, seed: b.seed, hue: b.hue, radius: b.radius, real_radius_km: b.real_radius_km, tilt: b.tilt });
@@ -441,6 +448,7 @@ function planetRocks(a, source) {
 // ---------- terrain ----------
 function planetTerrain(a, source) {
   const T = timer();
+  const ps = previewSize(a.preview_size, 384);
   const { P } = loadPlanet(this, a.planet);
   const t = normTerrain(P, a);
   const name = a.name || `${typeof a.planet === 'string' ? a.planet : 'planet'}_lz`;
@@ -520,7 +528,6 @@ function planetTerrain(a, source) {
   }
   if (fm.length) W.glb(`${name}_formations.glb`, { meshes: fm, nodes: fn }, { name: `${name}_formations` });
   // preview: perspective from the south-east over the landing pad
-  const ps = Math.round(Number(a.preview_size ?? 384));
   const sceneGroups = [...B.chunks.flatMap((c) => [c.lods[0]]), ...placedMeshes.flatMap(groups), ...formMeshes.flatMap(groups)];
   const light = { light: [-0.45, 0.8, 0.35].map((v, i, A) => v / Math.hypot(...A)), ambient: 0.4 };
   const view = renderCamera(sceneGroups, makeCamera({ pos: [t.size * 0.05, B.hi + t.size * 0.62, t.size * 0.82], look: [0, B.lo, -t.size * 0.08], fov: 55 }, ps, ps, []), ps, ps, light);
@@ -551,6 +558,7 @@ function planetTerrain(a, source) {
 // ---------- asteroids ----------
 function planetAsteroids(a, source) {
   const T = timer();
+  const ps = previewSize(a.preview_size, 384);
   const name = a.name || 'asteroids';
   if (!NAME_RE.test(name)) throw new Error('"name" must be 1-64 chars of letters, digits, _ - .');
   const seed = seedOf(a.seed ?? 1, 1001);
@@ -569,6 +577,9 @@ function planetAsteroids(a, source) {
   const F = { shape: a.field?.shape ?? 'belt', count: Math.round(Number(a.field?.count ?? 400)), inner: Number(a.field?.inner ?? 600), outer: Number(a.field?.outer ?? 900), thickness: Number(a.field?.thickness ?? 60), size: a.field?.size ?? [2, 40], power: Number(a.field?.power ?? 2.6) };
   if (!['belt', 'ring', 'cluster'].includes(F.shape)) throw new Error('field.shape must be belt, ring or cluster');
   if (!(F.count >= 1 && F.count <= 20000)) throw new Error('field.count must be 1..20000');
+  if (!(F.inner >= 0 && F.outer > F.inner && Number.isFinite(F.outer) && F.thickness >= 0 && Number.isFinite(F.thickness) && F.power > 0 && Number.isFinite(F.power))) throw new Error('field: need 0 <= inner < outer, thickness >= 0, power > 0 (numbers)');
+  if (!(Array.isArray(F.size) && F.size.length === 2 && F.size.every((v) => Number.isFinite(Number(v)) && Number(v) > 0) && Number(F.size[1]) >= Number(F.size[0]))) throw new Error('field.size must be [min, max] > 0');
+  F.size = F.size.map(Number);
   const r = mulberry32(seedOf(seed, 1020)), insts = [];
   for (let i = 0; i < F.count; i++) {
     let p;
@@ -602,7 +613,6 @@ function planetAsteroids(a, source) {
   W.json(`${name}.field.json`, { field: F, variants: kitLevels, instances: insts, note: 'p = position (units), r = quaternion, s = scale (the kit meshes are 1 unit half-extent), spin = slow tumble for the engine to animate. LOD per instance: pick the variant LOD by distance (kit lods[].distance x scale).' });
   T.lap('field');
   // preview: the field from above at an angle (LOD1 meshes, every instance)
-  const ps = Math.round(Number(a.preview_size ?? 384));
   const scene = [];
   for (const it of insts) { const [x, y, z, w] = it.r, s = it.s; scene.push(kit[it.v].lods[Math.min(1, kit[it.v].lods.length - 1)].mesh.clone().transform([(1 - 2 * (y * y + z * z)) * s, 2 * (x * y - z * w) * s, 2 * (x * z + y * w) * s, it.p[0], 2 * (x * y + z * w) * s, (1 - 2 * (x * x + z * z)) * s, 2 * (y * z - x * w) * s, it.p[1], 2 * (x * z - y * w) * s, 2 * (y * z + x * w) * s, (1 - 2 * (x * x + y * y)) * s, it.p[2]])); }
   const gs = scene.flatMap(groups);

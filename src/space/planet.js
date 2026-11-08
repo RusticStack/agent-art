@@ -131,6 +131,7 @@ export function normPlanet(a = {}) {
   s.mesh_relief = Number(a.mesh_relief ?? 4);
   s.hue = Number(a.hue ?? 0);
   s.dither = a.dither !== false;
+  if (!(s.real_radius_km > 0) || ![s.relief_km, s.mesh_relief, s.hue].every(Number.isFinite)) throw new Error('real_radius_km must be > 0; relief_km, mesh_relief and hue must be numbers');
   const shift = (c) => (s.hue ? shiftColor(c, s.hue) : c);
   if (s.gas) s.gas = { bands: 10, turbulence: 0.3, storms: 2, ...s.gas, ramp: ramp(s.gas.ramp, 'gas.ramp').map(shift) };
   s.biomes = s.gas ? [] : (s.biomes || []).map((b, i) => {

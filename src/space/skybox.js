@@ -31,6 +31,7 @@ export function normSky(a = {}) {
       return { ramp: L.ramp.map(hexRGB), frequency: Number(L.frequency ?? 1.5), density: Number(L.density ?? 0.5), warp: Number(L.warp ?? 0.7), offset: L.offset ?? i * 13.1 };
     }),
   };
+  if (!(s.stars.density >= 0 && s.stars.density <= 10) || (s.stars.count !== undefined && !(Number.isInteger(s.stars.count) && s.stars.count >= 0 && s.stars.count <= 200000))) throw new Error('stars: density 0..10, count 0..200000');
   const g = a.galaxy === undefined ? p.galaxy : a.galaxy;
   s.galaxy = g ? { tilt: Number(g.tilt ?? 25), width: Number(g.width ?? 0.15), color: hexRGB(g.color ?? '#c0b0e0'), yaw: Number(g.yaw ?? 0) } : null;
   return s;
