@@ -101,12 +101,13 @@ Turn pixel art into low-poly game assets in the HD-2D style (pixel textures on l
 - **Smooth geometry:** `lathe` profiles are simplified before revolving (collinear runs merged, then Douglas-Peucker with `simplify` px, default 0.75), so a pixel silhouette gives a few clean rings instead of one ring per pixel row.
 - **World-space UVs:** tiled faces get their UVs from the world position after placement, planar per face direction, at 1 texel = 1 px. The texture lattice starts at a grid-cell edge (`uv_origin`, default `[16,0,16]`, settable per model). Offsets, turns, arrays and nested layouts all continue the texture across touching pieces.
 - **Overlays:** grime, decay, moss, blood and edge wear become decal shells on a second UV set (glTF `TEXCOORD_1`, strength in `COLOR_0` alpha, alpha MASK). Example: `overlays:[{texture:"grime", where:["bottom","corners"], falloff:20}, {texture:"moss", where:"top"}]`. `map` is `world` (the overlay's own scale) or `face`/`piece`/`surface` (stretched 0..1). Overlays go on a part or on the whole model (model-level `overlays`, kept by `create` and `update`). Decal shells are tessellated adaptively (`detail` defaults from the falloff and face size, 16-64 px), and uniform areas such as `where:"all"` are not split at all.
+- **Hard-surface detail and render cost:** greebles, sweeps (pipes, cables), trim sheets, PBR materials, pixel-correct height normals, baked AO, booleans, morph targets, LODs, impostors, collision/occluder proxies and room/portal cull data; see [Hard-surface detail and render cost](#hard-surface-detail-and-render-cost).
 - **Connected textures (CTM):** `art_model ctm` builds an OptiFine/Continuity-style tileset; see below.
 - **Textures:** set them per face (`faces`, `top`, `side`), use a colour, or add a grime `overlay`. Emissive comes from a layer named `emissive`; that layer is left out of the base colour, so a glow-only pixel is black in the albedo and lit only by the emissive texture. `normal_maps:true` adds normal maps.
 - **Preview:** `art_model preview` renders a contact sheet with a software rasterizer. It includes the 38° game camera plus front, side, top and iso views.
 - **Export:** NEAREST samplers, REPEAT wrap, embedded PNGs, alpha MASK (cutoff 0.5) only when a triangle actually samples a transparent texel (unused tileset slots no longer force it), and emissive/normal textures. The file is Y-up with 32 px = 1 unit (`scale`). For a Z-up engine set `object.rotation.x = Math.PI / 2` or export with `up:"z"`. Options: one baked mesh, `instances:true` (shared meshes and nodes), or `atlas:true`.
 
-`art_help {topic:"3d"}` has every option plus recipes for a gothic arch kit, a gargoyle relief, chains, lathed candles, CTM marble floors, wall trims, moss and a spaceship. Skills: `3d-kit`, `ship-model`.
+`art_help {topic:"3d"}` has every option plus recipes for a gothic arch kit, a gargoyle relief, chains, lathed candles, CTM marble floors, wall trims, moss and a spaceship. Skills: `3d-kit`, `ship-model`, `hard-surface`.
 
 #### Rigid-part rigs, animation clips and pre-rendered sprites
 
@@ -187,6 +188,45 @@ The full pipeline (gun and magazine layers, angle sweep, 3D arms) is in `art_hel
 - **Cylinder decals:** `wrap:"once"` puts one copy of the texture round the side, centred on +z. `u_offset` (in turns, + toward +x) rotates it, so a decal can face any side. `wrap:"repeat"` gives a whole number of copies (`repeat:n`, or a default from the circumference), so there is no seam. `tile:false` keeps the old stretched mapping.
 - **Insets:** `insets:[{face, rect:[u,v,w,h], depth, texture?, side?}]` on a box. `rect` is in px from the face's top-left as seen from outside. `depth > 0` cuts a recess (the face gets a hole, four inner walls and a floor), and `depth < 0` adds a raised panel. Panels may touch the face border, for a hangar mouth.
 - **Origin:** the default `origin:"auto"` keeps part coordinates, so kit pieces stay on the grid; this did not change. For a standalone prop, ship or vehicle use `origin:"bottom"` (centred on X/Z, bottom on y=0). `create` says so in its `next` hint when the model is off-centre.
+
+#### Hard-surface detail and render cost
+
+Ships, stations, carrier interiors and cities that read like a big-budget sci-fi universe at a pixel-texture budget, and stay fast in a browser. Everything below is opt-in: models that use none of it export byte-for-byte as before.
+
+![Hull section: before, greebles + trim, PBR + height normals, baked AO](docs/surface/hull_before_after.png)
+
+```jsonc
+{ "action": "trim", "canvas": "hull_trim" }                     // a 64-wide trim sheet: plate, bevel, bolts, seam, hazard, grate, rib, pipe, rubber, light
+{ "action": "create", "name": "hull_a", "origin": "bottom", "parts": [
+  { "type": "box", "id": "hull", "w": 160, "h": 40, "d": 96, "bevel": 3, "texture": "hull", "material": "painted_metal", "trim": "hull_trim:bevel",
+    "greebles": [ { "face": "top", "seed": 11, "grid": 2, "density": 0.35, "avoid": [[64, 0, 32, 96]] },
+                  { "face": "right", "seed": 12, "density": 0.3, "size": [2, 8], "kinds": { "vent": 3, "pipe": 2, "bolts": 2, "panel": 3 } } ] },
+  { "type": "box", "w": 52, "h": 22, "d": 30, "at": [0, 0, 36], "boolean": "subtract", "target": "hull" },       // hangar mouth
+  { "type": "tube", "path": [[-82, 30, 44], [-82, 30, -40], [-60, 30, -46]], "r": 2, "trim": "hull_trim:pipe", "mirror": "x" },
+  { "type": "tube", "from": [-12, 50, 30], "to": [-12, 50, -30], "sag": 3, "r": 0.6, "sides": 4 },             // hanging cable
+  { "type": "cylinder", "r_bottom": 9, "r_top": 7, "h": 14, "rotate": [-90, 0, 0], "at": [-50, 20, -48], "mirror": "x", "material": "bare_metal" } ] }
+{ "action": "preview", "name": "hull_a", "views": ["game"], "ao": true }        // also lod:1|2, morph:{open:1}, bump
+{ "action": "export", "name": "hull_a", "bake_ao": true, "lods": [1, 0.5, 0.2], "impostor": { "grid": 8, "size": 64 }, "collision": "hull", "occluder": "boxes" }
+```
+
+- **PBR materials:** `material` on a part is a preset (`painted_metal`, `bare_metal`, `rubber`, `plastic`, `glass`, `emissive_panel`, `fabric`) or `{metal, rough}`, exported as glTF `metallicFactor`/`roughnessFactor` (the old default stays metal 0, rough 1). Canvas layers named `metal` and `rough` (grey = value, unpainted = the factor) become a `metallicRoughnessTexture`; canvas `meta.material` sets a whole canvas. `atlas:true` packs PBR textures into one metallicRoughness atlas.
+- **Height and normals:** a `height` layer (or a same-size `<canvas>_h` canvas with `bump`) gives a pixel-correct normal map: no blur, only texels within `bevel` of a drop to a lower neighbour tilt, so a raised panel gets a crisp rim and the low side stays flat. `bump:{strength, bevel, auto:"luminance"|"panels"}` derives height from brightness steps or dark panel lines when you have no height map. glTF convention (green = up).
+- **Baked AO:** `bake_ao:true|{mode:"texture"|"vertex"|"both", samples, distance, texel}` ray-casts hemispheres against the model (BVH) into an AO lightmap (`occlusionTexture`, its own unique `TEXCOORD_1`, NEAREST) and/or `COLOR_0`. Contact shadows land in crevices, under greebles and in insets. Bakes are deterministic. `cast_shadow:false` / `receive_shadow:false` on a part split it into a node with those flags in `extras`.
+- **Greebles:** a `greeble` part, or `greebles:[{face, ...}]` on a box/wall/floor, scatters non-overlapping pieces (`panel vent pipe conduit antenna bolts hatch heatsink nozzle dome cables tank block`, or your own models via `"model:<name>"` / `greeble_kind`) with a seed, density, size and height ranges, an optional panel `grid`, and an `avoid` mask or rectangles. Pieces merge into the model's materials, or `instanced:true` exports them with `EXT_mesh_gpu_instancing` (three.js `InstancedMesh`). LODs drop them (`drop_lod:"auto"`: flat pieces at LOD 1, tall ones at LOD 2).
+- **Sweeps:** `tube`/`sweep` sweeps a circle or a custom `profile` along a polyline, Catmull-Rom or Bezier `path` with rotation-minimising frames, mitred corners, `twist`, taper (`r_end`), caps and texture wrap; `from`/`to`/`sag` hangs a cable. Pipes, hoses, railings, conduits.
+- **Trim sheets:** `art_model trim {canvas}` paints a sheet with colour, height, metal, rough and emissive layers, or marks your own (`strips:{name:[y,h]}`). `trim:"sheet:strip"` maps a part's bevels, inset walls and thin faces to that strip: u along the face at world scale, v across the strip. Hulls and interiors share one texture.
+- **Mesh ops:** `boolean:"subtract"|"union"|"intersect"` (BSP CSG per closed piece; results are edge-manifold, world UVs continue on the cut walls), model `merge` (weld + drop hidden faces between touching pieces), and model `morphs:{open:{set:{door:{rotate:[0,-90,0]}}}}` or `{model:"variant"}` as glTF morph targets with names in `mesh.extras.targetNames`.
+- **LODs:** `lods:[1,0.5,0.2]` runs quadric edge collapse onto existing vertices. Each triangle keeps its own UVs, so flat regions stay pixel-exact. Material and open borders are kept, and hidden faces between pieces are dropped first. The levels go into `<name>_lods > <name>_LOD0..n` nodes (or `lod_mode:"files"`), and `meta.lods.levels[i].distance` is where that level's error falls below one screen pixel (`lod_screen:{height:720, fov:70, px:1}`).
+- **Impostors:** `impostor:{grid:8, size:64}` (hemi-octahedral) or `{layout:"ring", angles:8|16}` renders albedo, world-normal and depth atlases plus `<name>.impostor.json` (cells, directions, encode formula, quad size, switch distance) for far-LOD billboards.
+- **Proxies and stats:** `collision:"hull"|"boxes"` and `occluder:"boxes"` (conservative, inside the surface) export as hidden named nodes, with the boxes also listed in `meta.json`; they are not counted in triangles. `stats:true` adds per-part triangles and bounds.
+- **Cull data:** a layout's `cull:{rooms:[{name, min, max}]}` exports one `room_<name>` node per room, finds doorways automatically where rooms touch, and writes `meta.cull` (rooms, portals, PVS). The engine draws the camera's room plus its PVS, or walks the portals through the frustum.
+
+![Carrier corridor module: before, kit + trim + greebles, PBR + normals, baked AO](docs/surface/corridor_before_after.png)
+![Hull LOD0, LOD1, LOD2](docs/surface/hull_lods.png)
+![Impostor atlas: albedo, normal, depth](docs/surface/hull_impostor.png)
+![Greeble kit](docs/surface/greeble_kit.png)
+
+`node docs/surface/build-demos.mjs` rebuilds these renders. `art_help {topic:"3d"}` has every option plus recipes for hull greebling, a corridor with one trim sheet, a pipe run and LOD + impostor for a city block. Skill: `hard-surface`.
 
 #### Connected textures (CTM)
 
@@ -340,7 +380,7 @@ Behaviour changes in 0.5: `crop` on a frame strip takes frame coordinates, `adju
 | `art_critique` | Heuristic quality report and score for a frame, an animation or every frame |
 | `art_help` | Usage and examples for any command (`{op}`), guides (`{topic}`: workflow, textures, characters, animation, rig, scenes, hires, minecraft, 3d, audio, music, mixing, perception), and step-by-step recipes (`{skill}`) |
 | `art_rig` | Multi-view, multi-animation characters from parts and poses (templates incl. `humanoid_hd`, presets, tweening, IK, foot planting, secondary motion, `ik_from` to follow rendered anchors) |
-| `art_model` | 3D: modular HD-2D kit pieces, ruins, extruded/lathed props, ships and vehicles, and dioramas, previewed from the game camera, exported to `.glb`. Rigid-part rigs with `pose`, `animate` (glTF clips) and sockets, FP templates (`fp_rifle`, `fp_pistol`, `fp_arms`), `render` to pixel sprite frames |
+| `art_model` | 3D: modular HD-2D kit pieces, ruins, extruded/lathed props, ships and vehicles, and dioramas, previewed from the game camera, exported to `.glb`. Rigid-part rigs with `pose`, `animate` (glTF clips) and sockets, FP templates (`fp_rifle`, `fp_pistol`, `fp_arms`), `render` to pixel sprite frames. Hard-surface: greebles, tubes, trim sheets (`trim`), PBR, height normals, booleans, morphs; export baked AO, LODs, impostors, collision/occluder proxies, cull data |
 | `art_audio` | Sound effects, music, mixing and mastering; analysis images, listener reports and critiques; WAV/mp3/ogg/opus export |
 | `art_read` | Exact pixels as text rows plus a legend, in the format `grid` accepts |
 | `art_palette` | Named colors per canvas or project. `ramp` builds shading ramps |
@@ -360,7 +400,7 @@ Every command takes `layer`, `frame`, `mask` (opaque / transparent / a colour / 
 The recipes behind `art_help {skill}` are also served as MCP prompts and can be installed as agent skills:
 
 ```sh
-npx @rusticstack/agent-art skills --out ~/.claude/skills   # tileable-texture, sprite, rig, rig-hd, walk-cycle, iso-scene, hd2d-scene, 3d-kit, ship-model, fp-weapon, prop-rig, ui-icons, minecraft-pack, sfx-pack, music-track
+npx @rusticstack/agent-art skills --out ~/.claude/skills   # tileable-texture, sprite, rig, rig-hd, walk-cycle, iso-scene, hd2d-scene, 3d-kit, ship-model, hard-surface, fp-weapon, prop-rig, ui-icons, minecraft-pack, sfx-pack, music-track
 ```
 
 ## CLI (no MCP needed)

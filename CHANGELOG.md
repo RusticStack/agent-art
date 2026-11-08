@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+### Hard-surface detail (`art_model`)
+
+- PBR materials: part `material` = `painted_metal` | `bare_metal` | `rubber` | `plastic` | `glass` | `emissive_panel` | `fabric` or `{metal, rough}`, written as glTF `metallicFactor` / `roughnessFactor`. Canvas layers `metal` and `rough` become a `metallicRoughnessTexture`, and canvas `meta.material` sets a whole canvas. `atlas:true` merges them into one metallicRoughness atlas.
+- Height and normals: a `height` layer (or `<canvas>_h` with `bump`) gives a pixel-correct normal map: no blur, bevel-aware, the high side gets the chamfer, tiles wrap. `bump:{strength, bevel, auto:"luminance"|"panels", ...}` on a part, on the canvas meta, or on export/preview. The preview lights normal maps, metalness and roughness per pixel.
+- Greebles: a `greeble` part and box/wall/floor `greebles:[{face, ...}]`. A seeded, non-overlapping scatter of 13 built-in pieces (panel, vent, pipe, conduit, antenna, bolts, hatch, heatsink, nozzle, dome, cables, tank, block) or your own models (`"model:<name>"`, `greeble_kind`), with density, size, height, panel grid, alignment and an avoid mask or rectangles. Pieces merge into the model's materials, or `instanced:true` exports them with `EXT_mesh_gpu_instancing`. `drop_lod` (auto: flat pieces at LOD 1, tall ones at LOD 2).
+- Sweeps: `tube` / `sweep` sweeps a circle or a custom `profile` along a polyline, Catmull-Rom or Bezier path, with rotation-minimising frames, mitred corners, twist, taper, caps and texture wrap. `from` + `to` + `sag` makes a hanging cable.
+- Trim sheets: `art_model trim {canvas}` paints a sci-fi sheet (colour, height, metal, rough and emissive layers) or marks your own (`strips:{name:[y,h]}`). Part `trim:"sheet:strip"` maps bevels, inset walls and thin faces to that strip (u along the face at world scale, v across the strip). Tubes map the strip around their section.
+- Mesh ops: part `boolean:"subtract"|"union"|"intersect"` with `target` (index, `id` or name). It runs BSP CSG per closed piece and splits T-junctions, so results stay edge-manifold. Model `merge` welds vertices and drops hidden faces. Model `morphs` export glTF morph targets with named weights, and `preview {morph}` shows them.
+- Part `cast_shadow` / `receive_shadow` become node extras.
+
+### Render cost (`art_model export`)
+
+- `bake_ao`: a BVH ray-cast hemisphere AO into a lightmap (`occlusionTexture`, unique `TEXCOORD_1`, NEAREST) and/or `COLOR_0`. It is deterministic. Each LOD level bakes against itself into one shared lightmap.
+- `lods:[1, 0.5, 0.2]`: quadric half-edge collapse that keeps each triangle's own UVs, material and open borders, and drops hidden faces between pieces first. Output goes to `<name>_lods > <name>_LOD0..n` nodes (or `lod_mode:"files"`) with recommended switch distances in `meta.lods`.
+- `impostor`: a hemi-octahedral or ring billboard atlas (albedo, world normal, depth) plus `<name>.impostor.json`.
+- `collision` (convex hull or box set) and `occluder` (conservative box set): hidden named nodes, not counted in triangles. `stats:true` adds per-part triangles and bounds.
+- `cull` (layout rooms): one `room_<name>` node per room, doorways found automatically, and `meta.cull` with rooms, portals, PVS and usage.
+- `preview {ao, lod, morph}`.
+
+### Compatibility
+
+- Models and exports that use none of the new options are byte-for-byte the same as 0.6.0 (md5 of `.glb`, `meta.json`, `ctm.json`, preview and render PNGs).
+- The tool-list size limit in `test/quality.test.js` goes from 23350 to 24400 (24127 measured) for the new `art_model` options.
+
+### Docs
+
+- `art_help {topic:"3d"}`: new "Hard-surface detail" and "Render cost" sections, plus recipes for hull greebling, a corridor with one trim sheet, a pipe run, and LOD + impostor for a city block. README section with renders (`docs/surface/`, rebuilt by `node docs/surface/build-demos.mjs`). New skill `hard-surface`.
+
 ## 0.6.0
 
 ### 3D rigs, clips and pre-rendered sprites (`art_model`)

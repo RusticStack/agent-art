@@ -151,6 +151,23 @@ Keep pieces light (< 500 tris), reuse a few textures, characters stay 2D billboa
 5. Look and iterate: art_model ${J({ action: 'preview', name: 'scout' })}, update {set:{0:{d:72}}} / add / remove. Keep it light (< 1000 tris).
 6. Export: art_model ${J({ action: 'export', name: 'scout' })} -> exports/scout.glb (up:"z" for Z-up engines). Options and recipes: art_help {topic:"3d"}.`,
   },
+  'hard-surface': {
+    title: 'Hard-surface sci-fi detail: greebles, trim sheets, PBR, normals, baked AO, LODs + impostors (.glb)',
+    when: 'Big-budget sci-fi look at a pixel-texture budget: ship hull sections, stations, carrier corridors, city blocks; anything that needs greebles, pipes, panel trims, metal/rough, contact shadows, and must stay fast in a browser.',
+    body: `1. Textures with surface data layers (left out of the colour): a 32x32 hull plate with panel lines, then layers "height" (white = high: grooves black, rivets white), "metal" and "rough" (grey = value):
+   art_create_canvas ${J({ name: 'hull', width: 32 })}; art_layer ${J({ canvas: 'hull', action: 'add', name: 'height' })} (and "metal", "rough") -> art_draw on each layer. Canvas-wide PBR instead of layers: art_canvas ${J({ canvas: 'hull', action: 'meta', meta: { material: 'painted_metal' } })}.
+2. One trim sheet for edges, seams, pipes, hazard and light strips: art_model ${J({ action: 'trim', canvas: 'hull_trim' })} (or strips:{name:[y,h]} on your own sheet).
+3. Hull section: art_model ${J({ action: 'create', name: 'hull_a', origin: 'bottom', parts: [
+    { type: 'box', id: 'hull', w: 160, h: 40, d: 96, bevel: 3, texture: 'hull', material: 'painted_metal', trim: 'hull_trim:bevel', greebles: [{ face: 'top', seed: 11, grid: 2, density: 0.35, avoid: [[64, 0, 32, 96]] }, { face: 'right', seed: 12, density: 0.3, size: [2, 8], kinds: { vent: 3, pipe: 2, bolts: 2, panel: 3 } }] },
+    { type: 'box', w: 52, h: 22, d: 30, at: [0, 0, 36], boolean: 'subtract', target: 'hull' },
+    { type: 'tube', path: [[-82, 30, 44], [-82, 30, -40], [-60, 30, -46]], r: 2, trim: 'hull_trim:pipe', mirror: 'x' },
+    { type: 'tube', from: [-12, 50, 30], to: [-12, 50, -30], sag: 3, r: 0.6, sides: 4, color: '#24272c' },
+    { type: 'cylinder', r_bottom: 9, r_top: 7, h: 14, rotate: [-90, 0, 0], at: [-50, 20, -48], mirror: 'x', color: '#4a4f57', material: 'bare_metal' }] })}
+4. Corridor module (one trim sheet everywhere): floor {texture:"deck"} + a grate strip box {h:0.5, trim:{sheet:"hull_trim", strip:"grate", faces:"all"}}; walls box {insets:[{face:"right", rect, depth:1.5}]}; ribs box {bevel:1, material:"bare_metal", trim:"hull_trim:rib"} every 32 px; ceiling light strip {trim:{sheet:"hull_trim", strip:"light", faces:"all"}}; wall greeble part {w:20, d:110, rotate:[0,0,-90], mirror:"x"}; pipe runs and sagging cables (tube); a bulkhead doorway = box {boolean:"subtract", target:"bulkhead"}.
+5. Look: art_model ${J({ action: 'preview', name: 'hull_a', views: ['game'], ao: true })} (also lod:1|2, morph:{open:1}). Iterate seeds, density, avoid rects.
+6. Export for the browser: art_model ${J({ action: 'export', name: 'hull_a', bake_ao: true, lods: [1, 0.5, 0.2], impostor: { grid: 8, size: 64 }, collision: 'hull', occluder: 'boxes' })}: AO lightmap (TEXCOORD_1), <name>_lods > LOD0..2 with switch distances (THREE.LOD), impostor atlas + json, hidden collision / occluder nodes. Repeated greebles: greeble {instanced:true} -> EXT_mesh_gpu_instancing (InstancedMesh).
+7. Interiors: layout model with cull:{rooms:[{name, min, max}, ...]} -> room_<name> nodes, auto doorways, meta.cull.pvs. Budget: 3-8k tris per hero section at LOD0, < 1k per kit piece.`,
+  },
   'fp-weapon': {
     title: 'First-person weapon + arms: 3D rig with clips (.glb) or pre-rendered pixel sprites',
     when: 'FPS viewmodels: a gun with moving parts (magazine, bolt, slide) and separate arms, either shipped as true 3D (glTF animations, Roblox Motor6D) or rendered to 2D sprite layers with per-frame hand anchors.',
