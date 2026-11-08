@@ -14,6 +14,7 @@ import { normImpostor, bakeImpostor } from './impostor.js';
 import { renderViews } from './raster3d.js';
 import { quatOfMat } from './modelrig.js';
 import { paintTrimSheet, trimStrips, TRIM_STYLES, DEFAULT_TRIM } from './surface.js';
+import { normLightmap, normProbes, normThickness, bakeLighting, bakeProbes, probeScene } from './lightbake.js';
 
 const NAME_RE = /^[A-Za-z0-9_\-.]{1,64}$/;
 const f6 = (v) => +(+v).toFixed(6);
@@ -22,7 +23,7 @@ const hasFlags = (mesh) => mesh.faces.some(({ f }) => f.cs !== undefined || f.rs
 
 /** Does this export need the extras pipeline? */
 export function wantsExtras(def, built, a) {
-  return !!(a.bake_ao || a.lods || a.impostor || a.collision || a.occluder || a.stats || a.cull || def.cull || def.morphs || built.gpu || hasFlags(built.mesh));
+  return !!(a.bake_ao || a.lods || a.impostor || a.collision || a.occluder || a.stats || a.cull || def.cull || def.morphs || built.gpu || hasFlags(built.mesh) || a.lightmap || a.probes || a.thickness);
 }
 
 // ---------- morph targets ----------
@@ -107,13 +108,16 @@ export function exportExtras(engine, def, built, a, { scale, file, info, meshes,
   const glbOpts = {};
   const lods = normLods(a.lods);
   const ao = normAO(a.bake_ao);
+  const lm = normLightmap(a.lightmap), probes = normProbes(a.probes, built.grid), thick = normThickness(a.thickness);
+  const bent = !!(a.bake_ao && typeof a.bake_ao === 'object' && a.bake_ao.bent);
+  if (bent && ao) ao.bent = true;
   const cullSpec = a.cull ?? def.cull;
   const screen = { height: Number(a.lod_screen?.height ?? 720), fov: Number(a.lod_screen?.fov ?? 70), px: Number(a.lod_screen?.px ?? 1) };
   if (!(screen.height > 0 && screen.fov > 0 && screen.fov < 180 && screen.px > 0)) throw new Error('lod_screen must be {height?:720 px > 0, fov?:70 deg (0..180), px?:1 > 0}');
   const root = built.mesh;
   const base = file.replace(/\.glb$/i, '');
   if (info || a.instances) {
-    const what = [lods && 'lods', cullSpec && 'cull', def.morphs && 'morphs', info && ao && 'bake_ao'].filter(Boolean);
+    const what = [lods && 'lods', cullSpec && 'cull', def.morphs && 'morphs', info && ao && 'bake_ao', lm && 'lightmap', probes && 'probes', thick && 'thickness'].filter(Boolean);
     if (what.length) throw new Error(`${what.join(', ')}: not available on ${info ? 'rigged models (named parts / sockets / clips)' : 'instances:true exports'} yet; export without ${what.join(' / ')}`);
   }
   // world copies of the layout instances + GPU pieces (occluders, impostor, proxies)
@@ -148,7 +152,35 @@ export function exportExtras(engine, def, built, a, { scale, file, info, meshes,
       }
     }
     // ---- AO bake (one lightmap for every LOD level; each level occludes itself)
-    if (ao) {
+    if (lm || thick || bent || probes) {
+      // materials v2: AO, bent normals, lightmap and SSS thickness share one chart layout (TEXCOORD_1)
+      const sets = [{ meshes: rootParts.map((p) => p.mesh), occluders: [instWorld, gpuWorld] }, ...lodMeshes.map((l) => ({ meshes: [l.mesh] }))];
+      if (built.gpu) for (const it of built.gpu) sets.push({ meshes: [it.mesh] });
+      const bounds = whole().bounds(), lights = built.lights || [];
+      let scene = null;
+      if (ao || lm || thick) {
+        const r = bakeLighting(sets, { ao, lm, thickness: thick, lights, bounds });
+        if (r.ao) glbOpts.ao = r.ao;
+        for (const k of ['lightmap', 'bent', 'thickness']) if (r[k]) glbOpts[k] = r[k];
+        scene = r.scene;
+        if (ao) { meta.ao = { mode: ao.mode, samples: ao.samples, distance_px: ao.distance, strength: ao.strength, ...(ao.mode !== 'vertex' ? { size: r.stats.size, texel_px: r.stats.texel_px, charts: r.stats.charts } : {}), ...(bent ? { bent_normals: 'material extras.bentNormalTexture (TEXCOORD_1, object space)' } : {}), note: 'AO lightmap = occlusionTexture texCoord 1 (TEXCOORD_1, unique per face), shared with the lightmap / bent normal / thickness charts' }; result.ao = meta.ao; }
+        if (lm) {
+          meta.lightmap = { ...r.stats, range: lm.range, levels: lm.levels, dither: lm.dither, direct: lm.direct, lights: lights.map((L) => ({ kind: L.kind, at: L.pos.map((v) => f6(v / scale)), color: L.color.map(f6), intensity: L.intensity, range: f6(L.range / scale), ...(L.size ? { size: L.size.map((v) => f6(v / scale)) } : {}), part: L.part })),
+            three: 'const ex = mesh.material.userData.lightMap; const tex = await parser.getDependency("texture", ex.index); tex.channel = 1; tex.colorSpace = THREE.SRGBColorSpace; mat.lightMap = tex; mat.lightMapIntensity = ex.intensity; (GLTFLoader keeps material extras in material.userData; texture filters are already NEAREST). Baked light includes sky + bounce' + (lm.direct ? ' + the sun and light parts: drop the matching dynamic lights on these meshes (or bake with direct:false and keep a dynamic sun).' : ' (direct:false: sun and light parts stay dynamic).') + ' docs/materials/README.md' };
+          result.lightmap = { size: r.stats.size, texel_px: r.stats.texel_px, charts: r.stats.charts, ms: r.stats.ms, peak: r.stats.peak, lights: lights.length };
+        }
+        if (thick) { meta.thickness = { distance_px: thick.distance, samples: thick.samples, note: 'SSS thickness (white = thick) on TEXCOORD_1, in material extras.thicknessTexture of subsurface materials' }; result.thickness = { size: r.stats.size }; }
+        result.bake_ms = r.stats.ms;
+      }
+      if (probes) {
+        scene = scene || probeScene(sets, normLightmap(a.lightmap || true), lights, bounds);
+        const pr = bakeProbes(scene, bounds, probes, scale);
+        const pm = { order: 'SH9 radiance, three.js SphericalHarmonics3 order (L00, L1-1, L10, L11, L2-2, L2-1, L20, L21, L22), rgb per coefficient (27 numbers per probe, linear)', origin: pr.origin, spacing: pr.spacing, dims: pr.dims, count: pr.count, samples: pr.samples, ms: pr.ms, index: 'probe (x, y, z) = coefficients[(z * dims[1] + y) * dims[0] + x], position = origin + [x, y, z] * spacing (units)', three: 'const p = new THREE.LightProbe(); p.sh.fromArray(coefficients[i]); p.intensity = Math.PI (matches the lightmap scale); blend the 8 probes around a character trilinearly (docs/materials/README.md)' };
+        if (pr.count > 64) { const pf = `${base}.probes.json`; side.push([pf, Buffer.from(JSON.stringify({ ...pm, coefficients: pr.coefficients }))]); pm.file = path.basename(pf); } else pm.coefficients = pr.coefficients;
+        meta.probes = pm;
+        result.probes = { count: pr.count, dims: pr.dims, spacing: pr.spacing, ms: pr.ms, ...(pm.file ? { file: path.join(path.dirname(file), pm.file) } : {}) };
+      }
+    } else if (ao) {
       const sets = [{ meshes: rootParts.map((p) => p.mesh), occluders: [instWorld, gpuWorld] }, ...lodMeshes.map((l) => ({ meshes: [l.mesh] }))];
       if (built.gpu) for (const it of built.gpu) sets.push({ meshes: [it.mesh] });
       const { stats, map } = bakeAO(sets, ao);

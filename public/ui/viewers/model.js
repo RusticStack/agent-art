@@ -1,7 +1,9 @@
 // 3D model viewer (three.js, vendored in public/vendor/three, loaded on first use): the model's
 // in-memory .glb from the server (same scene as art_model export). Orbit, wireframe, vertex
-// normals, UV checker, clips (glTF animations), sockets and pivots, triangle / node stats.
-// Without WebGL it falls back to the server's software preview.
+// normals, UV checker, clips (glTF animations), sockets and pivots, triangle / node stats, and a
+// channel dropdown (materials v2: albedo, normal, ORM, metal, rough, AO, emissive, height, lightmap,
+// bent normals, tangents, lightmap UVs, detail) that reloads the .glb with profile=three (and a
+// quick bake for the TEXCOORD_1 channels). Without WebGL it falls back to the server's software preview.
 import { el, enc, getJSON, fmtBytes } from '../util.js';
 
 let threeP = null;
@@ -14,6 +16,34 @@ function loadThree() {
   ]).then(([THREE, oc, gl, vn]) => ({ THREE, OrbitControls: oc.OrbitControls, GLTFLoader: gl.GLTFLoader, VertexNormalsHelper: vn.VertexNormalsHelper }));
   return threeP;
 }
+
+/** Channel views: [label, texture source, swizzle (rgb|r|g|b), needs] (needs: three = v2 glb, bake = baked TEXCOORD_1). */
+const CHANNELS = {
+  lit: ['Lit', null], albedo: ['Albedo', 'map'], normal: ['Normal', 'normalMap', 'rgb', 'three'], orm: ['ORM', 'metalnessMap', 'rgb', 'three'],
+  metal: ['Metal', 'metalnessMap', 'b', 'three'], rough: ['Rough', 'roughnessMap', 'g', 'three'], ao: ['AO', 'aoMap', 'r', 'bake'], emissive: ['Emissive', 'emissiveMap', 'rgb', 'three'],
+  height: ['Height', 'x:heightTexture', 'r', 'three'], detail: ['Detail', 'x:detail.texture', 'rgb', 'three'], lightmap: ['Lightmap', 'x:lightMap', 'rgb', 'bake'],
+  bent: ['Bent normals', 'x:bentNormalTexture', 'rgb', 'bake'], tangent: ['Tangents', 'tangent', 'rgb', 'three'], uv1: ['Lightmap UVs', 'uv1', 'rgb', 'bake'],
+};
+const VS = `precision highp float;
+uniform mat4 modelViewMatrix; uniform mat4 projectionMatrix;
+attribute vec3 position; attribute vec2 uv; attribute vec2 uv1; attribute vec4 tangent;
+varying vec2 vUv; varying vec2 vUv1; varying vec4 vT;
+void main() { vUv = uv; vUv1 = uv1; vT = tangent; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+const FS = `precision highp float;
+uniform sampler2D map; uniform int useMap; uniform int useUv1; uniform int mode; uniform int swz; uniform int toSrgb; uniform vec3 color; uniform float scale;
+varying vec2 vUv; varying vec2 vUv1; varying vec4 vT;
+vec3 srgb(vec3 c) { return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
+void main() {
+  vec3 c = color;
+  if (mode == 1) c = vT.xyz * 0.5 + 0.5;
+  else if (mode == 2) { vec2 g = floor(vUv1 * 64.0); c = vec3(vUv1, mod(g.x + g.y, 2.0) * 0.6 + 0.2); }
+  else if (useMap == 1) {
+    vec4 t = texture2D(map, (useUv1 == 1 ? vUv1 : vUv) * scale);
+    vec3 v = swz == 1 ? vec3(t.r) : swz == 2 ? vec3(t.g) : swz == 3 ? vec3(t.b) : t.rgb;
+    c = (toSrgb == 1 ? srgb(v) : v) * color;
+  }
+  gl_FragColor = vec4(c, 1.0);
+}`;
 
 function checkerTexture(THREE) {
   const c = document.createElement('canvas');
@@ -50,8 +80,11 @@ export class ModelViewer {
     this.playBtn = el('button.btn', { text: '▶', title: 'Play / pause clip (Space)', on: { click: () => this.togglePlay() } });
     this.loopCb = el('input', { type: 'checkbox', checked: true, on: { change: () => this.playClip() } });
     this.glbA = el('a.btn', { text: 'GLB', download: '' });
+    this.chanSel = el('select', { title: 'Material channel (materials v2): reloads the model with profile three; lightmap / AO / bent / lightmap UVs run a quick bake', on: { change: () => this.setChannel() } },
+      ...Object.entries(CHANNELS).map(([k, [label]]) => el('option', { value: k, text: label })));
     this.root.append(el('div.vtoolbar', {},
       el('div.group', {}, w, n, u), el('div.group', {}, s, p, g),
+      el('div.group', {}, el('span.muted', { text: 'Channel' }), this.chanSel),
       el('div.group', {}, el('span.muted', { text: 'Clip' }), this.clipSel, this.playBtn, el('label.toggle', {}, this.loopCb, ' Loop')),
       el('button.btn', { text: 'Reset view', on: { click: () => this.frameCamera() } }),
       el('div.spacer'), this.glbA));
@@ -123,7 +156,10 @@ export class ModelViewer {
   async open(target) {
     const keepCam = this.target && this.target.name === target.name && this.target.kind === target.kind;
     this.target = target;
-    const url = target.kind === 'export' ? `/api/export-file?path=${enc(target.name)}` : `/api/model/${enc(target.name)}/glb${target.snap ? `?snap=${target.snap}` : ''}`;
+    const need = CHANNELS[this.chanSel.value]?.[3];
+    const q = [target.snap ? `snap=${target.snap}` : '', target.kind === 'model' && need ? `profile=three${need === 'bake' ? '&bake=1' : ''}` : ''].filter(Boolean).join('&');
+    this.loadedNeed = target.kind === 'model' ? need || '' : '';
+    const url = target.kind === 'export' ? `/api/export-file?path=${enc(target.name)}` : `/api/model/${enc(target.name)}/glb${q ? `?${q}` : ''}`;
     this.glbA.href = url + (url.includes('?') ? '&' : '?') + 'download=1';
     this.glbA.setAttribute('download', `${target.name.split('/').pop().replace(/\.glb$/i, '')}.glb`);
     const ok = await this.init();
@@ -139,6 +175,53 @@ export class ModelViewer {
     const gltf = await new Promise((res, rej) => new GLTFLoader().parse(buf, '', res, rej)).catch((e) => ({ error: e.message || String(e) }));
     if (gltf.error) { this.status.textContent = `GLB load failed: ${gltf.error}`; return; }
     this.setModel(gltf, buf.byteLength, keepCam);
+    await this.applyChannel();
+  }
+  /** Channel dropdown: reload when the channel needs a richer .glb, else swap the materials. */
+  async setChannel() {
+    const need = CHANNELS[this.chanSel.value]?.[3] || '';
+    const rank = { '': 0, three: 1, bake: 2 };
+    if (this.target && this.target.kind === 'model' && rank[need] > rank[this.loadedNeed || '']) { await this.open(this.target); return; }
+    await this.applyChannel();
+  }
+  async applyChannel() {
+    if (!this.model || !this.T) return;
+    const { THREE } = this.T;
+    const ch = this.chanSel.value, spec = CHANNELS[ch] || CHANNELS.lit;
+    const meshes = [];
+    this.model.traverse((o) => { if (o.isMesh) meshes.push(o); });
+    let missing = 0;
+    for (const o of meshes) {
+      if (!o.userData.origMat) o.userData.origMat = o.material;
+      if (ch === 'lit') { o.material = o.userData.origMat; continue; }
+      const m = o.userData.origMat;
+      let tex = null, scale = 1, uv1 = false, mode = 0, color = new THREE.Color(1, 1, 1);
+      const src = spec[1];
+      if (src === 'tangent') { mode = 1; if (!o.geometry.attributes.tangent) missing++; }
+      else if (src === 'uv1') { mode = 2; if (!o.geometry.attributes.uv1) missing++; }
+      else if (src.startsWith('x:')) {
+        const path = src.slice(2).split('.'), ex = path.reduce((v, k) => (v ? v[k] : null), m.userData || {});
+        if (ex && Number.isInteger(ex.index)) { tex = await this.gltf.parser.getDependency('texture', ex.index).catch(() => null); uv1 = ex.texCoord === 1; if (src === 'x:detail.texture') scale = m.userData.detail.scale || 1; }
+      } else { tex = m[src] || null; if (tex) uv1 = tex.channel === 1; }
+      if (src === 'emissiveMap' && m.emissive) color = m.emissive.clone().multiplyScalar(Math.min(1, m.emissiveIntensity || 1));
+      if (!tex && mode === 0) {
+        missing++;
+        if (src === 'normalMap') color = new THREE.Color(0.5, 0.5, 1);
+        else if (src === 'metalnessMap') color = ch === 'orm' ? new THREE.Color(1, m.roughness, m.metalness) : new THREE.Color(m.metalness, m.metalness, m.metalness);
+        else if (src === 'roughnessMap') color = new THREE.Color(m.roughness, m.roughness, m.roughness);
+        else if (src === 'map' && m.color) color = m.color.clone();
+        else if (src !== 'emissiveMap' && src !== 'aoMap') color = new THREE.Color(0.25, 0.1, 0.25);
+        else if (src === 'aoMap') color = new THREE.Color(1, 1, 1);
+        else color = new THREE.Color(0, 0, 0);
+      }
+      const swz = { rgb: 0, r: 1, g: 2, b: 3 }[spec[2] || 'rgb'];
+      o.material = new THREE.RawShaderMaterial({
+        vertexShader: VS, fragmentShader: FS, side: m.side,
+        uniforms: { map: { value: tex }, useMap: { value: tex ? 1 : 0 }, useUv1: { value: uv1 ? 1 : 0 }, mode: { value: mode }, swz: { value: swz }, toSrgb: { value: tex && tex.colorSpace === THREE.SRGBColorSpace ? 1 : 0 }, color: { value: color }, scale: { value: scale } },
+      });
+    }
+    this.chanNote = ch === 'lit' ? '' : `channel ${spec[0]}${missing ? ` (${missing} mesh${missing > 1 ? 'es' : ''} without it)` : ''}`;
+    if (this.statusBase) this.status.textContent = [this.statusBase, this.chanNote].filter(Boolean).join(' · ');
   }
   fallback() {
     this.stage.querySelector('img.fallback')?.remove();
@@ -208,7 +291,7 @@ export class ModelViewer {
     this.applyToggles();
     const i = this.info;
     const rig = i?.rig;
-    this.status.textContent = [
+    this.statusBase = this.status.textContent = [
       this.target.name + (this.target.snap ? ` (snapshot ${this.target.snap})` : ''),
       `${Math.round(tris)} tris`, `${verts} verts`, `${meshes} meshes`, `${this.materials.length} materials`,
       `${nodeNames.length} nodes`, `${this.sockets.length} sockets`, `${gltf.animations.length} clips`,
@@ -228,6 +311,7 @@ export class ModelViewer {
   }
   applyToggles() {
     if (!this.model) return;
+    this.model.traverse((o) => { if (o.isMesh && o.material && o.material.isRawShaderMaterial) o.material.wireframe = this.wireCb.checked; });
     for (const m of this.materials) {
       m.wireframe = this.wireCb.checked;
       const want = this.uvCb.checked ? this.checker : m.userData.origMap;

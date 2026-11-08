@@ -5,6 +5,7 @@
 // Everything here only runs when a model, part or canvas asks for it, so plain models export
 // byte-for-byte as before.
 import { mulberry32, hash3 } from './util.js';
+import { V2_PRESETS, V2_KEYS, normV2, v2Key } from './materials.js';
 
 // ---------- PBR ----------
 /**
@@ -26,24 +27,37 @@ const unit = (v, name) => {
   if (!Number.isFinite(x) || x < 0 || x > 1) throw new Error(`material ${name} must be a number 0..1 (got ${JSON.stringify(v)})`);
   return x;
 };
-/** "bare_metal" | {preset?, metal?, rough?, emissive?} -> {metal, rough, preset?, glass?, emissive?} | null. */
-export function normPBR(v) {
+const ALL_PRESETS = () => [...Object.keys(MATERIAL_PRESETS), ...Object.keys(V2_PRESETS)];
+const FIELDS = ['preset', 'metal', 'rough', 'emissive', ...V2_KEYS];
+/**
+ * "bare_metal" | {preset?, metal?, rough?, emissive?, clearcoat?, anisotropy?, transmission?, ior?,
+ * sheen?, subsurface?, height?, detail?} -> {metal, rough, preset?, glass?, emissive?, v2?} | null.
+ * named = model materials ({name: spec}): a string naming one resolves to it (before presets).
+ */
+export function normPBR(v, named = null, depth = 0) {
   if (v === undefined || v === null || v === false) return null;
   let base = {};
-  if (typeof v === 'string') v = { preset: v };
-  if (typeof v !== 'object' || Array.isArray(v)) throw new Error(`material must be a preset name (${Object.keys(MATERIAL_PRESETS).join('|')}) or {metal:0..1, rough:0..1, preset?}`);
-  if (v.preset !== undefined) {
-    base = MATERIAL_PRESETS[v.preset];
-    if (!base) throw new Error(`unknown material preset "${v.preset}" (presets: ${Object.keys(MATERIAL_PRESETS).join(', ')})`);
+  if (typeof v === 'string') {
+    if (named && named[v] !== undefined && depth < 4) { const r = normPBR(named[v], named, depth + 1); if (r) r.named = v; return r; }
+    v = { preset: v };
   }
-  for (const k of Object.keys(v)) if (!['preset', 'metal', 'rough', 'emissive'].includes(k)) throw new Error(`material.${k} is not a field (preset, metal, rough, emissive)`);
+  if (typeof v !== 'object' || Array.isArray(v)) throw new Error(`material must be a preset name (${ALL_PRESETS().join('|')}), a model material name, or {metal:0..1, rough:0..1, preset?, ...}`);
+  if (v.preset !== undefined) {
+    base = MATERIAL_PRESETS[v.preset] || V2_PRESETS[v.preset];
+    if (!base && named && named[v.preset] !== undefined && depth < 4) { const r = normPBR(named[v.preset], named, depth + 1); base = { metal: r.metal, rough: r.rough, ...(r.glass ? { glass: true } : {}), ...(r.emissive ? { emissive: true } : {}), ...(r.src || {}) }; }
+    if (!base) throw new Error(`unknown material preset "${v.preset}" (presets: ${ALL_PRESETS().join(', ')}${named ? `; model materials: ${Object.keys(named).join(', ') || 'none'}` : ''})`);
+  }
+  for (const k of Object.keys(v)) if (!FIELDS.includes(k)) throw new Error(`material.${k} is not a field (${FIELDS.join(', ')})`);
   const out = { metal: unit(v.metal ?? base.metal ?? 0, 'metal'), rough: unit(v.rough ?? base.rough ?? 1, 'rough') };
   if (v.preset) out.preset = v.preset;
   if (base.glass) out.glass = true;
   if (v.emissive ?? base.emissive) out.emissive = true;
+  // materials v2 fields (only present when asked for: 0.7 materials keep their keys and bytes)
+  const v2 = normV2(v, base);
+  if (v2) { out.v2 = v2; out.src = Object.fromEntries(['emissive', ...V2_KEYS].filter((k) => (v[k] ?? base[k]) !== undefined).map((k) => [k, v[k] ?? base[k]])); }
   return out;
 }
-export const pbrKey = (m) => `${m.metal}:${m.rough}${m.emissive ? 'e' : ''}`;
+export const pbrKey = (m) => `${m.metal}:${m.rough}${m.emissive ? 'e' : ''}${v2Key(m.v2)}`;
 
 const lum = (d, p) => (0.2126 * d[p] + 0.7152 * d[p + 1] + 0.0722 * d[p + 2]) / 255;
 

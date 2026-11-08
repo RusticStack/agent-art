@@ -3,6 +3,7 @@
 // share one scale (sizes compare across views); "game" is a 38° pitch perspective 3/4 camera.
 import { packImages } from './sheet.js';
 import { cross, dot, norm } from './model3d.js';
+import { wantsShade2, makeShade2 } from './shade2.js';
 
 const sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 
@@ -39,16 +40,16 @@ function project(groups, v, center, radius) {
     }
     return { X, Y, Z, W };
   });
-  return { out, box: [minX, maxX, minY, maxY], view: zc };
+  return { out, box: [minX, maxX, minY, maxY], view: zc, eye: v.perspective ? cam : [center[0] + zc[0] * 1e6, center[1] + zc[1] * 1e6, center[2] + zc[2] * 1e6] };
 }
 
-function raster(groups, proj, k, cx, cy, S, view) {
+function raster(groups, proj, k, cx, cy, S, view, extra) {
   const screen = proj.map(({ X, Y, Z, W }) => {
     const n = X.length, sx = new Float32Array(n), sy = new Float32Array(n);
     for (let i = 0; i < n; i++) { sx[i] = S / 2 + (X[i] - cx) * k; sy[i] = S / 2 - (Y[i] - cy) * k; }
     return { sx, sy, Z, W };
   });
-  return rasterCore(groups, screen, S, S, view ? { view } : {});
+  return rasterCore(groups, screen, S, S, extra ? { ...extra, ...(view ? { view } : {}) } : view ? { view } : {});
 }
 
 /**
@@ -70,11 +71,15 @@ export function rasterCore(groups, screen, IW, IH, opts = {}) {
   const zbuf = new Float32Array(IW * IH).fill(-Infinity);
   let drawn = 0;
   // opaque / alpha-tested groups first, then translucent ones (opacity, glass) blended over them
-  const order = groups.map((g, gi) => gi).sort((a, b) => (groups[a].tex.material?.blend ? 1 : 0) - (groups[b].tex.material?.blend ? 1 : 0));
+  const late = (g) => (g.tex.material?.blend || g.tex.v2?.transmission ? 1 : 0);
+  const order = groups.map((g, gi) => gi).sort((a, b) => late(groups[a]) - late(groups[b]));
+  const glow = opts.glow || null;
   for (const gi of order) {
     const g = groups[gi];
     const { sx, sy, Z, W, clip } = screen[gi];
-    const mat = g.tex.material, blend = !!mat?.blend, twoSided = !!mat?.double_sided, opacity = blend ? mat.opacity : 1;
+    // materials v2 shading (lightmap, extensions, detail, parallax, channel views): only when asked for
+    const sh2 = wantsShade2(g, opts) ? makeShade2(g, opts) : null;
+    const mat = g.tex.material, blend = !!mat?.blend || !!sh2?.transmissive, twoSided = !!mat?.double_sided, opacity = sh2?.transmissive ? Math.min(mat?.blend ? mat.opacity : 1, sh2.opacity) : blend ? mat.opacity : 1;
     const t = g.tex, tw = t.width, th = t.height, td = t.data, te = t.emissive;
     const { idx, uv, nrm } = g, al = g.alpha; // overlay shells: per-vertex strength
     const lit = !g.overlay && !!(t.pbr || t.mr || t.normal || g.ao || g.aoTex);
@@ -99,7 +104,7 @@ export function rasterCore(groups, screen, IW, IH, opts = {}) {
       const inv = 1 / area;
       // tangent frame for normal maps: T = +u, Bu = image up (-v) on the surface (glTF: green = up)
       let TT = null, BU = null;
-      if (tn) {
+      if (tn || sh2) {
         const P = (i) => [g.pos[i * 3], g.pos[i * 3 + 1], g.pos[i * 3 + 2]];
         const p0 = P(a), e1 = sub3(P(b), p0), e2 = sub3(P(c), p0);
         const du1 = uv[b * 2] - uv[a * 2], dv1 = uv[b * 2 + 1] - uv[a * 2 + 1], du2 = uv[c * 2] - uv[a * 2], dv2 = uv[c * 2 + 1] - uv[a * 2 + 1];
@@ -122,7 +127,14 @@ export function rasterCore(groups, screen, IW, IH, opts = {}) {
           const z = l0 * Z[a] + l1 * Z[b] + l2 * Z[c], o = py * IW + px;
           if (z <= zbuf[o]) continue;
           const iw = l0 * wa + l1 * wb + l2 * wc;
-          const u = (l0 * ua + l1 * ub + l2 * uc) / iw, v = (l0 * va + l1 * vb + l2 * vc) / iw;
+          let u = (l0 * ua + l1 * ub + l2 * uc) / iw, v = (l0 * va + l1 * vb + l2 * vc) / iw;
+          let n2 = null, Pw = null;
+          if (sh2 && opts.eye) Pw = [0, 1, 2].map((k2) => (l0 * g.pos[a * 3 + k2] * wa + l1 * g.pos[b * 3 + k2] * wb + l2 * g.pos[c * 3 + k2] * wc) / iw);
+          if (sh2 && sh2.pom) {
+            const P = Pw || [0, 1, 2].map((k2) => (l0 * g.pos[a * 3 + k2] * wa + l1 * g.pos[b * 3 + k2] * wb + l2 * g.pos[c * 3 + k2] * wc) / iw);
+            n2 = norm([l0 * nrm[a * 3] + l1 * nrm[b * 3] + l2 * nrm[c * 3], l0 * nrm[a * 3 + 1] + l1 * nrm[b * 3 + 1] + l2 * nrm[c * 3 + 1], l0 * nrm[a * 3 + 2] + l1 * nrm[b * 3 + 2] + l2 * nrm[c * 3 + 2]]);
+            [u, v] = sh2.pom(u, v, P, n2, TT, BU);
+          }
           let tx = Math.floor(u * tw) % tw, ty = Math.floor(v * th) % th;
           if (tx < 0) tx += tw;
           if (ty < 0) ty += th;
@@ -155,8 +167,16 @@ export function rasterCore(groups, screen, IW, IH, opts = {}) {
             gg = (td[p + 1] * kd + (f0 * 255 + td[p + 1] * metal) * spec) * ao;
             bb = (td[p + 2] * kd + (f0 * 255 + td[p + 2] * metal) * spec) * ao;
           }
+          if (sh2) {
+            const n = n2 || norm([l0 * nrm[a * 3] + l1 * nrm[b * 3] + l2 * nrm[c * 3], l0 * nrm[a * 3 + 1] + l1 * nrm[b * 3 + 1] + l2 * nrm[c * 3 + 1], l0 * nrm[a * 3 + 2] + l1 * nrm[b * 3 + 2] + l2 * nrm[c * 3 + 2]]);
+            const q1 = uv1 ? [(l0 * uv1[a * 2] * wa + l1 * uv1[b * 2] * wb + l2 * uv1[c * 2] * wc) / iw, (l0 * uv1[a * 2 + 1] * wa + l1 * uv1[b * 2 + 1] * wb + l2 * uv1[c * 2 + 1] * wc) / iw] : null;
+            const Vp = Pw ? norm([opts.eye[0] - Pw[0], opts.eye[1] - Pw[1], opts.eye[2] - Pw[2]]) : V; // per-pixel view vector (perspective)
+            const col = sh2.color({ p, u, v, n, TT, BU, L, V: Vp, amb, uv1: q1, aoV: g.ao ? l0 * g.ao[a] + l1 * g.ao[b] + l2 * g.ao[c] : 1 });
+            r = col[0]; gg = col[1]; bb = col[2];
+            if (glow && !blend && td[p + 3] * k >= 128 && z > zbuf[o]) { glow[o * 3] = Math.max(0, r - 255); glow[o * 3 + 1] = Math.max(0, gg - 255); glow[o * 3 + 2] = Math.max(0, bb - 255); }
+          }
           if (lc) { r *= lc[0]; gg *= lc[1]; bb *= lc[2]; }
-          if (te && te[p + 3]) { const ea = te[p + 3] / 255; r += te[p] * ea; gg += te[p + 1] * ea; bb += te[p + 2] * ea; }
+          if (te && te[p + 3] && !sh2) { const ea = te[p + 3] / 255; r += te[p] * ea; gg += te[p + 1] * ea; bb += te[p + 2] * ea; }
           if (blend) {
             // BLEND: alpha = texel alpha x opacity, no depth write (like glTF BLEND in engines)
             const a = (td[p + 3] / 255) * opacity;
@@ -249,7 +269,8 @@ export function makeCamera(spec, IW, IH, fit = [], opts = {}) {
 }
 
 /** Render groups (px, world) through a camera from makeCamera into a W x H image (rasterCore opts). */
-export function renderCamera(groups, cam, IW, IH, opts = {}) {
+export function renderCamera(groups, cam, IW, IH, opts0 = {}) {
+  const opts = cam.pos && !opts0.eye ? { ...opts0, eye: cam.pos } : opts0;
   const screen = groups.map((g) => {
     const n = g.pos.length / 3, sx = new Float32Array(n), sy = new Float32Array(n), Z = new Float32Array(n), W = new Float32Array(n), clip = cam.perspective ? new Uint8Array(n) : null;
     for (let i = 0; i < n; i++) {
@@ -266,7 +287,7 @@ export function renderCamera(groups, cam, IW, IH, opts = {}) {
  * Contact sheet of views. groups: [{tex:{width,height,data,emissive?}, pos, nrm, uv, idx}] in px.
  * -> { width, height, data, views:[{label, pixels}] }
  */
-export function renderViews(groups, { views = ['game', 'front', 'side', 'top', 'iso'], size = 192, labels = true } = {}) {
+export function renderViews(groups, { views = ['game', 'front', 'side', 'top', 'iso'], size = 192, labels = true, raster: extra = null } = {}) {
   const S = Math.max(32, Math.min(1024, Math.round(size)));
   // "fp" / {pos, look, fov}: a placed camera (first-person viewmodels), not fitted to the model
   const isCam = (v) => v === 'fp' || (v && typeof v === 'object' && Array.isArray(v.pos));
@@ -281,10 +302,10 @@ export function renderViews(groups, { views = ['game', 'front', 'side', 'top', '
   const fit = (box) => (S - 2 * margin) / Math.max(1e-6, box[1] - box[0], box[3] - box[2]);
   const orthoK = Math.min(...projs.filter((_, i) => !vs[i].perspective).map((p) => fit(p.box)), Infinity);
   const items = vs.map((v, i) => {
-    if (v.cam) return { img: renderCamera(groups, makeCamera(v.cam, S, S, [], { fov: v.cam.fov }), S, S), label: v.label, sub: v.cam === 'fp' ? '60 DEG EYE' : null };
+    if (v.cam) return { img: renderCamera(groups, makeCamera(v.cam, S, S, [], { fov: v.cam.fov }), S, S, extra || {}), label: v.label, sub: v.cam === 'fp' ? '60 DEG EYE' : null };
     const { out, box } = projs[i];
     const k = v.perspective || !Number.isFinite(orthoK) ? fit(box) : orthoK;
-    const img = raster(groups, out, k, (box[0] + box[1]) / 2, (box[2] + box[3]) / 2, S, projs[i].view);
+    const img = raster(groups, out, k, (box[0] + box[1]) / 2, (box[2] + box[3]) / 2, S, projs[i].view, extra ? { ...extra, eye: projs[i].eye } : null);
     return { img, label: v.label, sub: v.perspective ? `${v.pitch} DEG PERSP` : v.label === 'iso' ? 'ORTHO 3/4' : null };
   });
   const sheet = items.length === 1 && !labels ? items[0].img : packImages(items, { labels, checker: false, columns: Math.min(items.length, 3) });

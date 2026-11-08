@@ -13,7 +13,8 @@ import { triangulate, pointInPoly, polySDF, contour, simplifyLoop, simplifyPath,
 import { applyCTM, cellIndex, ctmTileFor, faceBasis, tileUV } from './ctm.js';
 import { sweep } from './sweep.js';
 import { greeble } from './greeble.js';
-import { normPBR, pbrKey, normBump, bumpKey, bumpNormal, mrTexture, normTrim, trimStrips } from './surface.js';
+import { normPBR, pbrKey, normBump, bumpKey, bumpNormal, mrTexture, normTrim, trimStrips, heightToNormal, autoHeight } from './surface.js';
+import { normDisplace, displaceMesh } from './displace.js';
 import { booleanMesh, mergeMesh } from './csg.js';
 
 // ---------- vector / matrix ----------
@@ -173,6 +174,7 @@ export function weld(g) {
   const ov = !!g.overlay;
   // optional per-vertex data (baked AO, AO lightmap UVs, morph targets) joins the key only when present
   const hasAO = !ov && !!g.ao, hasUV1 = !ov && !!g.uv1, morphs = !ov && g.morphs ? g.morphs : null, skin = g.skin || null;
+  const va = !ov && g.vattr ? Object.entries(g.vattr) : null, vout = va ? va.map(() => []) : null; // materials v2 vertex data
   const sj = [], sw = [], ao = [], uv1 = [], mpos = morphs ? morphs.map(() => []) : null, mnrm = morphs ? morphs.map(() => []) : null;
   for (let i = 0; i < g.pos.length / 3; i++) {
     let key = `${q(g.pos[i * 3])},${q(g.pos[i * 3 + 1])},${q(g.pos[i * 3 + 2])},${q(g.nrm[i * 3])},${q(g.nrm[i * 3 + 1])},${q(g.nrm[i * 3 + 2])},${q(g.uv[i * 2])},${q(g.uv[i * 2 + 1])}`;
@@ -181,6 +183,7 @@ export function weld(g) {
     if (hasUV1) key += `,l${q(g.uv1[i * 2])},${q(g.uv1[i * 2 + 1])}`;
     if (morphs) for (const t of morphs) key += `,m${q(t.pos[i * 3])},${q(t.pos[i * 3 + 1])},${q(t.pos[i * 3 + 2])}`;
     if (skin) for (let k = 0; k < 4; k++) key += `,s${skin.j[i * 4 + k]}:${skin.w[i * 4 + k]}`;
+    if (va) for (const [k, a] of va) { key += `,${k}`; for (let c = 0; c < a.size; c++) key += `,${q(a.data[i * a.size + c])}`; }
     let j = map.get(key);
     if (j === undefined) {
       j = pos.length / 3; map.set(key, j);
@@ -188,6 +191,7 @@ export function weld(g) {
       if (ov) { uv0.push(g.uv0[i * 2], g.uv0[i * 2 + 1]); alpha.push(g.alpha[i]); }
       if (hasAO) ao.push(g.ao[i]);
       if (hasUV1) uv1.push(g.uv1[i * 2], g.uv1[i * 2 + 1]);
+      if (va) va.forEach(([, a], k) => { for (let c = 0; c < a.size; c++) vout[k].push(a.data[i * a.size + c]); });
       if (morphs) morphs.forEach((t, k) => { mpos[k].push(t.pos[i * 3], t.pos[i * 3 + 1], t.pos[i * 3 + 2]); mnrm[k].push(t.nrm[i * 3], t.nrm[i * 3 + 1], t.nrm[i * 3 + 2]); });
       if (skin) for (let k = 0; k < 4; k++) { sj.push(skin.j[i * 4 + k]); sw.push(skin.w[i * 4 + k]); }
     }
@@ -200,6 +204,7 @@ export function weld(g) {
   if (morphs) out.morphs = morphs.map((t, k) => ({ name: t.name, pos: new Float32Array(mpos[k]), nrm: new Float32Array(mnrm[k]) }));
   // skin weights (art_model skin): JOINTS_0 / WEIGHTS_0, 4 per vertex
   if (skin) out.skin = { j: Uint16Array.from(sj), w: Float32Array.from(sw) };
+  if (va) out.vattr = Object.fromEntries(va.map(([k, a], j) => [k, { size: a.size, data: new Float32Array(vout[j]) }]));
   return out;
 }
 
@@ -1149,9 +1154,10 @@ export const PART_DOCS = {
   sweep: 'same as tube (profile sweeps: conduits, railings, rails, hoses)',
   greeble: 'w?:64,d?:64 region on y=0 facing +y, seed?, density?:0.45 (0..1 covered), size?:[3,12] px, height?:[1,4], kinds?:[panel vent pipe conduit antenna bolts hatch heatsink nozzle dome cables tank block | "model:<name>"] or {kind:weight}, grid? px (snap), align?:grid|free, gap?:1, margin?:1, avoid?:<mask canvas>|[[u,v,w,h]], texture|color, dark?, accent?, textures?:{<kind>|main|dark|accent}, drop_lod?:auto (<= 2 px tall at LOD 1, else 2), instanced? (GPU instancing). On box/wall/floor/slab/ledge: greeble:{face, ...} | greebles:[..]',
   model: 'model:"<other model>" = place another model (layouts / dioramas)',
+  light: 'light marker for baked lighting (no geometry): kind?:point|area|spot, color?:"#ffffff", intensity?:1, range?:128 px, size?:[w,h] (area), dir?:[0,-1,0] (area / spot facing), cone?:45 deg (spot); placed like any part (at, array, mirror)',
 };
-export const PART_TYPES = [...Object.keys(BUILDERS), 'model'];
-export const PART_COMMON = 'at?:[x,y,z]|cell?:[gx,gy,gz]|turn?|rotate?:[x,y,z] (deg, X then Y then Z about the part origin)|pivot?:[x,y,z] (rotate/scale about this local point)|scale?|mirror?:x|y|z|[..] (adds mirrored copies)|array?:{count,step|cell_step,rotate?,turn?,about?:[x,y,z]}|opacity?:0..1|glass?|double_sided?|overlays?:[{texture,where,map,scale,falloff,amount}]|ctm_tag?|material?:preset|{metal,rough}|bump?|trim?:"sheet:strip"|boolean?:subtract|union|intersect + target?|id?|cast_shadow?|receive_shadow?';
+export const PART_TYPES = [...Object.keys(BUILDERS), 'model', 'light'];
+export const PART_COMMON = 'at?:[x,y,z]|cell?:[gx,gy,gz]|turn?|rotate?:[x,y,z] (deg, X then Y then Z about the part origin)|pivot?:[x,y,z] (rotate/scale about this local point)|scale?|mirror?:x|y|z|[..] (adds mirrored copies)|array?:{count,step|cell_step,rotate?,turn?,about?:[x,y,z]}|opacity?:0..1|glass?|double_sided?|overlays?:[{texture,where,map,scale,falloff,amount}]|ctm_tag?|material?:preset|{metal,rough}|bump?|trim?:"sheet:strip"|boolean?:subtract|union|intersect + target?|id?|cast_shadow?|receive_shadow?|paint?:"#rrggbb[aa]" + wetness?:0..1 (vertex colour sets)|displace?:true|{scale,bias,max_triangles,tolerance,seams}';
 
 // ---------- world UVs (after placement) ----------
 /** Recompute UVs of world-tiled faces from their final positions: seamless across pieces. */
@@ -1457,14 +1463,19 @@ function partForSpec(p) {
 }
 /** Re-key a built part's base groups onto PBR / bump variants of their textures (no-op without material / bump). */
 function applySurface(mesh, p, ctx) {
-  const pbr = p.material === undefined ? null : normPBR(p.material);
+  const named = ctx.materials || null;
+  const pbr0 = p.material === undefined ? null : normPBR(p.material, named);
   const bump = p.bump === undefined ? null : normBump(p.bump);
-  if (!pbr && !bump) return mesh;
+  // model materials keyed by a canvas name apply to that canvas's faces on parts without material
+  const byCanvas = !pbr0 && named && [...mesh.groups.values()].some((g) => !g.overlay && g.tex.canvas && Object.hasOwn(named, g.tex.canvas)) ? named : null;
+  if (!pbr0 && !bump && !byCanvas) return mesh;
   const cache = ctx.surfCache || (ctx.surfCache = new Map());
   const groups = new Map();
   for (const [k, g] of mesh.groups) {
     if (g.overlay) { groups.set(k, g); continue; }
     const base = g.tex;
+    const pbr = pbr0 || (byCanvas && base.canvas && Object.hasOwn(byCanvas, base.canvas) ? normPBR(byCanvas[base.canvas], named) : null);
+    if (!pbr && !bump) { groups.set(k, g); continue; }
     const key = `${base.key}|s:${pbr ? pbrKey(pbr) : ''}|${bump ? bumpKey(bump) : ''}`;
     if (!cache.has(key)) {
       const ik = base.imageKey ?? base.key;
@@ -1473,6 +1484,7 @@ function applySurface(mesh, p, ctx) {
         v.pbr = { metal: pbr.metal, rough: pbr.rough };
         if (base.metalData || base.roughData) { v.mr = mrTexture(base.width, base.height, base.metalData, base.roughData, pbr); v.mrKey = `${ik}#mr${pbrKey(pbr)}`; }
         if (pbr.emissive && !base.emissive) { v.emissive = base.data; v.emissiveKey = `${ik}#self`; }
+        if (pbr.v2) { v.v2 = pbr.v2; if (pbr.v2.detail) v.detail = detailOf(pbr.v2.detail, ctx); }
       }
       if (bump && base.width * base.height > 1) {
         const n = bumpNormal(base, bump);
@@ -1485,6 +1497,15 @@ function applySurface(mesh, p, ctx) {
   }
   mesh.groups = groups;
   return mesh;
+}
+/** Detail map of a material v2 spec: tiling albedo + normal (given canvas, its own height normal, or derived from luminance). */
+export function detailOf(d, ctx) {
+  const t = ctx.tex(d.texture);
+  if (!t || t.width * t.height <= 1) throw new Error(`material detail.texture "${d.texture}" must be an image canvas`);
+  let normal = t.normal || null;
+  if (d.normal) { const n = ctx.tex(d.normal); if (n.width !== t.width || n.height !== t.height) throw new Error(`detail.normal "${d.normal}" must be ${t.width}x${t.height} like the detail texture`); normal = n.data; }
+  if (!normal) normal = heightToNormal(autoHeight(t.data, t.width, t.height, 'luminance', { levels: 4 }), t.width, t.height, { strength: 1, bevel: 1, wrap: true });
+  return { key: t.key, name: t.name, width: t.width, height: t.height, data: t.data, normal, scale: d.scale, strength: d.strength };
 }
 /** Move the faces pick(g, f) of a mesh into the group of texture tex (mutate(f) adjusts each moved face). */
 export function moveFaces(mesh, pick, tex, mutate) {
@@ -1657,7 +1678,7 @@ export function buildModel(def, ctx) {
   // booleans: parts are kept apart until the cutters are applied (only when a part asks for one)
   const useBool = def.parts.some((p) => p && p.boolean !== undefined && p.boolean !== null && !p.hidden);
   const placed = useBool ? [] : null;
-  const gpu = new Map(), partBounds = [];
+  const gpu = new Map(), partBounds = [], lights = [];
   def.parts.forEach((p0, i) => {
     const p = p0 && p0.material !== undefined ? partForSpec(p0) : p0;
     const type = p.type;
@@ -1666,6 +1687,7 @@ export function buildModel(def, ctx) {
       if (p.hidden) { parts.push({ i, type, triangles: 0, hidden: true }); return; }
       const M = partMatrix(p, grid);
       const mats = mirrorMatrices(p, arrayMatrices(p, M, grid));
+      if (type === 'light') { for (const mm of mats) lights.push(placeLight(p, mm, i)); parts.push({ i, type, triangles: 0, lights: mats.length }); return; }
       const partOv = p.overlays === false ? [] : (p.overlays || []).map(normOverlay);
       let local, tris = 0;
       if (type === 'model') {
@@ -1684,7 +1706,9 @@ export function buildModel(def, ctx) {
           parts.push({ i, type, model: p.model, triangles: built.triangles * mats.length, copies: mats.length });
           return;
         }
-        local = buildModel(sub, subCtx).mesh;
+        const subBuilt = buildModel(sub, subCtx);
+        local = subBuilt.mesh;
+        for (const L of subBuilt.lights || []) for (const mm of mats) lights.push(moveLight(L, mm, i));
         applyMaterial(local, p, ctx);
         applySurface(local, p, ctx);
         if (partOv.length) for (const { f } of local.faces) f.ov = [...(f.ov || []), ...partOv];
@@ -1704,6 +1728,9 @@ export function buildModel(def, ctx) {
         if (!firstTex && (type === 'extrude' || type === 'lathe')) firstTex = ctx.tex(p.canvas ? imageRef(p) : p.profile ?? p.texture);
       }
       if (layout && layout.nodeOf[i] !== null) for (const { f } of local.faces) f.node = layout.nodeOf[i];
+      // materials v2 face data (only when the part asks): vertex paint / wetness, displacement
+      if (p.paint !== undefined || p.wetness !== undefined) local.tagFaces({ paint: p.paint === undefined ? undefined : paintColor(p.paint), wet: p.wetness === undefined ? undefined : unit01(p.wetness, 'wetness') });
+      if (p.displace !== undefined && p.displace !== false && p.displace !== null) { const spec = normDisplace(p.displace); for (const { f } of local.faces) if (f.greeble === undefined) f.disp = { spec, part: i }; }
       const into = useBool ? (placed[i] = new Mesh()) : mesh;
       let pb = null;
       for (const [k, mm] of mats.entries()) {
@@ -1740,6 +1767,10 @@ export function buildModel(def, ctx) {
   if (!ctx.nested) {
     const uo = def.uv_origin ?? [grid / 2, 0, grid / 2];
     baked = finalize(mesh, ctx, uo);
+    if (def.parts.some((p) => p && p.displace !== undefined && p.displace !== false && p.displace !== null && !p.hidden)) {
+      const d = displaceMesh(mesh);
+      for (const [pi, s] of Object.entries(d.parts)) { const rec = parts.find((x) => x.i === Number(pi)); if (rec) { rec.triangles += s.after - s.before; rec.displaced = s; } }
+    }
     for (const m of instMeshes.values()) finalize(m, ctx, uo);
     for (const it of gpu.values()) finalize(it.mesh, ctx, [0, 0, 0]);
   }
@@ -1749,9 +1780,52 @@ export function buildModel(def, ctx) {
   const gpuList = [...gpu.values()];
   if (shift.some((v) => v)) for (const it of gpuList) it.mats = it.mats.map((M) => matMul(mT(...shift), M));
   if (shift.some((v) => v)) for (const b of partBounds) if (b) { b.min = b.min.map((v, k) => v + shift[k]); b.max = b.max.map((v, k) => v + shift[k]); }
+  if (shift.some((v) => v)) for (const L of lights) L.pos = L.pos.map((v, k) => v + shift[k]);
   const out = { mesh, parts, origin: mode, instances, grid, baked, shift, layout, partBounds };
+  if (lights.length) out.lights = lights;
   if (gpuList.length) out.gpu = gpuList;
   if (merged) out.merged = merged;
+  return out;
+}
+
+// ---------- light markers (baked lighting), vertex paint ----------
+const unit01 = (v, name) => { const x = Number(v); if (!(x >= 0 && x <= 1)) throw new Error(`${name} must be 0..1`); return x; };
+/** paint:"#rrggbb[aa]" -> linear RGBA 0..1 (glTF COLOR_n is linear). */
+function paintColor(v) {
+  const m = typeof v === 'string' && v.match(/^#?([0-9a-f]{6})([0-9a-f]{2})?$/i);
+  if (!m) throw new Error(`paint must be "#rrggbb" or "#rrggbbaa" (got ${JSON.stringify(v)})`);
+  const n = parseInt(m[1], 16), lin = (c) => { const x = c / 255; return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; };
+  return [lin((n >> 16) & 255), lin((n >> 8) & 255), lin(n & 255), m[2] ? parseInt(m[2], 16) / 255 : 1].map((x) => +x.toFixed(5));
+}
+const rgb01 = (v, what) => {
+  const m = typeof v === 'string' && v.match(/^#?([0-9a-f]{6})$/i);
+  if (!m) throw new Error(`${what} must be "#rrggbb"`);
+  const n = parseInt(m[1], 16);
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+};
+/** light part -> {kind, pos (px), dir, u? (area width axis), color (0..1), intensity, range px, size?, cone?, part}. */
+function placeLight(p, M, i) {
+  const kind = p.kind ?? 'point';
+  if (!['point', 'area', 'spot'].includes(kind)) throw new Error('light kind must be point, area or spot');
+  const intensity = Number(p.intensity ?? 1), range = Number(p.range ?? 128);
+  if (!(intensity >= 0) || !(range > 0)) throw new Error('light intensity must be >= 0 and range > 0 px');
+  const d0 = p.dir ?? [0, -1, 0];
+  if (!Array.isArray(d0) || d0.length !== 3 || d0.some((v) => !Number.isFinite(Number(v)))) throw new Error('light dir must be [x,y,z]');
+  const L = { kind, pos: [0, 0, 0], dir: norm(d0.map(Number)), color: rgb01(p.color ?? '#ffffff', 'light color'), intensity, range, part: i };
+  if (kind === 'area') {
+    const s = p.size ?? [16, 16];
+    if (!Array.isArray(s) || s.length !== 2 || !(s[0] > 0 && s[1] > 0)) throw new Error('area light size must be [w, h] px');
+    L.size = s.map(Number);
+    L.u = Math.abs(L.dir[1]) > 0.9 ? [1, 0, 0] : norm(cross([0, 1, 0], L.dir));
+  }
+  if (kind === 'spot') { L.cone = Number(p.cone ?? 45); if (!(L.cone > 0 && L.cone < 180)) throw new Error('spot cone must be 0..180 deg'); }
+  return moveLight(L, M, i);
+}
+const dirBy = (M, d) => [M[0] * d[0] + M[1] * d[1] + M[2] * d[2], M[4] * d[0] + M[5] * d[1] + M[6] * d[2], M[8] * d[0] + M[9] * d[1] + M[10] * d[2]];
+function moveLight(L, M, i) {
+  const out = { ...L, pos: applyP(M, L.pos), dir: norm(dirBy(M, L.dir)), part: i };
+  if (L.u) out.u = norm(dirBy(M, L.u));
+  if (L.size) { const k = Math.cbrt(Math.abs(det3(M))) || 1; out.size = L.size.map((v) => v * k); }
   return out;
 }
 

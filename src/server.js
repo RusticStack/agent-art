@@ -166,7 +166,12 @@ export function startServer(engine, { port, host = '127.0.0.1' }) {
           if (!t || t.key !== key || snapId) { t = { key, png: modelThumbnail(engine, def, Number(url.searchParams.get('size') || 128)) }; if (!snapId) modelThumbs.set(name, t); }
           return sendBin(res, 'image/png', t.png);
         }
-        const { glb } = assembleGLB(engine, def, {});
+        // materials v2 channel views (UI channel dropdown): ?profile=three (tangents, ORM, extensions,
+        // height maps) and &bake=1 (quick lightmap + AO + bent normals on TEXCOORD_1, light parts)
+        const prof = url.searchParams.get('profile'), bake = url.searchParams.get('bake') === '1';
+        const args = prof === 'three' ? { profile: 'three', ...(bake ? { lightmap: { samples: 12, bounce: 1 }, bake_ao: { samples: 12, bent: true } } : {}) } : {};
+        let glb;
+        try { ({ glb } = assembleGLB(engine, def, { args })); } catch (e) { if (!prof) throw e; ({ glb } = assembleGLB(engine, def, { args: { profile: 'three' } })); }
         return sendBin(res, 'model/gltf-binary', glb);
       }
       s = p.match(/^\/api\/rig\/([^/]+)\/(layers|debug)$/);

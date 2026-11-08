@@ -16,7 +16,7 @@ export const READ_ONLY = new Set([
 ]);
 /** Ops that write files (exports_to edges in the asset graph). */
 const EXPORTS = new Set(['export', 'export_animation', 'model_export', 'audio_export', 'pack_zip', 'pack_build']);
-const MODEL_WRITES = new Set(['model_create', 'model_update', 'model_pose', 'model_animate', 'model_delete']);
+const MODEL_WRITES = new Set(['model_create', 'model_update', 'model_pose', 'model_animate', 'model_delete', 'model_material']);
 const SNAP_MAX = 512; // px: larger canvases are snapshotted downsampled
 const SNAP_BUDGET = 64 * 1024 * 1024;
 const SNAP_COUNT = 20000; // tiny canvases: cap the number of snapshots too

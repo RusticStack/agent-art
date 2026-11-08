@@ -336,6 +336,20 @@ Ships, stations, carrier interiors and cities that read like a big-budget sci-fi
 
 `node docs/surface/build-demos.mjs` rebuilds these renders. `art_help {topic:"3d"}` has every option plus recipes for hull greebling, a corridor with one trim sheet, a pipe run and LOD + impostor for a city block. Skill: `hard-surface`.
 
+#### Materials v2: render data for modern renderers
+
+Opt-in per part, canvas or model; models that use none of it export the same bytes as before.
+
+- **Material extensions:** presets `painted_hull` (clearcoat), `brushed_metal` (anisotropy + streaked direction map), `glass_canopy` (transmission + volume + ior), `cloth` (sheen), `neon` (emissive strength), `skin` (diffuse transmission + SSS thickness); or fields `emissive:{color, strength, animate}`, `clearcoat`, `anisotropy`, `transmission`, `ior`, `sheen`, `subsurface`, `height` (parallax height texture), `detail` (tiling detail albedo + normal). `art_model material {name, material, preset|set}` edits model materials after creation.
+- **Baked light:** light parts (`{type:"light", kind:"point"|"spot"|"area"}`), `export {lightmap}` = a coloured, quantised, dithered lightmap on TEXCOORD_1 (sun, sky, lights, emissive bounce), `probes` = SH9 light probes on a grid, `bake_ao:{bent:true}` = bent normals, `thickness` = SSS thickness.
+- **Geometry and vertex data:** MikkTSpace-compatible TANGENT, part `displace` (adaptive, crack-free true displacement from the height map), `vertex_colors` (paint / masks / AO sets), `uv2` / `uv3`.
+- **Packing and profiles:** ORM packing (`gltf_orm`, `roblox`, `unity_mask`), texture dedupe, `export {profile:"three"|"roblox"|"minimal"}` (Roblox: SurfaceAppearance maps <= 1024 px, meshes < 20k triangles, a report of what was dropped). Every v2 export runs an in-repo structural glTF validator.
+- **Channels:** `preview {channel:"normal"|"orm"|"lightmap"|"bent"|"emissive"|"height"|...|"all"}`, and a channel dropdown in the web UI 3D viewer.
+
+![Corridor: AO only vs baked coloured lightmap](docs/materials/corridor_lightmap.png)
+
+[docs/materials/README.md](docs/materials/README.md) has every demo (hull clearcoat, brushed metal, glass canopy, fabric seat, neon sign, parallax, detail maps) and the three.js hookups (lightmap, probes, pixel-snapped parallax, detail, bent normals, emissive flicker, SSS). `art_help {topic:"materials"}`.
+
 #### Connected textures (CTM)
 
 ```jsonc
