@@ -55,7 +55,7 @@ function buildAtlas(meshes, maxSize = 256) {
     if (!users.has(k)) users.set(k, { tex: p.tex, prims: [], ok: true });
     const u = users.get(k);
     u.prims.push(p);
-    if (p.overlay || p.tex.material || p.morphs) { u.ok = false; continue; } // decal shells keep their own texture (TEXCOORD_1); glass/opacity keep their own material; morph targets keep their own primitive
+    if (p.overlay || p.tex.material || p.morphs || p.skin) { u.ok = false; continue; } // decal shells keep their own texture (TEXCOORD_1); glass/opacity keep their own material; morph targets / skin weights keep their own primitive
     if (p.tex.width * p.tex.height > 1) for (const v of p.uv) if (v < -1e-4 || v > 1 + 1e-4) { u.ok = false; break; }
   }
   const items = [...users.values()].filter((u) => u.ok && u.tex.width <= maxSize && u.tex.height <= maxSize);
@@ -271,6 +271,11 @@ export function writeGLB(scene, opts = {}) {
         for (let i = 0; i < vc; i++) col.set([1, 1, 1, p.alpha[i]], i * 4);
         attributes.COLOR_0 = acc(view(col, ARRAY), FLOAT, vc, 'VEC4');
       }
+      if (p.skin) {
+        // skinned primitive: 4 joints (UNSIGNED_SHORT, indices into skin.joints) + 4 weights (FLOAT, sum 1)
+        attributes.JOINTS_0 = acc(view(p.skin.j, ARRAY), U16, vc, 'VEC4');
+        attributes.WEIGHTS_0 = acc(view(p.skin.w, ARRAY), FLOAT, vc, 'VEC4');
+      }
       const prim = { attributes, indices: acc(view(I, ELEMENTS), big ? U32 : U16, I.length, 'SCALAR'), material: material(p.tex, !!p.overlay, !p.overlay && !!opts.ao && !p.uv1), mode: 4 };
       if (p.morphs) {
         // morph targets: POSITION / NORMAL deltas (units), names in mesh.extras.targetNames
@@ -317,6 +322,7 @@ export function writeGLB(scene, opts = {}) {
   for (const [ni, n] of scene.nodes.entries()) {
     const node = { name: n.name };
     if (n.mesh !== undefined && n.mesh !== null) node.mesh = n.mesh;
+    if (n.skin !== undefined && n.skin !== null) node.skin = n.skin;
     const M = n.matrix;
     if (M && M.some((v, i) => v !== [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0][i])) {
       node.matrix = [M[0], M[4], M[8], 0, M[1], M[5], M[9], 0, M[2], M[6], M[10], 0, M[3] / scale, M[7] / scale, M[11] / scale, 1];
@@ -364,7 +370,7 @@ export function writeGLB(scene, opts = {}) {
         const times = Array.from(ch.times, (t) => Math.fround(t));
         const vals = ch.path === 'translation' ? Array.from(ch.values, (v) => v / scale) : Array.from(ch.values);
         const input = accF(times, 'SCALAR', { min: [times[0]], max: [times[times.length - 1]] });
-        const output = accF(vals, ch.path === 'rotation' ? 'VEC4' : 'VEC3');
+        const output = accF(vals, ch.path === 'rotation' ? 'VEC4' : ch.path === 'weights' ? 'SCALAR' : 'VEC3');
         samplers.push({ input, output, interpolation: ch.interpolation || 'LINEAR' });
         channels.push({ sampler: samplers.length - 1, target: { node: ch.node, path: ch.path } });
       }
@@ -372,6 +378,15 @@ export function writeGLB(scene, opts = {}) {
       if (an.extras) a.extras = an.extras;
       json.animations.push(a);
     }
+  }
+  // skins: joints = node indices, inverseBindMatrices from 3x4 px matrices (column-major MAT4, units)
+  if (scene.skins && scene.skins.length) {
+    json.skins = scene.skins.map((sk) => {
+      const ibm = new Float32Array(sk.ibm.length * 16);
+      sk.ibm.forEach((M, i) => ibm.set([M[0], M[4], M[8], 0, M[1], M[5], M[9], 0, M[2], M[6], M[10], 0, M[3] / scale, M[7] / scale, M[11] / scale, 1], i * 16));
+      json.accessors.push({ bufferView: view(ibm), componentType: FLOAT, count: sk.ibm.length, type: 'MAT4' });
+      return { name: sk.name, joints: sk.joints.slice(), ...(sk.skeleton !== undefined ? { skeleton: sk.skeleton } : {}), inverseBindMatrices: json.accessors.length - 1 };
+    });
   }
   if (opts.up === 'z') {
     json.nodes.push({ name: 'z_up', rotation: [Math.SQRT1_2, 0, 0, Math.SQRT1_2], children: top });
