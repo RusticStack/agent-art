@@ -23,6 +23,8 @@ export function normalizeConstraints(rig, list, limits) {
     const w = `constrain[${i}]`;
     if (!c0 || !CONSTRAINT_TYPES.includes(c0.type)) throw new Error(`${w}.type must be ${CONSTRAINT_TYPES.join(' | ')}`);
     if (!rig.parts[c0.part]) throw new Error(`${w}: unknown part "${c0.part}"`);
+    const num = (k) => { if (c0[k] !== undefined && !Number.isFinite(Number(c0[k]))) throw new Error(`${w}.${k} must be a finite number (got ${JSON.stringify(c0[k])})`); };
+    for (const k of ['weight', 'offset', 'axis']) num(k);
     const c = { ...c0, weight: clamp(Number(c0.weight ?? 1), 0, 1) };
     if (c.type === 'copy_rotation') {
       if (!rig.parts[c.from]) throw new Error(`${w}: copy_rotation needs from:<part>`);
@@ -34,8 +36,9 @@ export function normalizeConstraints(rig, list, limits) {
       if (c.type === 'look_at') {
         c.chain = [].concat(c.chain || []);
         for (const n of c.chain) if (!rig.parts[n]) throw new Error(`${w}.chain: unknown part "${n}"`);
-        if (c.share !== undefined && (!Array.isArray(c.share) || c.share.length !== c.chain.length)) throw new Error(`${w}.share must list one fraction per chain part`);
+        if (c.share !== undefined && (!Array.isArray(c.share) || c.share.length !== c.chain.length || !c.share.every((v) => Number.isFinite(Number(v))))) throw new Error(`${w}.share must list one finite fraction per chain part`);
         c.limit = Number(c.limit ?? 75);
+        if (!(Number.isFinite(c.limit) && c.limit >= 0)) throw new Error(`${w}.limit must be a finite number of degrees >= 0 (got ${JSON.stringify(c0.limit)})`);
       }
     }
     out.list.push(c);

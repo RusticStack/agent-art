@@ -416,3 +416,19 @@ test('skin2d: weights paint (regions, weight canvas), validation, weights image,
   for (const a of ['skin', 'weights', 'shapes', 'chain', 'export']) assert.ok(t.inputSchema.properties.action.enum.includes(a));
   assert.match(helpText({ topic: 'skin2d' }), /pixel for pixel/);
 });
+
+test('skin2d: constraint numbers are validated (look_at limit / share, offset, axis, weight)', () => {
+  const e = new Engine({ home: tmp() });
+  const parts = { base: { w: 2, h: 2, pivot: [1, 1] }, neck: { w: 2, h: 4, pivot: [1, 3], parent: 'base', at: [6, 0] }, head: { w: 6, h: 4, pivot: [0, 2], parent: 'neck', at: [0, -3] }, twin: { w: 1, h: 3, pivot: [0, 0], parent: 'base', at: [-4, 0] } };
+  const mk = (c) => e.run('rig_create', { name: 'cv', frame: [40, 40], root: [20, 10], parts, constrain: [c], overwrite: true });
+  const look = { type: 'look_at', part: 'head', target: [30, 2], chain: ['neck'] };
+  assert.throws(() => mk({ ...look, limit: 'wide' }), /limit must be a finite number of degrees >= 0/);
+  assert.throws(() => mk({ ...look, limit: -5 }), /limit must be/);
+  assert.throws(() => mk({ ...look, share: ['half'] }), /share must list one finite fraction/);
+  assert.throws(() => mk({ ...look, axis: 'x' }), /axis must be a finite number/);
+  assert.throws(() => mk({ type: 'copy_rotation', part: 'twin', from: 'neck', offset: 'a' }), /offset must be a finite number/);
+  assert.throws(() => mk({ type: 'copy_rotation', part: 'twin', from: 'neck', weight: 'w' }), /weight must be a finite number/);
+  mk({ ...look, limit: 0, share: [0.5] });
+  const sp = solvePose(getRig(e, 'cv').rig, {}, 'side');
+  assert.ok(Object.values(sp.world).every((t) => Number.isFinite(t.rot)), 'finite rotations');
+});
