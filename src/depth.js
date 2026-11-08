@@ -109,11 +109,22 @@ export function decideDepth(rig, P, view, solved, prev = null) {
   const m = D.margin;
   const W = rig.weapon;
   const locked = new Set();
-  if (W && solved.weapon) for (const r of ['main', 'support']) if (solved.weapon.hands?.[r]?.weight >= 0.999) locked.add(solved.weapon.hands[r].hand);
+  const held = new Set();
+  if (W && solved.weapon) for (const r of ['main', 'support']) { const h = solved.weapon.hands?.[r]; if (h?.weight >= 0.999) { locked.add(h.hand); for (const n of [h.up, h.fore, h.hand]) held.add(n); } }
   const zWeapon = W ? zOf(W.part) : null;
+  // back-facing views, arms holding the gun: an arm level with the torso cannot be inside it; an
+  // upper arm past the torso's centre (away from the camera) is in front of the body, and a forearm /
+  // hand on the gun (in front of the body, drawn under the torso from behind) is too unless it is
+  // clearly nearer the camera than the back surface: both are hidden by the torso. "below" also goes under
+  // the whole trunk (the ref and its parents), not just the ref, so the arm reaching to a hip grip
+  // is not drawn over the lower torso.
+  const backView = psi < -1e-6 && D.cfg.back_occlusion !== false;
   for (const rule of D.rules) {
     if (rule.views && !rule.views.has(src)) continue;
-    const R = refDepth(rig, D, Wb, rule.ref, s, c), zr = zOf(rule.ref);
+    const R = refDepth(rig, D, Wb, rule.ref, s, c);
+    const zRef = zOf(rule.ref);
+    let zTrunk = zRef;
+    if (backView) for (let p = rig.parts[rule.ref]?.parent; p; p = rig.parts[p]?.parent) zTrunk = Math.min(zTrunk, zOf(p));
     const front = R.d + R.half, back = R.d - R.half;
     rule.parts.forEach((n, k) => {
       if (poseOf(rig, VP, n).hide) return;
@@ -122,14 +133,15 @@ export function decideDepth(rig, P, view, solved, prev = null) {
       const latB = rule.parts[k + 1] ? D.lat[rule.parts[k + 1]] : D.lat[n];
       const d0 = dOf(e.a, D.lat[n]), d1 = dOf(e.b, latB), dm = (d0 + d1) / 2;
       const was = prev?.[key] ?? null;
-      const side = (d) => (d > front + m ? 'above' : d < back - m ? 'below' : null);
+      const bh = backView && held.has(n), zr = backView ? zTrunk : zRef;
+      const side = (d) => (d > front + m ? 'above' : d < back - m ? 'below' : bh && (k > 0 || d < R.d - m) ? 'below' : null);
       let st = side(dm);
       if (!st && was === 'above' && dm > front - m) st = 'above';
-      if (!st && was === 'below' && dm < back + m) st = 'below';
+      if (!st && was === 'below' && dm < (bh ? R.d + m : back + m)) st = 'below';
       states[key] = st;
       const za = partIn(rig, n, src).z;
       const zFor = (state) => {
-        if (state === 'above') { let z = za > zr ? za : zr + 0.1 + 0.01 * k; if (locked.has(n) && zWeapon !== null) z = Math.max(z, zWeapon + 0.05 + 0.01 * k); return z; }
+        if (state === 'above') { let z = za > zRef ? za : zRef + 0.1 + 0.01 * k; if (locked.has(n) && zWeapon !== null) z = Math.max(z, zWeapon + 0.05 + 0.01 * k); return z; }
         if (state === 'below') return za < zr ? za : zr - 0.5 + 0.01 * k;
         return za;
       };
@@ -140,7 +152,7 @@ export function decideDepth(rig, P, view, solved, prev = null) {
       if (rule.split && e.len > 2) {
         const sa = side(d0) ?? (st && Math.abs(d0 - dm) < m ? st : null), sb = side(d1) ?? (st && Math.abs(d1 - dm) < m ? st : null);
         if (sa !== sb && Math.abs(zFor(sa) - zFor(sb)) > 1e-9) {
-          const surf = (sa === 'above' || sb === 'above') ? front + m : back - m;
+          const surf = (sa === 'above' || sb === 'above') ? front + m : bh ? R.d - m : back - m;
           const t = Math.min(0.95, Math.max(0.05, (surf - d0) / ((d1 - d0) || 1e-9)));
           const p = partIn(rig, n, D.base);
           const cut = Math.round(p.pivot[1] + t * (e.local[1] ?? e.len));

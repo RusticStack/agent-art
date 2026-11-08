@@ -171,7 +171,7 @@ export function renderWeaponCells(asset, rigDef, doc, { views = SHEET_VIEWS, pit
         for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) if (img[(y * S + x) * 4 + 3]) { if (!ub) ub = [x, y, x, y]; else { if (x < ub[0]) ub[0] = x; if (y < ub[1]) ub[1] = y; if (x > ub[2]) ub[2] = x; if (y > ub[3]) ub[3] = y; } }
       }
       const at = (q) => { if (!q) return null; const [qx, qy] = rot2(T.phi, T.sxs * (q[0] - g[0]), q[1] - g[1]); return [qx, qy]; };
-      row.push({ muzzle: at(assetPoint(asset, rig, 'muzzle', attach)), support: at(assetPoint(asset, rig, 'grip_support', attach)), T });
+      row.push({ muzzle: at(assetPoint(asset, rig, 'muzzle', attach)), support: at(assetPoint(asset, rig, 'grip_support', attach)), axis: rot2(T.phi, T.sxs, 0), T });
     }
     pts.push(row);
   }
@@ -181,7 +181,7 @@ export function renderWeaponCells(asset, rigDef, doc, { views = SHEET_VIEWS, pit
   const grip = [Math.round(rig.root[0]) - x0, Math.round(rig.root[1]) - y0];
   const cells = {};
   for (const [k, list] of Object.entries(raw)) cells[k] = views.map((_, vi) => pitch.map((__, pi) => crop(list[vi * pitch.length + pi])));
-  return { frame: [fw, fh], grip, cells, pts: pts.map((row) => row.map((c) => ({ muzzle: c.muzzle && [r1(grip[0] + c.muzzle[0]), r1(grip[1] + c.muzzle[1])], support: c.support && [r1(grip[0] + c.support[0]), r1(grip[1] + c.support[1])], alpha: c.T.alpha }))), views, pitch };
+  return { frame: [fw, fh], grip, cells, pts: pts.map((row) => row.map((c) => ({ muzzle: c.muzzle && [r1(grip[0] + c.muzzle[0]), r1(grip[1] + c.muzzle[1])], support: c.support && [r1(grip[0] + c.support[0]), r1(grip[1] + c.support[1])], axis: c.axis.map((v) => Math.round(v * 1000) / 1000), alpha: c.T.alpha }))), views, pitch };
 }
 
 /** One sheet image from cells [view][pitch]: rows = views, columns = pitch (the engine's layout). */
@@ -206,10 +206,25 @@ export function socketOf(rig, solved, trace, { pad = [0, 0, 0, 0], pitch = DEFAU
   const pv = partIn(rig, W.part, W.base).pivot, gm = W.points.grip_main;
   let [x, y] = R.scr({ x: gm.x - pv[0], y: gm.y - pv[1] });
   const elev = -R.s.theta;
-  const col = pitchCol(pitch, elev);
-  const cell = cellTransform(W, src, pitch[col], W.base);
   const alphaF = R.flip ? R.phi + 180 : R.phi;
-  let rot = norm180(alphaF - cell.alpha);
+  // column: of the two pitch cells around the elevation, the one whose drawing puts the support
+  // grip closest to the frame's (the cells are foreshortened per pitch, so the nearest pitch is not
+  // always the best fit); its pitch is emitted when it is not the nearest, so the engine picks it
+  const near = pitchCol(pitch, elev);
+  const sup = W.points.grip_support;
+  const fitOf = (c) => {
+    const cell = cellTransform(W, src, pitch[c], W.base), rot = norm180(alphaF - cell.alpha);
+    if (!sup) return { c, cell, rot, err: 0 };
+    const [ox, oy] = rot2(cell.phi, cell.sxs * (sup.x - gm.x), sup.y - gm.y);
+    const [qx, qy] = rot2(rot, ox, oy);
+    const [fx, fy] = R.scr({ x: sup.x - pv[0], y: sup.y - pv[1] });
+    return { c, cell, rot, err: Math.hypot(x + qx - fx, y + qy - fy) };
+  };
+  const other = pitch[near] > elev ? near - 1 : near + 1;
+  let fit = fitOf(near);
+  if (other >= 0 && other < pitch.length) { const f2 = fitOf(other); if (f2.err < fit.err - 0.25) fit = f2; }
+  const col = fit.c;
+  let rot = fit.rot;
   // drawn order: behind = the gun under the torso, else body / gun / __front
   const idx = (n) => trace.order.findIndex((e) => e.part === n);
   const wi = idx(W.part), ti = Math.min(...W.spine.map(idx).filter((i) => i >= 0));
@@ -220,7 +235,7 @@ export function socketOf(rig, solved, trace, { pad = [0, 0, 0, 0], pitch = DEFAU
     x = (rig.root[0] + pad[2]) + (rig.root[0] + pad[0]) - 1 - (x - pad[0] + pad[2]);
     rot = norm180(-rot);
   }
-  const s = { x: r1(x), y: r1(y), rot: r1(rot), pitch: r1(elev), order };
+  const s = { x: r1(x), y: r1(y), rot: r1(rot), pitch: col === near ? r1(elev) : pitch[col], order };
   if (R.s.pl.hidden >= 0.5) s.hidden = true;
   if (W.mag && solved.VP[W.mag.part]?.hide && !s.hidden) s.mag = false;
   return s;

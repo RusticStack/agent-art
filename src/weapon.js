@@ -764,6 +764,20 @@ export function solveHeld(rig, P, src) {
     }
     // elbow side: the one closest to the projected 3D elbow
     const pe = proj(sub(arm.E, arm.S)), Ev = [Wv[up].x + pd[0] + pe[0], Wv[up].y + pd[1] + pe[1]];
+    if (rig.scaleChildren && ax.yaw < 0 && Math.abs(ax.x) < 0.5 && W.cfg.back_elbow !== false) {
+      // seen from behind the arm points mostly away from the camera, so 2D IK on short projected
+      // bones folds it (elbow flipped above the shoulder). Use the 3D arm projected instead: the
+      // upper arm runs to the projected elbow, the forearm from there to the grip (bone lengths =
+      // the projected distances, capped at full length), so the elbow sits where the 3D one is.
+      const su = poseOf(rig, Q, up).sy, sf = poseOf(rig, Q, fore).sy;
+      const full1 = Math.hypot(Wq[fore].x - Wq[up].x, Wq[fore].y - Wq[up].y) / (su || 1), full2 = Math.hypot(Wq[hand].x - Wq[fore].x, Wq[hand].y - Wq[fore].y) / (sf || 1);
+      const l1 = Math.hypot(Ev[0] - Wq[up].x, Ev[1] - Wq[up].y), l2 = Math.hypot(target[0] - Ev[0], target[1] - Ev[1]);
+      if (full1 > 1e-6 && full2 > 1e-6 && l2 <= full2 * 1.02) {
+        Q[up] = { ...Q[up], sy: clamp(l1 / full1, 0.12, 1) };
+        Q[fore] = { ...Q[fore], sy: clamp(l2 / full2, 0.12, 1) };
+        Wq = worldOf(rig, Q, src);
+      }
+    }
     let bend = 1, bestD = Infinity;
     for (const b of [1, -1]) {
       const R = applyIK(rig, { ...Q, ik: { [hand]: { target, bend: b } } }, src);
@@ -806,6 +820,34 @@ export function projectWeapon(W, u, view, { aimF = 0, weld = 0, out = 1, side = 
   let L = Math.hypot(Mu[0], Mu[1]);
   const fs = W.foreshorten ? { floor: tune?.floor ?? W.foreshorten.floor, cant: tune?.cant ?? W.foreshorten.cant } : null;
   let canted = false;
+  // the back view proper (back_side keeps the 2D rule below: the barrel already reads there)
+  const backFacing = fs && ax.yaw < 0 && Math.abs(ax.x) < 0.5;
+  if (backFacing) {
+    // back-facing views: the gun is in front of the body, away from the camera. Yaw it OUTWARD in 3D
+    // (about the vertical axis, toward the weapon side) just enough that the barrel reads past the
+    // silhouette (outward share >= sin(back_cant)) and is at least back_floor long, then project:
+    // the pitch is kept (a level gun stays level), the result is continuous over frames, and it
+    // does not depend on the carry state, so sheet cells and frames agree.
+    const outS = Math.sign(-ax.z * side) || 1;
+    const minX = Math.sin(Number(W.cfg.foreshorten?.back_cant ?? 45) * D2R);
+    const Lmin = Number(tune?.back_floor ?? W.cfg.foreshorten?.back_floor ?? 0.55);
+    const yawed = (c) => { const k = Math.cos(c), q = Math.sin(c); return proj([u[0] * k - u[2] * q, u[1], u[0] * q + u[2] * k]); };
+    const good = (m) => { const l = Math.hypot(m[0], m[1]); return l >= Lmin - 1e-6 && (m[0] * outS) / (l || 1) >= minX - 1e-6; };
+    if (!good(Mu)) {
+      // the yaw sign that moves the projection outward, then the smallest angle that is good
+      const sg = yawed(0.2)[0] * outS > yawed(-0.2)[0] * outS ? 1 : -1;
+      let lo = 0, hi = Math.PI / 2;
+      if (good(yawed(sg * hi))) { for (let i = 0; i < 30; i++) { const m = (lo + hi) / 2; if (good(yawed(sg * m))) hi = m; else lo = m; } }
+      Mu = yawed(sg * hi);
+      L = Math.hypot(Mu[0], Mu[1]);
+      // one length for every yawed back view (back_floor): the projected length would otherwise
+      // swing with the pitch (0.7 at 30 deg, 1.0 at 45), which pitch-stepped sheet cells cannot follow
+      Mu = [Mu[0] * Lmin / (L || 1), Mu[1] * Lmin / (L || 1)]; L = Lmin;
+      canted = 'back';
+    }
+    if (L < 0.05) { Mu = [Mu[0] / (L || 1) * 0.05, Mu[1] / (L || 1) * 0.05]; L = 0.05; }
+    return { Mu, L, canted };
+  }
   if (fs && L < fs.floor - 1e-9 && view !== W.base) {
     // barrel toward / away from the camera: carried, yaw it outward a little and keep a readable
     // length; aimed (firing states), keep it short and canted INWARD so the muzzle sits near the
@@ -819,8 +861,7 @@ export function projectWeapon(W, u, view, { aimF = 0, weld = 0, out = 1, side = 
     if (L < floor) { Mu = [Mu[0] * floor / L, Mu[1] * floor / L]; L = floor; }
     canted = f >= 0.5 ? 'inward' : true;
   }
-  // back-facing views: the gun is in front of the body, away from the camera; keep the muzzle
-  // angled out past the silhouette on the weapon side so it still reads
+  // back_side views: keep the muzzle angled out past the silhouette on the weapon side so it reads
   if (fs && ax.yaw < 0 && Math.abs(ax.x) < 0.8) {
     const outS = Math.sign(-ax.z * side) || 1;
     const minX = Math.sin(Number(W.cfg.foreshorten?.back_cant ?? 45) * D2R);
@@ -928,6 +969,33 @@ export function weaponMetrics(rig, solved) {
       if (ny < 0) { nx = -nx; ny = -ny; }
       const sd = (E.x - S.x) * nx + (E.y - S.y) * ny;
       if (sd < -1.5 && Math.abs(vy) / L < 0.92) out.elbow_inverted.push(role);
+    }
+  }
+  // seen from behind: the elbow stays below the shoulder when the 3D elbow is (no arm raised over
+  // the shoulder), and arm parts in front of the body are drawn under the whole trunk
+  out.elbow_raised = [];
+  if (back && !out.hidden) {
+    for (const role of ['main', 'support']) {
+      const h = R.hands[role], A = s.arms[role];
+      if (!h || h.weight < 0.999 || !A) continue;
+      const S = world[h.up], E = world[h.fore];
+      if (A.E[1] > A.S[1] + 1 && E.y < S.y - 1.5) out.elbow_raised.push(role);
+    }
+    const dep = solved.depth;
+    if (dep) {
+      const zOf = (n) => poseOf(rig, solved.VP, n).z ?? partIn(rig, n, R.view).z;
+      const trunk = Math.min(...W.spine.filter((n) => rig.parts[n]).map(zOf));
+      for (const role of ['main', 'support']) {
+        const heldArm = R.hands[role]?.weight >= 0.999;
+        s.chains[role].forEach((n, k) => {
+          const d = dep[n];
+          if (!d || poseOf(rig, solved.VP, n).hide) return;
+          // a forearm / hand on the gun is in front of the body unless clearly nearer the camera
+          const inFront = d.state === 'below' || (heldArm && k > 0 && d.state === 'authored');
+          const sp = poseOf(rig, solved.VP, n).split, z = sp ? sp.z[sp.z.length - 1] : zOf(n);
+          if (inFront && z >= trunk) out.layer.push(`${n} drawn over the torso from behind while in front of the body`);
+        });
+      }
     }
   }
   return out;

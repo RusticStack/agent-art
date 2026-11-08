@@ -480,7 +480,9 @@ function supportError(f, cells, vi, pitch) {
   if (!h || h.weight < 0.999 || R.s.pl.cup || f.sock.hidden) return null;
   const c = cells.pts[vi][pitchCol(pitch, f.sock.pitch)];
   if (!c.support) return null;
-  const [dx, dy] = rotDeg(f.sock.rot, c.support[0] - cells.grip[0], c.support[1] - cells.grip[1]);
+  // the support hand may slide back along the handguard (reach): the same rail move on this gun
+  const sl = R.s.slide || 0;
+  const [dx, dy] = rotDeg(f.sock.rot, c.support[0] - sl * c.axis[0] - cells.grip[0], c.support[1] - sl * c.axis[1] - cells.grip[1]);
   return Math.hypot(f.sock.x + dx - h.grip[0], f.sock.y + dy - h.grip[1]);
 }
 const rotDeg = (deg, x, y) => { const r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r); return [x * c - y * s, x * s + y * c]; };

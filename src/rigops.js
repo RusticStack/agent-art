@@ -668,6 +668,7 @@ function frameIssues(m, vis, W) {
   for (const [r, v] of Object.entries(m.reach)) if (v !== null && v > W.reach + 0.005) out.push(`${r} arm over-extended (${v} of its length)`);
   if (m.corrections.includes('out_of_reach') && !out.some((x) => /over-extended/.test(x))) out.push('a grip is out of reach (arm clamped at full extension)');
   for (const r of m.elbow_inverted) out.push(`${r} elbow inverted`);
+  for (const r of m.elbow_raised || []) out.push(`${r} elbow raised above the shoulder (seen from behind)`);
   if (m.penetration > 1) out.push(`weapon ${m.penetration}px inside the ${m.hit}`);
   if (m.muzzle) out.push(m.muzzle);
   for (const x of m.layer || []) out.push(x);

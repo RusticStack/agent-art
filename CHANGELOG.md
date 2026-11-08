@@ -36,6 +36,15 @@
 - `art_help {topic:"planets"}` and the `planets-space` skill, with three.js snippets for the atmosphere, night lights, quadtree streaming, far-planet impostors and terrain loading. Demo renders are in `docs/planets/`.
 - Existing `art_model` exports are unchanged byte for byte (tested).
 
+### Back-view holding
+
+- **Gun seen from behind:** it is yawed outward in 3D and projected, instead of being forced to a 45° screen angle. A level aim stays level, a muzzle-down carry points down, and every yawed back view has one length (`foreshorten.back_floor`). Runtime sheet cells now match the frames: the back-aim socket `rot` drops from ±45° to a few degrees, and the composite error to 0.1 px.
+- **Arms:** the arms in the back view follow the projected 3D arm solution, so the elbow sits out and below the shoulder. This fixes the #8 back aim that raised the arm over the shoulder. `weapon.back_elbow: false` restores the 2D IK.
+- **Draw order:** in back-facing views, the forearms and hands of arms holding the gun, and their upper arms past the torso's centre, are drawn under the whole trunk (the chest and its parents). Any arm part already behind the torso from the camera's view also goes under the whole trunk. `depth.back_occlusion: false` turns this off.
+- **Weapon check:** two new issues, "elbow raised above the shoulder (seen from behind)" and "<part> drawn over the torso from behind while in front of the body".
+- **Socket pitch:** sockets now choose the better-fitting of the two pitch cells around the elevation, and emit that cell's pitch when it is not the nearest.
+- **Composite and class check:** both account for the support hand sliding along the handguard.
+
 ### Runtime weapon layers (`art_anim`)
 
 - Handling classes (pistol, smg, rifle, lmg, sniper, launcher, none) with a standard grip geometry and tolerance per class, scaled to the character frame.
