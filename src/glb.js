@@ -223,7 +223,7 @@ export function writeGLB(scene, opts = {}) {
       m.alphaMode = 'BLEND';
       m.pbrMetallicRoughness.baseColorFactor = [1, 1, 1, spec.opacity];
       if (spec.glass && !pbr && !mrMap) { m.pbrMetallicRoughness.roughnessFactor = 0.1; }
-      m.extras = { transparent: true, depthWrite: false, opacity: spec.opacity, ...(spec.glass ? { glass: true } : {}) };
+      m.extras = { transparent: true, depthWrite: false, opacity: spec.opacity, ...(spec.glass ? { glass: true } : {}), ...(spec.additive ? { blending: 'additive' } : {}) };
     } else if (overlay || needsAlpha(t)) { m.alphaMode = 'MASK'; m.alphaCutoff = 0.5; }
     if (overlay) m.extras = { overlay: true };
     if (spec && spec.double_sided) m.doubleSided = true;

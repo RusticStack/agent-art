@@ -42,13 +42,13 @@ function project(groups, v, center, radius) {
   return { out, box: [minX, maxX, minY, maxY], view: zc };
 }
 
-function raster(groups, proj, k, cx, cy, S, view) {
+function raster(groups, proj, k, cx, cy, S, view, render = {}) {
   const screen = proj.map(({ X, Y, Z, W }) => {
     const n = X.length, sx = new Float32Array(n), sy = new Float32Array(n);
     for (let i = 0; i < n; i++) { sx[i] = S / 2 + (X[i] - cx) * k; sy[i] = S / 2 - (Y[i] - cy) * k; }
     return { sx, sy, Z, W };
   });
-  return rasterCore(groups, screen, S, S, view ? { view } : {});
+  return rasterCore(groups, screen, S, S, view ? { ...render, view } : render);
 }
 
 /**
@@ -69,15 +69,37 @@ export function rasterCore(groups, screen, IW, IH, opts = {}) {
   if (bg) for (let i = 0; i < IW * IH; i++) img.set(bg, i * 4), (img[i * 4 + 3] = 255);
   const zbuf = new Float32Array(IW * IH).fill(-Infinity);
   let drawn = 0;
+  // coloured point lights (mood previews): per-vertex RGB light, replaces the scalar Lambert term
+  const PL = opts.lights && opts.lights.length ? opts.lights : null;
+  const ambC = opts.ambient_color || [amb, amb, amb];
+  const vertexLight = (g) => {
+    const n = g.pos.length / 3, out = new Float32Array(n * 3);
+    const dirC = lc || [1, 1, 1], dk = opts.light_strength ?? (1 - amb);
+    for (let i = 0; i < n; i++) {
+      const nx = g.nrm[i * 3], ny = g.nrm[i * 3 + 1], nz = g.nrm[i * 3 + 2];
+      const d0 = Math.max(0, nx * L[0] + ny * L[1] + nz * L[2]) * dk;
+      let r = ambC[0] + d0 * dirC[0], gg = ambC[1] + d0 * dirC[1], b = ambC[2] + d0 * dirC[2];
+      const px = g.pos[i * 3], py = g.pos[i * 3 + 1], pz = g.pos[i * 3 + 2];
+      for (const l of PL) {
+        const dx = l.pos[0] - px, dy = l.pos[1] - py, dz = l.pos[2] - pz, d = Math.hypot(dx, dy, dz) || 1;
+        if (d >= l.range) continue;
+        const f = (1 - d / l.range) ** 2 * l.intensity * Math.max(0, (nx * dx + ny * dy + nz * dz) / d * 0.8 + 0.2);
+        r += l.color[0] * f; gg += l.color[1] * f; b += l.color[2] * f;
+      }
+      out[i * 3] = r; out[i * 3 + 1] = gg; out[i * 3 + 2] = b;
+    }
+    return out;
+  };
   // opaque / alpha-tested groups first, then translucent ones (opacity, glass) blended over them
   const order = groups.map((g, gi) => gi).sort((a, b) => (groups[a].tex.material?.blend ? 1 : 0) - (groups[b].tex.material?.blend ? 1 : 0));
   for (const gi of order) {
     const g = groups[gi];
     const { sx, sy, Z, W, clip } = screen[gi];
-    const mat = g.tex.material, blend = !!mat?.blend, twoSided = !!mat?.double_sided, opacity = blend ? mat.opacity : 1;
+    const mat = g.tex.material, blend = !!mat?.blend, twoSided = !!mat?.double_sided, opacity = blend ? mat.opacity : 1, additive = !!mat?.additive;
+    const VC = PL && !g.overlay ? vertexLight(g) : null;
     const t = g.tex, tw = t.width, th = t.height, td = t.data, te = t.emissive;
     const { idx, uv, nrm } = g, al = g.alpha; // overlay shells: per-vertex strength
-    const lit = !g.overlay && !!(t.pbr || t.mr || t.normal || g.ao || g.aoTex);
+    const lit = !VC && !g.overlay && !!(t.pbr || t.mr || t.normal || g.ao || g.aoTex);
     const aux = opts.aux || null;
     const V = opts.view || [0, 0, 1];
     const tn = lit ? t.normal : null, tmr = lit ? t.mr : null, aoT = lit ? g.aoTex : null, uv1 = g.uv1, gao = lit ? g.ao : null;
@@ -130,6 +152,10 @@ export function rasterCore(groups, screen, IW, IH, opts = {}) {
           const k = al ? (l0 * al[a] * wa + l1 * al[b] * wb + l2 * al[c] * wc) / iw : 1;
           const shade = l0 * sa + l1 * sb + l2 * sc;
           let r = td[p] * shade, gg = td[p + 1] * shade, bb = td[p + 2] * shade;
+          if (VC) {
+            const cr = (l0 * VC[a * 3] * wa + l1 * VC[b * 3] * wb + l2 * VC[c * 3] * wc) / iw, cg = (l0 * VC[a * 3 + 1] * wa + l1 * VC[b * 3 + 1] * wb + l2 * VC[c * 3 + 1] * wc) / iw, cb = (l0 * VC[a * 3 + 2] * wa + l1 * VC[b * 3 + 2] * wb + l2 * VC[c * 3 + 2] * wc) / iw;
+            r = td[p] * cr; gg = td[p + 1] * cg; bb = td[p + 2] * cb;
+          }
           if (lit) {
             let n = norm([l0 * nrm[a * 3] + l1 * nrm[b * 3] + l2 * nrm[c * 3], l0 * nrm[a * 3 + 1] + l1 * nrm[b * 3 + 1] + l2 * nrm[c * 3 + 1], l0 * nrm[a * 3 + 2] + l1 * nrm[b * 3 + 2] + l2 * nrm[c * 3 + 2]]);
             if (tn && TT) {
@@ -155,13 +181,21 @@ export function rasterCore(groups, screen, IW, IH, opts = {}) {
             gg = (td[p + 1] * kd + (f0 * 255 + td[p + 1] * metal) * spec) * ao;
             bb = (td[p + 2] * kd + (f0 * 255 + td[p + 2] * metal) * spec) * ao;
           }
-          if (lc) { r *= lc[0]; gg *= lc[1]; bb *= lc[2]; }
+          if (lc && !VC) { r *= lc[0]; gg *= lc[1]; bb *= lc[2]; }
           if (te && te[p + 3]) { const ea = te[p + 3] / 255; r += te[p] * ea; gg += te[p + 1] * ea; bb += te[p + 2] * ea; }
           if (blend) {
             // BLEND: alpha = texel alpha x opacity, no depth write (like glTF BLEND in engines)
             const a = (td[p + 3] / 255) * opacity;
             if (a <= 0) continue;
             const da = img[o * 4 + 3] / 255;
+            if (additive) {
+              // additive (fog cards, god rays, holograms): adds light, never darkens
+              const ec = te ? 1 : shade;
+              img[o * 4] = Math.min(255, img[o * 4] + (te ? te[p] : td[p] * ec) * a); img[o * 4 + 1] = Math.min(255, img[o * 4 + 1] + (te ? te[p + 1] : td[p + 1] * ec) * a); img[o * 4 + 2] = Math.min(255, img[o * 4 + 2] + (te ? te[p + 2] : td[p + 2] * ec) * a);
+              if (da < 1) img[o * 4 + 3] = Math.min(255, img[o * 4 + 3] + a * 255);
+              drawn++;
+              continue;
+            }
             if (da >= 1) { img[o * 4] = img[o * 4] * (1 - a) + r * a; img[o * 4 + 1] = img[o * 4 + 1] * (1 - a) + gg * a; img[o * 4 + 2] = img[o * 4 + 2] * (1 - a) + bb * a; }
             else {
               // over a transparent background (sprite renders): "over" compositing
@@ -266,7 +300,7 @@ export function renderCamera(groups, cam, IW, IH, opts = {}) {
  * Contact sheet of views. groups: [{tex:{width,height,data,emissive?}, pos, nrm, uv, idx}] in px.
  * -> { width, height, data, views:[{label, pixels}] }
  */
-export function renderViews(groups, { views = ['game', 'front', 'side', 'top', 'iso'], size = 192, labels = true } = {}) {
+export function renderViews(groups, { views = ['game', 'front', 'side', 'top', 'iso'], size = 192, labels = true, render = {} } = {}) {
   const S = Math.max(32, Math.min(1024, Math.round(size)));
   // "fp" / {pos, look, fov}: a placed camera (first-person viewmodels), not fitted to the model
   const isCam = (v) => v === 'fp' || (v && typeof v === 'object' && Array.isArray(v.pos));
@@ -281,10 +315,10 @@ export function renderViews(groups, { views = ['game', 'front', 'side', 'top', '
   const fit = (box) => (S - 2 * margin) / Math.max(1e-6, box[1] - box[0], box[3] - box[2]);
   const orthoK = Math.min(...projs.filter((_, i) => !vs[i].perspective).map((p) => fit(p.box)), Infinity);
   const items = vs.map((v, i) => {
-    if (v.cam) return { img: renderCamera(groups, makeCamera(v.cam, S, S, [], { fov: v.cam.fov }), S, S), label: v.label, sub: v.cam === 'fp' ? '60 DEG EYE' : null };
+    if (v.cam) return { img: renderCamera(groups, makeCamera(v.cam, S, S, [], { fov: v.cam.fov }), S, S, render), label: v.label, sub: v.cam === 'fp' ? '60 DEG EYE' : null };
     const { out, box } = projs[i];
     const k = v.perspective || !Number.isFinite(orthoK) ? fit(box) : orthoK;
-    const img = raster(groups, out, k, (box[0] + box[1]) / 2, (box[2] + box[3]) / 2, S, projs[i].view);
+    const img = raster(groups, out, k, (box[0] + box[1]) / 2, (box[2] + box[3]) / 2, S, projs[i].view, render);
     return { img, label: v.label, sub: v.perspective ? `${v.pitch} DEG PERSP` : v.label === 'iso' ? 'ORTHO 3/4' : null };
   });
   const sheet = items.length === 1 && !labels ? items[0].img : packImages(items, { labels, checker: false, columns: Math.min(items.length, 3) });
