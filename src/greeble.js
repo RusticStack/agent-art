@@ -306,7 +306,8 @@ export function greeble(a, ctx) {
     const protos = new Map();
     for (const pc of lay.pieces) {
       const key = `${pc.model ? `model:${pc.model}` : pc.kind}|${pc.sx}|${pc.sz}|${pc.h}`;
-      if (!protos.has(key)) protos.set(key, { key, mesh: tag(pieceMesh(pc, perKind(pc.kind), ctx, cache)), mats: [] });
+      // identity transform: builders leave some normals unnormalised (placement normally fixes that); prototypes are never placed
+      if (!protos.has(key)) protos.set(key, { key, mesh: tag(pieceMesh(pc, perKind(pc.kind), ctx, cache).transform(mT(0, 0, 0))), mats: [] });
       protos.get(key).mats.push(pieceMatrix(pc, lay.W, lay.D));
     }
     m.gpu = [...protos.values()];
