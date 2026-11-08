@@ -243,3 +243,15 @@ test('mcp: art_graph + art_review end to end, hint only when relevant', async ()
   const tools = replies.get(11).result.tools.map((t) => t.name);
   assert.ok(tools.includes('art_graph') && tools.includes('art_review'));
 });
+
+test('graph: group names like "__proto__" stay plain groups (no prototype pollution)', () => {
+  const home = tmp();
+  const e = new Engine({ home });
+  e.run('graph_group', { name: '__proto__', note: 'polluted?' });
+  assert.equal(({}).note, undefined);
+  assert.throws(() => e.run('graph_group', { name: 'constructor', delete: true }), /no group "constructor"/);
+  e.flush();
+  const again = new Engine({ home });
+  assert.match(again.run('graph_summary', {}).text, /group:__proto__ "polluted\?"/);
+  assert.equal(({}).note, undefined);
+});
