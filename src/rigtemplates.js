@@ -137,6 +137,7 @@ const LONG_MAP = { run_contact: 'sprint', run_down: 'sprint', run_pass: 'sprint'
 const PISTOL_MAP = { ...LONG_MAP, death_buckle: 'low', run_contact: 'low', run_down: 'low', run_pass: 'low', throw_windup: 'holster', throw_release: 'holster', throw_follow: 'holster' };
 /** humanoid_hd weapon handling defaults: carry states per template pose, attachment cells. */
 export function hdWeaponConfig(weapon) {
+  if (weapon !== true && (!weapon || typeof weapon !== 'object' || Array.isArray(weapon))) throw new Error(`rig "weapon" must be true or {class?, points?, attachments?, carry?, ...} (e.g. weapon:{class:"pistol"}), not ${JSON.stringify(weapon)}`);
   const cfg = weapon === true ? {} : { ...weapon };
   const cls = cfg.class ?? (cfg.kind === 'pistol' ? 'pistol' : 'rifle');
   const pistol = cfg.kind === 'pistol' || ['pistol', 'handgun', 'revolver'].includes(cls);

@@ -153,6 +153,8 @@ export function normalizeWeapon(rig, cfg) {
     const from = s.base ? states[s.base] : builtIn[n];
     if (s.base && !from) throw new Error(`weapon.states.${n}.base: unknown state "${s.base}"`);
     states[n] = { ...(from || { point: 'grip_main', at: [0.3, 0.6], angle: 30, lock: ['main', 'support'] }), ...s };
+    for (const k of ['angle', 'lateral', 'follow']) if (s[k] !== undefined && !Number.isFinite(Number(s[k]))) throw new Error(`weapon.states.${n}.${k} must be a number`);
+    if (s.at !== undefined && s.at !== 'pocket' && !(Array.isArray(s.at) && s.at.length === 2 && s.at.every((v) => Number.isFinite(Number(v))))) throw new Error(`weapon.states.${n}.at must be [forward, down] (arm lengths) or "pocket"`);
   }
   const carry = cfg.carry ?? (kind === 'pistol' ? 'low' : 'ready_low');
   if (!states[carry]) throw new Error(`weapon.carry "${carry}" is not a state (${Object.keys(states).join(', ')})`);

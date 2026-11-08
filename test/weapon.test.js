@@ -385,3 +385,10 @@ test('a pose may set carry (art_rig pose / update poses); unknown states are ref
   assert.equal(solvePose(rig, 'high_pose', 'side').weapon.s.pl.name, 'ready_high');
   assert.throws(() => e.run('rig_pose', { name: 'pc', pose: 'bad', parts: { carry: 'nope' } }), /carry: unknown state "nope"/);
 });
+
+test('weapon setting validation: a bare class string and non-numeric state fields are refused', () => {
+  const e = new Engine({ home: tmp() });
+  assert.throws(() => e.run('rig_create', { name: 'ws', frame: [96, 144], template: 'humanoid_hd', weapon: 'pistol' }), /weapon:\{class:"pistol"\}/);
+  assert.throws(() => e.run('rig_create', { name: 'wn', frame: [96, 144], template: 'humanoid_hd', weapon: { states: { x: { angle: 'steep' } } } }), /states\.x\.angle must be a number/);
+  assert.throws(() => e.run('rig_create', { name: 'wa', frame: [96, 144], template: 'humanoid_hd', weapon: { states: { x: { at: 'chest' } } } }), /states\.x\.at must be/);
+});
