@@ -9,6 +9,10 @@
 // Parameters: t = 0 (tail, -z) .. 1 (nose, +z) along the length; u = 0 .. 1 around the section,
 // starting at the top centre and running down the +x side (u 0.25), the keel (0.5) and up the -x
 // side (0.75). The hull is centred on z (z = (t - 0.5) * length) and symmetric about x = 0.
+//
+// Walkable hulls: shell:<px> adds an inner skin (the hull gets a real wall thickness, so an
+// interior can live inside the same model) and openings:[{t:[a,b], u:[a,b]}] cut doorways,
+// hatches and canopy wells through both skins with rim walls that show the thickness.
 import { Mesh } from './model3d.js';
 
 const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
@@ -222,7 +226,14 @@ function features(a, S) {
     if (!c.mask) throw new Error('carve needs mask: <canvas> (opaque pixels = recessed (depth > 0) or raised (depth < 0) hull quads; x = around from the top centre, y = nose (top row) .. tail)');
     mask = { ref: c.mask, depth: fnum(c.depth, 1.5, 'carve.depth'), tex: c.texture };
   }
-  return { rings, seams, plates, mask, perim };
+  const holes = [];
+  for (const [k, o] of (a.openings || []).entries()) {
+    if (!o || !Array.isArray(o.t) || !Array.isArray(o.u)) throw new Error(`openings[${k}] must be {t:[t0,t1], u:[u0,u1] (u0 > u1 wraps through the top centre), id?}`);
+    const t0 = clamp01(Math.min(...o.t.map(Number))), t1 = clamp01(Math.max(...o.t.map(Number)));
+    const u0 = ((Number(o.u[0]) % 1) + 1) % 1, u1 = ((Number(o.u[1]) % 1) + 1) % 1;
+    holes.push({ t0, t1, u0, u1, id: o.id ?? `opening_${k}` });
+  }
+  return { rings, seams, plates, mask, perim, holes };
 }
 
 /**
@@ -243,12 +254,18 @@ export function hull(a, ctx) {
   for (const r of F.rings) { T.add(r.t0); T.add(r.t1); }
   for (const p of F.plates) { T.add(p.t0); T.add(p.t1); }
   for (const s of F.seams) { T.add(Math.max(0, s.t0)); T.add(Math.min(1, s.t1)); }
+  for (const h of F.holes) { T.add(h.t0); T.add(h.t1); }
+  // patch:{t, u} + inset: only that region of the surface, pushed inward (glazing panes set into the armour)
+  const PT = a.patch ? { t0: clamp01(Math.min(...a.patch.t.map(Number))), t1: clamp01(Math.max(...a.patch.t.map(Number))), u0: ((Number(a.patch.u[0]) % 1) + 1) % 1, u1: ((Number(a.patch.u[1]) % 1) + 1) % 1 } : null;
+  if (PT) { T.add(PT.t0); T.add(PT.t1); }
   const ts = [...T].map((t) => clamp01(t)).sort((x, y) => x - y).filter((t, i, A) => i === 0 || t - A[i - 1] > 1e-5);
   const U = new Set();
   for (let j = 0; j < NS; j++) U.add(j / NS);
   for (const c of S.corners) U.add(((c % 1) + 1) % 1);
   for (const s of F.seams) { U.add((((s.u - s.hw) % 1) + 1) % 1); U.add((((s.u + s.hw) % 1) + 1) % 1); }
   for (const p of F.plates) { U.add(((p.u0 % 1) + 1) % 1); U.add(((p.u1 % 1) + 1) % 1); }
+  for (const h of F.holes) { U.add(h.u0); U.add(h.u1); }
+  if (PT) { U.add(PT.u0); U.add(PT.u1); }
   const us = [...U].sort((x, y) => x - y).filter((u, i, A) => i === 0 || u - A[i - 1] > 1e-5);
   const nr = ts.length, nu = us.length;
   const P = ts.map((t) => us.map((u) => S.point(t, u))), N = ts.map((t) => us.map((u) => S.normal(t, u)));
@@ -284,6 +301,22 @@ export function hull(a, ctx) {
       level[i].push(L); qtex[i].push(tx);
     }
   }
+  // openings (quads cut through both skins) and the shell (inner skin, px inward along the normal)
+  if (PT) {
+    const inset = fnum(a.inset, 0, 'inset');
+    for (let i = 0; i < nr - 1; i++) for (let j = 0; j < nu; j++) {
+      const tc = (ts[i] + ts[i + 1]) / 2, uc = (us[j] + (j + 1 < nu ? us[j + 1] : 1)) / 2;
+      level[i][j] = tc > PT.t0 && tc < PT.t1 && (PT.u0 <= PT.u1 ? uc > PT.u0 && uc < PT.u1 : uc > PT.u0 || uc < PT.u1) ? inset : NaN;
+      qtex[i][j] = base;
+    }
+  }
+  const shell = PT ? 0 : a.shell !== undefined ? fnum(a.shell, 6, 'shell') : F.holes.length ? 6 : 0;
+  if (shell < 0) throw new Error('hull shell must be >= 0 px');
+  const hole = level.map((row, i) => row.map((L0, j) => {
+    if (Number.isNaN(L0)) return true;
+    const tc = (ts[i] + ts[i + 1]) / 2, uc = (us[j] + (j + 1 < nu ? us[j + 1] : 1)) / 2;
+    return F.holes.some((h) => tc > h.t0 && tc < h.t1 && (h.u0 <= h.u1 ? uc > h.u0 && uc < h.u1 : uc > h.u0 || uc < h.u1));
+  }));
   const at = (i, j, L) => { const jj = j % nu, p = P[i][jj], n = N[i][jj]; return [p[0] - n[0] * L, p[1] - n[1] * L, p[2] - n[2] * L]; };
   // face normals per quad (at its level), then crease-aware vertex normals
   const fn = level.map((row, i) => row.map((L, j) => {
@@ -317,6 +350,7 @@ export function hull(a, ctx) {
   };
   const m = new Mesh();
   for (let i = 0; i < nr - 1; i++) for (let j = 0; j < nu; j++) {
+    if (hole[i][j]) continue;
     const L = level[i][j], tx = qtex[i][j];
     const C = [[i, j], [i, j + 1], [i + 1, j + 1], [i + 1, j]];
     const Pq = C.map(([a2, b2]) => at(a2, b2, L));
@@ -337,18 +371,70 @@ export function hull(a, ctx) {
   };
   const qc = (i, j) => { const L = level[i][j]; return mul(add(add(at(i, j, L), at(i, j + 1, L)), add(at(i + 1, j, L), at(i + 1, j + 1, L))), 0.25); };
   for (let i = 0; i < nr - 1; i++) for (let j = 0; j < nu; j++) {
+    if (hole[i][j]) continue;
     const L = level[i][j];
     // around (j | j + 1): edge from (i, j+1) to (i+1, j+1)
     const jn = (j + 1) % nu, Ln = level[i][jn];
-    if (Ln !== L) wall((K) => at(i, j + 1, K), (K) => at(i + 1, j + 1, K), L, Ln, i, j, i, jn, Ln > L ? qc(i, jn) : qc(i, j));
+    if (Ln !== L && !hole[i][jn]) wall((K) => at(i, j + 1, K), (K) => at(i + 1, j + 1, K), L, Ln, i, j, i, jn, Ln > L ? qc(i, jn) : qc(i, j));
     if (i + 1 < nr - 1) {
       const Lu = level[i + 1][j];
-      if (Lu !== L) wall((K) => at(i + 1, j, K), (K) => at(i + 1, j + 1, K), L, Lu, i, j, i + 1, j, Lu > L ? qc(i + 1, j) : qc(i, j));
+      if (Lu !== L && !hole[i + 1][j]) wall((K) => at(i + 1, j, K), (K) => at(i + 1, j + 1, K), L, Lu, i, j, i + 1, j, Lu > L ? qc(i + 1, j) : qc(i, j));
     }
   }
-  // end caps (tail t = 0, nose t = 1) where the section is open
-  if (a.caps !== false) for (const [i, nz] of [[0, -1], [nr - 1, 1]]) {
-    if ((a.caps === 'nose' && nz < 0) || (a.caps === 'tail' && nz > 0)) continue;
+  // inner skin (reversed, facing the interior) and rims round the openings (show the thickness)
+  const inn = (i, j) => { const jj = j % nu, p = P[i][jj], n = N[i][jj]; return [p[0] - n[0] * shell, p[1] - n[1] * shell, p[2] - n[2] * shell]; };
+  if (shell > 0) {
+    const innerT = ctx.tex(a.inner ?? '#3c4047'), rimT = ctx.tex(a.rim ?? a.groove ?? '#23262c');
+    for (let i = 0; i < nr - 1; i++) for (let j = 0; j < nu; j++) {
+      if (hole[i][j]) continue;
+      const C = [[i + 1, j], [i + 1, j + 1], [i, j + 1], [i, j]];
+      const Pq = C.map(([a2, b2]) => inn(a2, b2));
+      const nIn = mul(fn[i][j], -1);
+      if (len(cross(sub(Pq[2], Pq[0]), sub(Pq[3], Pq[1]))) < 1e-9) continue;
+      m.face(innerT, Pq, C.map(() => nIn), C.map(([a2, b2]) => uvOf(innerT, a2, b2)), nIn, 0);
+    }
+    const rim = (E0, E1, L, holeC) => {
+      if (PT) return;
+      const W = [at(E0[0], E0[1], L), at(E1[0], E1[1], L), inn(E1[0], E1[1]), inn(E0[0], E0[1])];
+      let n = norm(cross(sub(W[1], W[0]), sub(W[3], W[0])));
+      if (len(n) < 1e-9) return;
+      const mid = mul(add(add(W[0], W[1]), add(W[2], W[3])), 0.25);
+      if (dot(n, sub(holeC, mid)) < 0) n = mul(n, -1);
+      const f = m.face(rimT, W, n, W.map((p) => [(p[0] + p[2]) / rimT.width, -p[1] / rimT.height]), n, 0);
+      f.edge = true;
+    };
+    const hc = (i, j) => mul(add(add(P[i][j % nu], P[i][(j + 1) % nu]), add(P[i + 1][j % nu], P[i + 1][(j + 1) % nu])), 0.25);
+    for (let i = 0; i < nr - 1; i++) for (let j = 0; j < nu; j++) {
+      if (hole[i][j]) continue;
+      const L = level[i][j], jn = (j + 1) % nu, jp = (j - 1 + nu) % nu;
+      if (hole[i][jn]) rim([i, j + 1], [i + 1, j + 1], L, hc(i, jn));
+      if (hole[i][jp]) rim([i, j], [i + 1, j], L, hc(i, jp));
+      if (i + 1 < nr - 1 && hole[i + 1][j]) rim([i + 1, j], [i + 1, j + 1], L, hc(i + 1, j));
+      if (i > 0 && hole[i - 1][j]) rim([i, j], [i, j + 1], L, hc(i - 1, j));
+    }
+  }
+  // end caps (tail t = 0, nose t = 1) where the section is open; a shelled hull also closes its
+  // inner skin there, and an open end of a shelled hull gets an annulus rim
+  if (!PT) for (const [i, nz] of [[0, -1], [nr - 1, 1]]) {
+    const capped = a.caps !== false && !((a.caps === 'nose' && nz < 0) || (a.caps === 'tail' && nz > 0));
+    if (shell > 0) {
+      const { w: w0, top: tp0, bottom: bt0 } = S.extentAt(ts[i]);
+      if (w0 >= 0.25 && tp0 - bt0 >= 0.25) {
+        const rimT = ctx.tex(a.rim ?? a.groove ?? '#23262c'), innerT = ctx.tex(a.inner ?? '#3c4047');
+        if (!capped) for (let j = 0; j < nu; j++) {
+          const q = [P[i][j], P[i][(j + 1) % nu], inn(i, j + 1), inn(i, j)];
+          let n = norm(cross(sub(q[1], q[0]), sub(q[3], q[0])));
+          if (len(n) < 1e-9) continue;
+          if (n[2] * nz < 0) n = mul(n, -1);
+          m.face(rimT, q, q.map(() => n), q.map((p) => [p[0] / rimT.width, -p[1] / rimT.height]), n, 0);
+        } else {
+          const ring = us.map((_, j) => inn(i, j)), ctr = [0, (tp0 + bt0) / 2, ring[0][2]];
+          const pts = [ctr, ...ring], n = [0, 0, -nz];
+          m.polygon(innerT, pts, n, pts.map((p) => [p[0] / innerT.width, -p[1] / innerT.height]), ring.map((_, j) => [0, ((j + 1) % nu) + 1, j + 1]), 0);
+        }
+      }
+    }
+    if (!capped) continue;
     const ring = us.map((_, j) => P[i][j]);
     const { w, top, bottom } = S.extentAt(ts[i]);
     if (w < 0.25 || top - bottom < 0.25) continue;
@@ -358,7 +444,7 @@ export function hull(a, ctx) {
     const tex = a.cap !== undefined ? ctx.tex(a.cap) : base;
     m.polygon(tex, pts, n, pts.map((p) => [p[0] / tex.width, -p[1] / tex.height]), tris, 0);
   }
-  m.hullStats = { rings: nr, segments: nu, quads: (nr - 1) * nu, grooves: F.rings.length + F.seams.length, plates: F.plates.length };
+  m.hullStats = { rings: nr, segments: nu, quads: (nr - 1) * nu, grooves: F.rings.length + F.seams.length, plates: F.plates.length, ...(shell ? { shell } : {}), ...(F.holes.length ? { openings: F.holes.map((h) => h.id) } : {}) };
   return m;
 }
 

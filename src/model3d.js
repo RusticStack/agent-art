@@ -16,9 +16,10 @@ import { greeble } from './greeble.js';
 import { normPBR, pbrKey, normBump, bumpKey, bumpNormal, mrTexture, normTrim, trimStrips } from './surface.js';
 import { booleanMesh, mergeMesh } from './csg.js';
 import { hull } from './hull.js';
-import { truss, beam, revolve, dome, rock, wingPanel, catwalk, landingPad, neon, signBox, holo, fogCard, light, marker, container, withGen, transformMarkers } from './structures.js';
+import { truss, beam, revolve, dome, rock, wingPanel, catwalk, landingPad, neon, signBox, holo, fogCard, light, marker, container, decal, withGen, transformMarkers } from './structures.js';
 import { expandDef } from './kitparts.js';
 import './kitrooms.js';
+import './kitship.js';
 
 // ---------- vector / matrix ----------
 const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
@@ -1115,7 +1116,7 @@ export const BUILDERS = {
   pillar: pillar(false),
   column: pillar(true),
   sweep, tube: sweep, greeble,
-  hull, truss, beam, revolve, dome, rock, wing_panel: wingPanel, catwalk, landing_pad: landingPad, neon, sign: signBox, holo, fog_card: fogCard, light, marker, container,
+  hull, truss, beam, revolve, dome, rock, wing_panel: wingPanel, catwalk, landing_pad: landingPad, neon, sign: signBox, holo, fog_card: fogCard, light, marker, container, decal,
 };
 BUILDERS.god_ray = (a, ctx) => fogCard({ falloff: 'beam', w: 32, h: 128, opacity: 0.3, ...a }, ctx);
 BUILDERS.prism = (a, ctx) => cylinder({ segments: 6, flat: true, ...a }, ctx);
@@ -1159,6 +1160,7 @@ export const PART_DOCS = {
   wing_panel: 'span?:48,root?:40,tip?,sweep?,thick?:4,tip_thick?,dihedral?:0 (90 = fin),section?:hex|diamond|flat',
   catwalk: 'len?:96 (along z),w?:40,deck?:2,texture? (default see-through grate),rails?:both|left|right|none,rail_h?:34,post_every?:32,kick?:true',
   landing_pad: 'w?:192,h?:4,round?,mark?:"H"|"07",lights?:8,color?,line?,hazard?,light_color?',
+  decal: 'kind?:text|logo|arrow|chevrons|stripes, text?, font?:3x5|5x7|7x9, px?:0.5 (model px per decal pixel), color?, color2? (stripes / second colour), bg?, dir?:left|right|up|down (arrow), count?:3 (chevrons), len? (stripes), stencil? (stencil bridges), glow? (emissive): one alpha-cut quad facing +z, place it 0.2 px off a surface',
   neon: 'text+font?:5x7|3x5|7x9 | canvas (1 px strokes) | strokes:[[[x,y],..]], px?:4 (model px per glyph pixel), r?:0.9, sides?:6, color, backing?:true (emissive tubes + a light marker)',
   sign: 'text,h?:24,w?,d?:4,color?,bg?,font?,frame?,double? (lit sign box: emissive text face)',
   holo: 'w?:32,h?:24,text?,color?,opacity?:0.7 (additive hologram card, double-sided)',
@@ -1171,7 +1173,7 @@ export const PART_DOCS = {
 };
 export const PART_TYPES = [...Object.keys(BUILDERS), 'model'];
 /** Builders that make their own (generated) textures. */
-const GEN_TYPES = new Set(['catwalk', 'landing_pad', 'neon', 'sign', 'holo', 'fog_card', 'god_ray', 'light', 'container', 'wing_panel']);
+const GEN_TYPES = new Set(['catwalk', 'landing_pad', 'neon', 'sign', 'holo', 'fog_card', 'god_ray', 'light', 'container', 'wing_panel', 'decal']);
 export const PART_COMMON = 'at?:[x,y,z]|cell?:[gx,gy,gz]|turn?|rotate?:[x,y,z] (deg, X then Y then Z about the part origin)|pivot?:[x,y,z] (rotate/scale about this local point)|scale?|mirror?:x|y|z|[..] (adds mirrored copies)|array?:{count,step|cell_step,rotate?,turn?,about?:[x,y,z]}|opacity?:0..1|glass?|double_sided?|overlays?:[{texture,where,map,scale,falloff,amount}]|ctm_tag?|material?:preset|{metal,rough}|bump?|trim?:"sheet:strip"|boolean?:subtract|union|intersect + target?|id?|cast_shadow?|receive_shadow?';
 
 // ---------- world UVs (after placement) ----------

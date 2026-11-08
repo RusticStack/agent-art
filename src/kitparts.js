@@ -250,7 +250,7 @@ const ringPath = (r, z, segs = 12, y0 = 0) => [...Array(segs + 1).keys()].map((k
 // ---------- ship components ----------
 registerAssembly('canopy', (p, k) => {
   const L = n(p.len ?? p.length, 48), W = n(p.w, 22), H = n(p.h, 12), sill = n(p.sill, 2), ribs = Math.max(0, Math.round(n(p.ribs, 3)));
-  const frameT = tex(p, 'frame', '#2a2d33'), glassT = tex(p, 'glass', '#7fc8e8');
+  const frameT = tex(p, 'frame', 'kit_metal_dark'), glassT = tex(p, 'glass', 'kit_glass');
   const ang = n(p.open_angle, 65), front = p.hinge === 'front';
   const hingeZ = front ? L / 2 : -L / 2, sgn = front ? 1 : -1;
   const open = k.rig ? 0 : Math.max(0, Math.min(1, n(p.open, 0)));
@@ -261,7 +261,7 @@ registerAssembly('canopy', (p, k) => {
   const parts = [{ type: 'box', w: W + 3, h: sill, d: L + 3, bevel: 0.8, texture: frameT }];
   if (p.cockpit !== false) {
     // a seat + instrument console under the glass (scaled to the canopy height)
-    const ks = Math.max(0.2, (H - 1) / 46);
+    const ks = n(p.seat_scale, Math.max(0.2, Math.min(1, (H - 1) / 46)));
     parts.push({ type: 'seat', at: [0, sill, r4(-L * 0.08)], scale: r4(ks), textures: { texture: frameT, pad: tex(p, 'seat', '#4a3a30') } });
     parts.push({ type: 'console', id: `${k.id}_dash`, turn: 2, at: [0, sill, r4(L * 0.24)], scale: r4(ks * 0.75), w: r4((W * 0.75) / (ks * 0.75)), screens: 2, textures: { texture: frameT, ...(p.textures?.screen ? { screen: p.textures.screen } : {}) } });
   }
@@ -278,8 +278,8 @@ registerAssembly('canopy', (p, k) => {
 
 const engineParts = (p, k, small = false) => {
   const r = n(p.r, small ? 3 : 10), L = n(p.len ?? p.length, small ? r * 2.5 : r * 4);
-  const housing = tex(p, 'housing', tex(p, 'texture', '#5d636d')), dark = tex(p, 'dark', '#202328'), glowC = p.glow ?? '#7fd8ff';
-  const nz = n(p.nozzle_len, L * 0.28), nozzle = tex(p, 'nozzle', '#3a3e45');
+  const housing = tex(p, 'housing', tex(p, 'texture', 'kit_hull_dark')), dark = tex(p, 'dark', 'kit_metal_dark'), glowC = p.glow ?? '#7fd8ff';
+  const nz = n(p.nozzle_len, L * 0.28), nozzle = tex(p, 'nozzle', 'kit_metal');
   const parts = [];
   if (!small) {
     parts.push({ type: 'hull', length: L, plan: [[0, r * 0.86], [0.18, r], [0.82, r], [1, r * 0.72]], profile: [[0, r * 0.86, -r * 0.86], [0.18, r, -r], [0.82, r, -r], [1, r * 0.72, -r * 0.72]], section: 2, rings: 6, segments: n(p.segments, 12), texture: housing, panel_lines: { rings: [0.35, 0.62], width: 1, depth: 0.6 }, groove: dark });
@@ -292,6 +292,14 @@ const engineParts = (p, k, small = false) => {
   parts.push({ type: 'cylinder', r_bottom: r * 0.82, r_top: r * 0.96, h: nz, segments: n(p.segments, 12), rotate: [-90, 0, 0], at: [0, 0, z0], texture: nozzle, material: 'bare_metal' });
   parts.push({ type: 'cylinder', r: r * 0.7, h: 0.8, segments: n(p.segments, 12), rotate: [-90, 0, 0], at: [0, 0, z0 - nz * 0.45], ...glow(glowC) });
   parts.push({ type: 'tube', path: ringPath(r * 0.9, z0 - nz + 0.3, 12), r: Math.max(0.45, r * 0.07), sides: 4, caps: false, closed: false, ...glow(glowC) });
+  // exhaust petals: overlapping flaps round the nozzle exit, flared out
+  const np = Math.round(n(p.petals, small ? 0 : 10));
+  for (let i = 0; i < np; i++) {
+    const a = (360 * i) / np, ar = (a * Math.PI) / 180, rr = r * 0.93;
+    parts.push({ type: 'box', w: r4((2 * Math.PI * rr * 1.08) / np), h: Math.max(0.5, r * 0.06), d: r4(nz * 0.55), at: [r4(Math.sin(ar) * rr), r4(Math.cos(ar) * rr), r4(z0 - nz * 0.78)], rotate: [n(p.petal_flare, 10), 0, r4(-a)], texture: nozzle, material: 'bare_metal' });
+  }
+  // housing straps (exposed mounting bands)
+  if (!small && p.straps !== false) for (const f of [0.3, 0.7]) parts.push({ type: 'tube', path: ringPath(r * 1.02, r4(-L / 2 + L * f), 14), r: Math.max(0.5, r * 0.06), sides: 4, caps: false, texture: dark });
   const exit = [0, 0, z0 - nz];
   parts.push({ type: 'light', at: [0, 0, z0 - nz - r], color: glowC, intensity: small ? 0.4 : 1.2, range: r * (small ? 6 : 10), bulb: false });
   const sockets = {};
@@ -299,12 +307,12 @@ const engineParts = (p, k, small = false) => {
   else parts.push(markerPart('plume', exit, { socket: `${k.id}_plume`, r: r * 0.9 }, [0, 0, -1]));
   return { parts, sockets };
 };
-registerAssembly('engine', (p, k) => engineParts(p, k, false), 'r?:10,len?:40 (axis z, nozzle toward -z),nozzle_len?,glow?:"#7fd8ff",textures:{housing,nozzle,dark},segments?:12 -> plume socket / marker <id>_plume, glow light');
+registerAssembly('engine', (p, k) => engineParts(p, k, false), 'r?:10,len?:40 (axis z, nozzle toward -z),nozzle_len?,petals?:10 (exhaust petals; petal_flare?:10 deg),straps?:true,glow?:"#7fd8ff",textures:{housing,nozzle,dark},segments?:12 -> plume socket / marker <id>_plume, glow light');
 registerAssembly('thruster', (p, k) => engineParts(p, k, true), 'r?:3,len? (small nozzle block, nozzle toward -z),glow? -> plume marker');
 
 registerAssembly('wing', (p, k) => {
   const side = p.side ?? 'both';
-  const base = { type: 'wing_panel', span: n(p.span, 64), root: n(p.root ?? p.chord, 48), tip: n(p.tip, (p.root ?? 48) * 0.4), sweep: n(p.sweep, (p.root ?? 48) * 0.45), thick: n(p.thick, 4), tip_thick: p.tip_thick, dihedral: n(p.dihedral, side === 'center' ? 90 : 0), section: p.section, texture: tex(p, 'texture', '#6b717b'), faces: p.faces };
+  const base = { type: 'wing_panel', span: n(p.span, 64), root: n(p.root ?? p.chord, 48), tip: n(p.tip, (p.root ?? 48) * 0.4), sweep: n(p.sweep, (p.root ?? 48) * 0.45), thick: n(p.thick, 4), tip_thick: p.tip_thick, dihedral: n(p.dihedral, side === 'center' ? 90 : 0), section: p.section, texture: tex(p, 'texture', 'kit_hull'), faces: p.faces };
   const rootX = n(p.root_x, 0), fold = n(p.fold_angle, 90), parts = [], clips = {};
   const sides = side === 'both' ? [1, -1] : side === 'left' ? [1] : side === 'right' ? [-1] : [0];
   const foldKeys = {};
@@ -339,7 +347,7 @@ registerAssembly('fin', (p, k) => ASSEMBLIES.wing({ side: 'center', dihedral: 90
 
 registerAssembly('landing_gear', (p, k) => {
   const h = n(p.h, 24), r = n(p.r, 1.6), foot = p.foot ?? 'pad', dir = p.retract === 'forward' ? -1 : 1;
-  const metal = tex(p, 'texture', '#4b5059'), piston = tex(p, 'piston', '#9aa0a8'), doorT = tex(p, 'door', tex(p, 'hull', '#6b717b')), dark = tex(p, 'dark', '#202328');
+  const metal = tex(p, 'texture', 'kit_metal'), piston = tex(p, 'piston', '#b4b8bc'), doorT = tex(p, 'door', tex(p, 'hull', 'kit_hull')), dark = tex(p, 'dark', 'kit_metal_dark');
   const dw = n(p.door_w, Math.max(8, r * 6)), dd = n(p.door_d, h * 0.75), bay = p.bay !== false;
   const deployed = k.rig ? true : p.deployed !== false;
   const parts = [];
@@ -349,6 +357,10 @@ registerAssembly('landing_gear', (p, k) => {
     parts.push({ type: 'cylinder', name: k.node(), r, h: strutL, segments: 8, at: [0, -strutL, 0], pivot: [0, strutL, 0], texture: metal, material: 'painted_metal' });
     parts.push({ type: 'cylinder', name: k.node('piston'), parent: k.node() ?? undefined, r: r * 0.68, h: h * 0.5, segments: 8, at: [0, -h * 0.98, 0], texture: piston, material: 'bare_metal' });
     parts.push({ type: 'box', parent: k.node() ?? undefined, w: r * 0.8, h: h * 0.3, d: r * 0.8, at: [0, -h * 0.55, r * 1.3], texture: metal });
+    // torque links (scissor) + drag brace up into the bay + hydraulic line: exposed structure
+    for (const [y, a2] of [[-h * 0.62, 35], [-h * 0.8, -35]]) parts.push({ type: 'box', parent: k.node() ?? undefined, w: r * 0.5, h: h * 0.2, d: r * 0.5, at: [0, y, -r * 1.2], rotate: [a2, 0, 0], texture: metal });
+    parts.push({ type: 'beam', parent: k.node() ?? undefined, from: [0, -strutL * 0.7, 0], to: [0, -0.5, -dd * 0.45], s: Math.max(0.8, r * 0.55), texture: metal });
+    parts.push({ type: 'tube', parent: k.node() ?? undefined, path: [[r * 1.05, -1, 0], [r * 1.05, -h * 0.75, 0]], r: Math.max(0.25, r * 0.15), sides: 4, color: '#a03028' });
     const footN = k.node('foot'), fp = footN ? { name: footN, parent: k.node('piston') } : {};
     if (foot === 'wheel') {
       parts.push({ type: 'cylinder', ...fp, r: r * 3, h: r * 2.2, segments: 10, rotate: [0, 0, 90], at: [r * 1.1, -h + r * 3, 0], color: '#1e1f22', material: 'rubber' });
@@ -376,7 +388,7 @@ registerAssembly('landing_gear', (p, k) => {
 registerAssembly('ramp', (p, k) => {
   const w = n(p.w, 48), L = n(p.len ?? p.length, 56), th = n(p.thick, 3);
   const ang = n(p.open_angle, 112), open = k.rig ? 0 : Math.max(0, Math.min(1, n(p.open, 0)));
-  const T = tex(p, 'texture', '#5d636d'), tread = tex(p, 'tread', '#2c3036'), haz = tex(p, 'hazard', '#d09a28');
+  const T = tex(p, 'texture', 'kit_deck'), tread = tex(p, 'tread', 'kit_metal_dark'), haz = tex(p, 'hazard', 'kit_hazard');
   const N = k.node(), rot = open ? [-ang * open, 0, 0] : undefined;
   const pv = [0, 0, th / 2];
   const attach = (at) => (N ? { parent: N, at } : { at, pivot: at.map((v) => -v), ...(rot ? { rotate: rot } : {}) });
@@ -386,6 +398,7 @@ registerAssembly('ramp', (p, k) => {
   for (const s of [1, -1]) parts.push({ type: 'box', w: 2, h: L, d: 1, color: haz, ...attach([s * (w / 2 - 1), 0, 0.5]) });
   const clips = N ? { [p.clip ?? 'ramp_open']: { keys: [{ t: 0, parts: {} }, { t: 0.25, parts: { [N]: { rot: [-4, 0, 0] } }, ease: 'step' }, { t: n(p.duration, 2.2), parts: { [N]: { rot: [-ang, 0, 0] } }, ease: 'smooth' }] } } : {};
   parts.push(markerPart('door', [0, 0, 0], { door: k.id, kind: 'ramp', w, h: L }, [0, 0, -1]));
+  parts.push({ type: 'marker', kind: 'walk', dir: [0, 1, 0], data: { w: r4(w * 0.9), d: r4(L), kind: 'ramp', room: String(k.id) }, ...attach([0, L / 2, 0.2]) });
   return { parts, clips };
 }, 'w?:48,len?:56 (panel height when closed, hinge at its bottom edge, outer face -z),thick?:3,open_angle?:112,open?:0..1 (static),textures:{texture,tread,hazard} -> named: clip ramp_open; door marker for interiors');
 
@@ -393,7 +406,7 @@ registerAssembly('cargo_door', (p, k) => {
   // in the hull-surface convention: panel in the local xz plane facing +y (on_hull: +y = normal), length along z
   const w = n(p.w, 40), d = n(p.d ?? p.len, 48), th = n(p.thick, 2), style = p.style ?? 'slide';
   if (!['slide', 'gullwing', 'split'].includes(style)) throw new Error('cargo_door style must be slide|gullwing|split');
-  const T = tex(p, 'texture', '#6b717b'), frame = tex(p, 'frame', '#2c3036');
+  const T = tex(p, 'texture', 'kit_hull_dark'), frame = tex(p, 'frame', 'kit_metal_dark');
   const open = k.rig ? 0 : Math.max(0, Math.min(1, n(p.open, 0)));
   const parts = [{ type: 'box', w: w + 4, h: 0.6, d: d + 4, at: [0, -0.4, 0], color: frame }];
   const clips = {};
@@ -421,7 +434,7 @@ registerAssembly('cargo_door', (p, k) => {
 registerAssembly('turret', (p, k) => {
   const r = n(p.r, 8), h = n(p.h, 5), style = p.style ?? 'cannon', nb = Math.max(1, Math.round(n(p.barrels, style === 'rotary' ? 6 : 2)));
   const bl = n(p.barrel_len, r * 3), br = n(p.barrel_r, r * 0.13);
-  const T = tex(p, 'texture', '#5d636d'), dark = tex(p, 'dark', '#25282d'), barrelT = tex(p, 'barrel', '#33363c');
+  const T = tex(p, 'texture', 'kit_hull_dark'), dark = tex(p, 'dark', 'kit_metal_dark'), barrelT = tex(p, 'barrel', 'kit_metal');
   const Y = k.node(), P = k.node('pitch'), B = k.node('barrel');
   const parts = [
     { type: 'cylinder', r: r * 1.12, h: 1.6, segments: 12, texture: dark },
@@ -452,7 +465,7 @@ registerAssembly('turret', (p, k) => {
 }, 'r?:8,h?:5,style?:cannon|rotary,barrels?:2 (rotary 6),barrel_len?,barrel_r?,scan?:60,textures:{texture,dark,barrel} -> named: yaw node <name>, pitch <name>.pitch, clips <name>_scan (+ <name>_spin), socket <name>_muzzle');
 registerAssembly('rotary_cannon', (p, k) => ASSEMBLIES.turret({ style: 'rotary', r: 5, h: 3, ...p }, k), 'turret with style:"rotary" (6 barrels, spin clip)');
 registerAssembly('hardpoint', (p, k) => {
-  const L = n(p.len, 24), T = tex(p, 'texture', '#4b5059');
+  const L = n(p.len, 24), T = tex(p, 'texture', 'kit_metal');
   const parts = [{ type: 'box', w: 3, h: 4, d: L * 0.6, bevel: 0.5, at: [0, -4, 0], texture: T }, { type: 'box', w: 4, h: 1.2, d: L, at: [0, -5.2, 0], color: tex(p, 'dark', '#25282d') }];
   if (p.payload !== false) {
     const mr = n(p.missile_r, 2);
@@ -466,7 +479,7 @@ registerAssembly('hardpoint', (p, k) => {
   return { parts, sockets };
 }, 'len?:24 (pylon under the mount, -y),payload?:true (missile),missile_r?:2 -> hardpoint_<id> socket / marker');
 registerAssembly('antenna', (p) => {
-  const h = n(p.h, 24), style = p.style ?? 'whip', T = tex(p, 'texture', '#3a3e45');
+  const h = n(p.h, 24), style = p.style ?? 'whip', T = tex(p, 'texture', 'kit_metal_dark');
   const parts = [{ type: 'cylinder', r: 1.6, h: 1.2, segments: 8, texture: T }];
   if (style === 'whip') { parts.push({ type: 'cylinder', r: 0.35, h, segments: 4, at: [0, 1.2, 0], texture: T }); parts.push({ type: 'light', at: [0, h + 1.6, 0], color: '#ff3030', intensity: 0.4, range: 40, bulb: 1.2 }); }
   else if (style === 'mast') { parts.push({ type: 'truss', from: [0, 1.2, 0], to: [0, h, 0], w: 3, h: 3, section: 'tri', bay: 4, chord: 0.6, texture: T }); for (const y of [h * 0.6, h * 0.9]) parts.push({ type: 'box', w: h * 0.4, h: 0.6, d: 0.6, at: [0, y, 0], texture: T }); parts.push({ type: 'light', at: [0, h + 1, 0], color: '#ff3030', intensity: 0.4, range: 40, bulb: 1.2 }); }
@@ -476,10 +489,10 @@ registerAssembly('antenna', (p) => {
 }, 'h?:24,style?:whip|mast|array|blade (red beacon light on whip / mast)');
 registerAssembly('sensor_dome', (p) => {
   const r = n(p.r, 6);
-  return { parts: [{ type: 'cylinder', r: r * 1.1, h: 1.2, segments: 12, texture: tex(p, 'texture', '#3a3e45') }, { type: 'dome', r, h: r * 0.9, segments: 12, rings: 4, at: [0, 1.2, 0], color: tex(p, 'dome', '#20262e'), material: { metal: 0.1, rough: 0.2 } }, { type: 'light', at: [0, r + 2, 0], color: p.glow ?? '#40ffa0', intensity: 0.3, range: 24, bulb: 1 }] };
+  return { parts: [{ type: 'cylinder', r: r * 1.1, h: 1.2, segments: 12, texture: tex(p, 'texture', 'kit_metal_dark') }, { type: 'dome', r, h: r * 0.9, segments: 12, rings: 4, at: [0, 1.2, 0], color: tex(p, 'dome', '#20262e'), material: { metal: 0.1, rough: 0.2 } }, { type: 'light', at: [0, r + 2, 0], color: p.glow ?? '#40ffa0', intensity: 0.3, range: 24, bulb: 1 }] };
 }, 'r?:6 (sensor dome on a base ring, small status light)');
 registerAssembly('rcs_quad', (p, k) => {
-  const s = n(p.s ?? p.size, 4), T = tex(p, 'texture', '#4b5059'), parts = [{ type: 'box', w: s * 1.6, h: s, d: s * 1.6, bevel: s * 0.15, texture: T }];
+  const s = n(p.s ?? p.size, 4), T = tex(p, 'texture', 'kit_metal'), parts = [{ type: 'box', w: s * 1.6, h: s, d: s * 1.6, bevel: s * 0.15, texture: T }];
   for (const [dx, dz, ry2] of [[1, 0, 90], [-1, 0, -90], [0, 1, 0], [0, -1, 180]]) {
     parts.push({ type: 'cone', r: s * 0.32, h: s * 0.7, segments: 6, rotate: [-90, ry2 + 180, 0], at: [dx * s * 0.8, s * 0.5, dz * s * 0.8], color: '#2a2c30' });
     if (!k.rig) parts.push(markerPart('rcs', [dx * s * 1.5, s * 0.5, dz * s * 1.5], { socket: `${k.id}_rcs` }, [dx, 0, dz]));
@@ -487,32 +500,38 @@ registerAssembly('rcs_quad', (p, k) => {
   return { parts };
 }, 's?:4 (RCS block with 4 nozzles in the tangent plane; rcs markers for puff sprites)');
 registerAssembly('intake', (p) => {
-  const w = n(p.w, 16), h = n(p.h, 8), d = n(p.d, 20), T = tex(p, 'texture', '#5d636d'), dark = tex(p, 'dark', '#15171a');
-  const parts = [{ type: 'box', w, h, d, at: [0, 0, 0], insets: [{ face: 'front', rect: [1.2, 1.2, w - 2.4, h - 2.4], depth: Math.min(d * 0.8, 8), texture: dark, side: dark }], texture: T }];
-  const slats = Math.max(1, Math.round(w / 4));
-  for (let i = 1; i < slats; i++) parts.push({ type: 'box', w: 0.5, h: h - 2.4, d: 1, at: [-w / 2 + (w * i) / slats, 1.2, d / 2 - 1.5], color: dark });
+  const w = n(p.w, 16), h = n(p.h, 8), d = n(p.d, 20), T = tex(p, 'texture', 'kit_hull_dark'), dark = tex(p, 'dark', '#15171a'), sideT = tex(p, 'side', 'kit_metal_dark');
+  const lip = Math.max(1, Math.min(w, h) * 0.12), depth = Math.min(d - 1, n(p.depth, Math.min(d * 0.85, Math.max(8, h * 1.5))));
+  const parts = [{ type: 'box', w, h, d, at: [0, 0, 0], insets: [{ face: 'front', rect: [lip, lip, w - 2 * lip, h - 2 * lip], depth, texture: dark, side: sideT }], texture: T }];
+  // splitter plate + compressor face deep in the duct
+  parts.push({ type: 'box', w: Math.max(0.6, w * 0.06), h: h - 2 * lip, d: depth * 0.7, at: [0, lip, d / 2 - depth * 0.35], texture: sideT });
+  parts.push({ type: 'cylinder', r: Math.min(w, h) * 0.32, h: 0.6, segments: 10, rotate: [90, 0, 0], at: [0, h / 2, d / 2 - depth + 0.4], color: '#2c3036', material: 'bare_metal' });
+  const slats = Math.max(1, Math.round(w / 6));
+  for (let i = 1; i < slats; i++) parts.push({ type: 'box', w: 0.5, h: h - 2 * lip, d: 1, at: [-w / 2 + (w * i) / slats, lip, d / 2 - 1.5], color: '#15171a' });
   return { parts };
-}, 'w?:16,h?:8,d?:20 (air scoop: recessed dark mouth facing +z, grille slats)');
+}, 'w?:16,h?:8,d?:20,depth? (air scoop facing +z: lipped mouth, deep dark duct, splitter, compressor face, grille slats)');
 registerAssembly('vent', (p) => {
-  const w = n(p.w, 12), d = n(p.d, 16), sl = Math.max(2, Math.round(n(p.slats, 5))), T = tex(p, 'texture', '#3a3e45'), dark = tex(p, 'dark', '#121417');
+  const w = n(p.w, 12), d = n(p.d, 16), sl = Math.max(2, Math.round(n(p.slats, 5))), T = tex(p, 'texture', 'kit_metal_dark'), dark = tex(p, 'dark', '#121417');
   const parts = [{ type: 'box', w: w + 2, h: 0.8, d: d + 2, texture: T }, { type: 'box', w, h: 0.3, d, at: [0, 0.8, 0], color: dark }];
   for (let i = 0; i < sl; i++) parts.push({ type: 'box', w: w - 0.6, h: 0.4, d: d / sl * 0.7, at: [0, 1.1, -d / 2 + ((i + 0.5) * d) / sl], rotate: [25, 0, 0], texture: T });
   if (p.glow) parts.push({ type: 'box', w: w - 1, h: 0.2, d: d - 1, at: [0, 0.85, 0], ...glow(p.glow) });
   return { parts };
 }, 'w?:12,d?:16,slats?:5,glow?:<colour> (heat glow under the slats)');
 registerAssembly('armor_plate', (p) => {
-  const w = n(p.w, 20), d = n(p.d, 28), h = n(p.h, 1.8), T = tex(p, 'texture', '#6b717b');
+  const w = n(p.w, 20), d = n(p.d, 28), h = n(p.h, 1.8), T = tex(p, 'texture', 'kit_hull');
   const parts = [{ type: 'box', w, h, d, bevel: Math.min(0.8, h * 0.45), texture: T, material: p.material ?? 'painted_metal' }];
+  // stepped edge: a second, smaller layer on top
+  if (p.steps !== 1 && p.steps !== false) parts.push({ type: 'box', w: w * 0.72, h: h * 0.8, d: d * 0.78, at: [0, h, -d * 0.04], bevel: Math.min(0.6, h * 0.35), texture: T, material: p.material ?? 'painted_metal' });
   if (p.bolts !== false) for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) parts.push({ type: 'box', w: 1, h: 0.6, d: 1, at: [sx * (w / 2 - 1.6), h, sz * (d / 2 - 1.6)], color: tex(p, 'bolt', '#9aa0a8') });
   return { parts };
-}, 'w?:20,d?:28,h?:1.8,bolts?:true (bevelled armour plate in the local xz plane: put it on_hull)');
+}, 'w?:20,d?:28,h?:1.8,steps?:2 (stepped: a smaller second layer),bolts?:true (bevelled armour plate in the local xz plane: put it on_hull)');
 registerAssembly('container_rack', (p, k) => {
   const [cw, ch, cd] = v3(p.size, 0).every((v) => !v) ? [40, 40, 96] : v3(p.size);
   const cols = Math.max(1, Math.round(n(p.cols, 2))), rows = Math.max(1, Math.round(n(p.rows, 2))), layers = Math.max(1, Math.round(n(p.layers, 1)));
   const gap = n(p.gap, 3), fill = Math.max(0, Math.min(1, n(p.fill, 1)));
   const colors = p.colors ?? ['#8a3a2a', '#2f5a7a', '#a8862a', '#4a6a3a', '#7a7a80'];
   const W = cols * cw + (cols + 1) * gap, H = rows * ch + (rows + 1) * gap, D = layers * cd + (layers + 1) * gap;
-  const parts = [], frameT = tex(p, 'frame', '#3a3e45');
+  const parts = [], frameT = tex(p, 'frame', 'kit_metal_dark');
   for (let l = 0; l < layers; l++) for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) {
     if (k.rnd() > fill) continue;
     const col = colors[Math.floor(k.rnd() * colors.length)];

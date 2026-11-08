@@ -18,6 +18,9 @@ import { normPBR, normBump, bumpNormal, mrTexture, heightFromData } from './surf
 import { exportExtras, previewExtras, wantsExtras, MODEL_EXTRA_OPS } from './modelexport.js';
 import { expandDef } from './kitparts.js';
 import { kitOps } from './kitops.js';
+import { isKitRef, kitTexture } from './kittex.js';
+import { bakeAO } from './bake.js';
+import { WALK_KINDS, navMesh } from './walk.js';
 import { addMarkerNodes, markerMeta, splitScene, materialize, sceneTriangles, sceneDrawCalls, normBudget, ROBLOX_TRIS, moodOpts, budgetReport } from './modelkit.js';
 
 const NAME_RE = /^[A-Za-z0-9_\-.]{1,64}$/;
@@ -84,6 +87,8 @@ export function texResolver(engine, { normal = false, bump = null } = {}) {
     const region = Array.isArray(ref.region) ? ref.region : ref.w !== undefined ? [ref.x ?? 0, ref.y ?? 0, ref.w, ref.h ?? ref.w] : null;
     const key = JSON.stringify([ref.canvas, ref.frame ?? null, ref.layer ?? null, region, ref.overlay ?? null]);
     if (cache.has(key)) return cache.get(key);
+    // built-in kit textures ("kit_deck", "kit_fabric_a03028"): used when no canvas has that name
+    if (!engine.docs.has(ref.canvas) && isKitRef(ref.canvas) && ref.frame === undefined && ref.layer === undefined && !region && !ref.overlay) { const kt = kitTexture(ref.canvas); cache.set(key, kt); return kt; }
     const d = engine.get(ref.canvas);
     used.add(d.name);
     const f = Number(ref.frame ?? 0);
@@ -240,7 +245,10 @@ function previewImage(engine, def, a) {
   def = expandDef(def);
   const t0 = performance.now();
   const built = build(engine, def, a.bump !== undefined ? { bump: a.bump } : {});
-  const ex = previewExtras(def, built, a, { variantDef: variantOf(engine, def), buildDef: (d) => build(engine, d, { tex: built.tex }) });
+  const render = a.mood ? moodOpts(built.markers, a.mood) : undefined;
+  // a posed preview bakes its own AO (ao + pose), so previewExtras only takes ao without a pose
+  const posedAO = a.ao && a.clip === undefined && (a.pose !== undefined || a.parts) && a.lod === undefined && !a.morph;
+  const ex = posedAO ? null : previewExtras(def, built, a, { variantDef: variantOf(engine, def), buildDef: (d) => build(engine, d, { tex: built.tex }), render });
   if (ex) return ex;
   if (a.clip !== undefined || a.pose !== undefined || a.parts) {
     const info = rigOf(def, built, true);
@@ -260,16 +268,16 @@ function previewImage(engine, def, a) {
       return { image: encodePNG(img.width, img.height, img.data), clip: a.clip, view: cam.label, frames: samples.map((s) => +s.time.toFixed(3)), triangles: built.mesh.triangles, ms: Math.round(performance.now() - t0) };
     }
     const { mesh } = posedWorld(info, resolveOffsets(def, info, { pose: a.pose, parts: a.parts }), filter);
+    const aoInfo = posedAO ? bakeAO([{ meshes: [mesh] }], a.ao === true ? {} : a.ao).stats : null;
     if (a.view !== undefined && (a.view === 'fp' || (typeof a.view === 'object' && a.view.pos))) {
       const S = Math.max(32, Math.min(1024, Math.round(a.size ?? 384)));
       const img = renderCamera(groupsOf(mesh), makeCamera(a.view, S, S, [], { fov: a.fov }), S, S);
       return { image: encodePNG(img.width, img.height, img.data), pose: a.pose ?? null, views: [{ view: 'fp', pixels: img.drawn }], triangles: mesh.triangles, ms: Math.round(performance.now() - t0) };
     }
-    const img = renderViews(groupsOf(mesh), { views: a.views || (a.view ? [a.view] : undefined), size: a.size ?? (a.views?.length === 1 || a.view ? 384 : 192), ...(a.mood ? { render: moodOpts(built.markers, a.mood) } : {}) });
-    return { image: encodePNG(img.width, img.height, img.data), pose: a.pose ?? null, views: img.views, triangles: mesh.triangles, ms: Math.round(performance.now() - t0) };
+    const img = renderViews(groupsOf(mesh), { views: a.views || (a.view ? [a.view] : undefined), size: a.size ?? (a.views?.length === 1 || a.view ? 384 : 192), ...(render ? { render } : {}) });
+    return { image: encodePNG(img.width, img.height, img.data), pose: a.pose ?? null, views: img.views, triangles: mesh.triangles, ...(aoInfo ? { ao: aoInfo } : {}), ms: Math.round(performance.now() - t0) };
   }
   const groups = [...built.mesh.groups.values()].filter((g) => g.idx.length);
-  const render = a.mood ? moodOpts(built.markers, a.mood) : undefined;
   const img = renderViews(groups, { views: a.views, size: a.size ?? (a.views?.length === 1 ? 384 : 192), ...(render ? { render } : {}) });
   return { image: encodePNG(img.width, img.height, img.data), views: img.views, triangles: built.mesh.triangles, ms: Math.round(performance.now() - t0) };
 }
@@ -936,6 +944,19 @@ export function assembleGLB(engine, def0, { normal = false, instances = false, s
   // surface / render-cost extras (only when asked for: plain exports are unchanged); side files are written by ext.after()
   const ext = wantsExtras(def, built, args) ? exportExtras(engine, def, built, args, { scale, file, info, meshes, nodes, writeGLB, variantDef: variantOf(engine, def), buildDef: (d) => build(engine, d, { tex: built.tex, normal, keepGpu }) }) : null;
   if (ext) ({ meshes, nodes } = ext);
+  // walkability (export walk:true): navmesh node + collider / trigger marker nodes; otherwise those markers stay out
+  if (built.markers && built.markers.some((k) => WALK_KINDS.has(k.kind))) {
+    if (args.walk) {
+      const nav = navMesh(built.markers);
+      if (nav.triangles) {
+        meshes = [...meshes, { name: `${def.name}_walk`, groups: nav.groups.values() }];
+        nodes = [...nodes, { name: `${def.name}_walk`, mesh: meshes.length - 1, proxy: true, extras: { navmesh: true, visible: false, note: 'walkable surface (one quad per walk area): hide it, feed it to the navmesh / character controller' } }];
+      }
+      const ks = built.markers.filter((k) => WALK_KINDS.has(k.kind));
+      kitMeta.walk = { areas: ks.filter((k) => k.kind === 'walk').length, colliders: ks.filter((k) => k.kind === 'collider').length, triggers: ks.filter((k) => k.kind === 'trigger').length, navmesh: `${def.name}_walk`, note: 'collider_<n> = box colliders (extras w/h/d units, room); trigger_<n> = door / ladder / lift trigger volumes; walk_<n> = walk areas; seat_<n> / spawn_<n> = seat sockets and spawn points' };
+      kitResult.walk = { navmesh_triangles: nav.triangles, colliders: kitMeta.walk.colliders, triggers: kitMeta.walk.triggers, areas: kitMeta.walk.areas };
+    } else built = { ...built, markers: built.markers.filter((k) => !WALK_KINDS.has(k.kind)) };
+  }
   // lights + markers (plumes, hardpoints, doors, screens, spawns) as empty nodes with extras
   if (built.markers && built.markers.length) {
     const r = addMarkerNodes(nodes, built.markers, scale, info ? { info, index: rigIndex } : null);

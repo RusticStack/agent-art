@@ -6,6 +6,7 @@ import { hullSurface } from './hull.js';
 import { mulberry32, hash3, BAYER4 } from './util.js';
 import { FONTS } from './fonts.js';
 import { shipClass, SCALE_CLASSES } from './modelkit.js';
+import { gunshipTemplate } from './gunship.js';
 
 const r2 = (v) => Math.round(v * 100) / 100;
 const pick = (rnd, list) => list[Math.floor(rnd() * list.length)];
@@ -178,64 +179,12 @@ export function capitalRingTemplate(o = {}) {
   return { parts, notes: `capital_ring template (ORIGINAL): ring module ${(2 * R / 32).toFixed(0)} m across, ${n} hull segments (one instanced segment arrayed radially), ${spokes} truss spokes, hub, 4 docking arms, 8 turrets, window bands. Class capital: export {split:true, lods:[1,0.4,0.15], impostor:true}; interior: art_model generate {kind:"interior", hull:<name>, part:"ring_segment"}.` };
 }
 
-export const SHIP_TEMPLATES = { fighter: fighterTemplate, dropship: dropshipTemplate, hauler: haulerTemplate, capital_ring: capitalRingTemplate };
+export const SHIP_TEMPLATES = { gunship: gunshipTemplate, fighter: fighterTemplate, dropship: dropshipTemplate, hauler: haulerTemplate, capital_ring: capitalRingTemplate };
 
-// ---------- kit textures ----------
+// ---------- kit textures (kittex.js) ----------
+export { paintKitTextures } from './kittex.js';
 const hex = (c) => { const v = parseInt(String(c).replace('#', '').slice(0, 6), 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255, 255]; };
 const shade = (c, k) => [Math.max(0, Math.min(255, c[0] * k)), Math.max(0, Math.min(255, c[1] * k)), Math.max(0, Math.min(255, c[2] * k)), c[3] ?? 255];
-/** Paint the sci-fi kit texture set: name -> {w, h, color: RGBA, height?, metal?, rough?, emissive?, meta?}. */
-export function paintKitTextures({ prefix = 'kit', colors = {}, seed = 1 } = {}) {
-  const C = { hull: '#7a8089', hull_dark: '#4f555e', metal: '#5a5f68', metal_dark: '#2a2d33', deck: '#4a4f57', wall: '#5b6068', glow: '#7fd8ff', hazard: '#d09a28', accent: '#b8462e', rock: '#5d5650', concrete: '#77736b', glass: '#7fc8e8', screen: '#40ffb0', ...colors };
-  const out = {};
-  const make = (name, w, h, fn) => {
-    const color = new Uint8ClampedArray(w * h * 4), height = new Uint8ClampedArray(w * h * 4), extra = {};
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const r = fn(x, y);
-      color.set(r.c, (y * w + x) * 4);
-      const hv = Math.round((r.h ?? 0.5) * 255); height.set([hv, hv, hv, 255], (y * w + x) * 4);
-      for (const k of ['emissive', 'metal', 'rough']) if (r[k] !== undefined) { if (!extra[k]) extra[k] = new Uint8ClampedArray(w * h * 4); const v = Array.isArray(r[k]) ? r[k] : [Math.round(r[k] * 255), Math.round(r[k] * 255), Math.round(r[k] * 255), 255]; extra[k].set(v, (y * w + x) * 4); }
-    }
-    out[`${prefix}_${name}`] = { w, h, color, height, ...extra };
-  };
-  const n = (x, y, s = 0) => hash3(x, y, seed * 97 + s);
-  const plate = (base) => (x, y) => {
-    const c = hex(base), e = x % 16 === 0 || y % 16 === 0, e2 = (x + 8) % 32 === 0 && y >= 16;
-    const rivet = (x % 16 === 2 || x % 16 === 13) && (y % 16 === 2 || y % 16 === 13);
-    const k = e || e2 ? 0.55 : rivet ? 1.25 : x % 16 === 1 || y % 16 === 1 ? 1.12 : 0.95 + n(x >> 1, y >> 1) * 0.1;
-    return { c: shade(c, k), h: e || e2 ? 0 : rivet ? 1 : 0.6, rough: e ? 0.9 : 0.55, metal: 0.25 };
-  };
-  make('hull', 32, 32, plate(C.hull));
-  make('hull_dark', 32, 32, plate(C.hull_dark));
-  make('metal', 16, 16, (x, y) => ({ c: shade(hex(C.metal), 0.9 + n(x, y, 3) * 0.2 - (y % 8 === 0 ? 0.25 : 0)), h: y % 8 === 0 ? 0 : 0.6, metal: 0.85, rough: 0.4 }));
-  make('metal_dark', 16, 16, (x, y) => ({ c: shade(hex(C.metal_dark), 0.85 + n(x, y, 4) * 0.3), metal: 0.6, rough: 0.6 }));
-  make('deck', 32, 32, (x, y) => {
-    const e = x % 32 === 0 || y % 16 === 0, tread = (x + y) % 6 === 0 && x % 32 > 3 && x % 32 < 29 && y % 16 > 2 && y % 16 < 14;
-    return { c: shade(hex(C.deck), e ? 0.5 : tread ? 1.2 : 0.92 + n(x, y, 5) * 0.12), h: e ? 0 : tread ? 0.85 : 0.5, metal: 0.5, rough: 0.6 };
-  });
-  make('wall', 32, 32, (x, y) => {
-    const inset = x > 3 && x < 28 && y > 5 && y < 26, frame = x === 3 || x === 28 || y === 5 || y === 26, strip = y >= 1 && y <= 2 && x > 5 && x < 26;
-    const c = strip ? hex(C.glow) : shade(hex(C.wall), frame ? 0.6 : inset ? 0.88 + n(x, y, 6) * 0.08 : 1.05);
-    return { c, h: frame ? 0 : inset ? 0.35 : 0.7, ...(strip ? { emissive: hex(C.glow) } : {}), metal: 0.3, rough: 0.6 };
-  });
-  make('hazard', 16, 16, (x, y) => ({ c: ((x + y) >> 2) % 2 ? hex(C.hazard) : hex('#1c1d20'), h: 0.5 }));
-  make('accent', 16, 16, (x, y) => ({ c: shade(hex(C.accent), 0.92 + n(x, y, 8) * 0.12), h: 0.5 }));
-  make('glow', 8, 8, () => ({ c: hex(C.glow), emissive: hex(C.glow) }));
-  make('glass', 8, 8, (x, y) => ({ c: shade(hex(C.glass), x + y < 3 ? 1.3 : 1) }));
-  make('screen', 32, 16, (x, y) => {
-    const bars = y > 9 && x > 2 && x < 29 && x % 3 !== 0 && y > 15 - Math.floor(n(x, 0, 9) * 6) - 1, line = y === 4 && x > 2 && x < 29, frame = x === 0 || y === 0 || x === 31 || y === 15;
-    const lit = bars || line || (y === 7 && (x * 7) % 5 === 0);
-    const c = frame ? hex('#1a1c20') : lit ? hex(C.screen) : shade(hex(C.screen), 0.12);
-    return { c, emissive: frame ? [0, 0, 0, 0] : lit ? hex(C.screen) : shade(hex(C.screen), 0.1) };
-  });
-  make('rock', 32, 32, (x, y) => { const v = n(x >> 2, y >> 2, 11) * 0.5 + n(x, y, 12) * 0.3 + (n(x >> 3, y >> 3, 13) > 0.8 ? -0.2 : 0); return { c: shade(hex(C.rock), 0.7 + v * 0.6), h: v, rough: 0.95 }; });
-  make('concrete', 32, 32, (x, y) => { const seam = x % 32 === 0 || y % 32 === 0, stain = n(x >> 3, (y + x * 0.2) >> 2, 14) > 0.8; return { c: shade(hex(C.concrete), seam ? 0.6 : stain ? 0.78 : 0.92 + n(x, y, 15) * 0.12), h: seam ? 0 : 0.5, rough: 0.9 }; });
-  make('pipe', 16, 16, (x, y) => ({ c: shade(hex(C.metal), y % 16 < 2 ? 0.6 : 0.8 + Math.sin((x / 16) * Math.PI) * 0.35), metal: 0.8, rough: 0.35 }));
-  make('scratches', 32, 32, (x, y) => {
-    const s = (n(Math.floor((x + y * 2) / 3), 0, 21) > 0.93 && n(x >> 2, y >> 2, 22) > 0.55) || (n(x, y, 23) > 0.985);
-    return { c: s ? [210, 214, 220, 200] : [0, 0, 0, 0] };
-  });
-  return out;
-}
 
 // ---------- livery ----------
 /**

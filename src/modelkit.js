@@ -9,16 +9,16 @@ export const ROBLOX_TRIS = 20000;
 
 // ---------- scale classes ----------
 /**
- * Triangle budgets (LOD0, whole model) and size bands. Ships: length in metres (32 px = 1 m).
+ * Triangle budgets (LOD0, whole model, exterior + walkable interior) and size bands. Ships: length in metres (32 px = 1 m).
  * mesh = max triangles per exported mesh (Roblox MeshPart limit); draw = draw-call guide.
  */
 export const SCALE_CLASSES = {
-  snub: { kind: 'ship', length_m: [0, 12], triangles: 4000, draw: 8, lods: [1, 0.5, 0.2], note: 'shuttle / escape pod / snub fighter' },
-  fighter: { kind: 'ship', length_m: [8, 25], triangles: 10000, draw: 14, lods: [1, 0.5, 0.2], note: 'single-seat fighter / interceptor' },
-  dropship: { kind: 'ship', length_m: [18, 45], triangles: 18000, draw: 18, lods: [1, 0.5, 0.25, 0.1], note: 'dropship / gunship / light hauler' },
-  freighter: { kind: 'ship', length_m: [35, 120], triangles: 35000, draw: 24, lods: [1, 0.5, 0.25, 0.1], note: 'cargo hauler / freighter (split meshes)' },
-  corvette: { kind: 'ship', length_m: [80, 220], triangles: 60000, draw: 32, lods: [1, 0.5, 0.25, 0.1], note: 'corvette / frigate (split meshes, impostor far)' },
-  capital: { kind: 'ship', length_m: [200, 4000], triangles: 150000, draw: 48, lods: [1, 0.4, 0.15, 0.05], note: 'carrier / capital ring module (split meshes, impostor far, cull rooms inside)' },
+  snub: { kind: 'ship', length_m: [0, 12], triangles: 6000, draw: 8, lods: [1, 0.5, 0.2], note: 'shuttle / escape pod / snub fighter' },
+  fighter: { kind: 'ship', length_m: [8, 25], triangles: 14000, draw: 14, lods: [1, 0.5, 0.2], note: 'single-seat fighter / interceptor' },
+  dropship: { kind: 'ship', length_m: [18, 45], triangles: 45000, draw: 18, lods: [1, 0.5, 0.25, 0.1], note: 'dropship / gunship / light hauler' },
+  freighter: { kind: 'ship', length_m: [35, 120], triangles: 80000, draw: 24, lods: [1, 0.5, 0.25, 0.1], note: 'cargo hauler / freighter (split meshes)' },
+  corvette: { kind: 'ship', length_m: [80, 220], triangles: 120000, draw: 32, lods: [1, 0.5, 0.25, 0.1], note: 'corvette / frigate (split meshes, impostor far)' },
+  capital: { kind: 'ship', length_m: [200, 4000], triangles: 200000, draw: 48, lods: [1, 0.4, 0.15, 0.05], note: 'carrier / capital ring module (split meshes, impostor far, cull rooms inside)' },
   prop: { kind: 'kit', triangles: 1500, draw: 3, note: 'small prop' },
   kit_piece: { kind: 'kit', triangles: 3000, draw: 4, note: 'modular kit piece (corridor, tank, crane)' },
   room: { kind: 'kit', triangles: 8000, draw: 8, note: 'interior room / engine room' },
@@ -250,18 +250,23 @@ export function budgetReport(def, built, { cls, scale = 32, lods = null } = {}) 
 // ---------- mood previews ----------
 const hexRGB = (c) => { const m = /^#?([0-9a-f]{6})/i.exec(String(c)); if (!m) return [1, 1, 1]; const v = parseInt(m[1], 16); return [(v >> 16 & 255) / 255, (v >> 8 & 255) / 255, (v & 255) / 255]; };
 /**
- * Render options for a dark, moody preview: low cool ambient, a dim key light, and the model's
- * light markers (engines, neon, lamps) as coloured point lights. mood: true | {ambient, ambient_color,
- * key:{dir, color, strength}, lights:true|false, gain, bg}.
+ * Render options for a dark, moody preview (preview only, never exported): low cool ambient, a dim
+ * key light, a rim light from behind the model, and the model's light markers (engines, neon,
+ * lamps) as coloured point lights. Every opaque surface is lit per pixel (normal maps, specular
+ * highlights of the point lights, baked AO). mood: true | {ambient, ambient_color, key:{dir, color,
+ * strength}, fill:false|{dir, color, strength}, rim:false|{dir?, color, strength}, lights:true|false, max_lights?:12 (per material
+ * group, strongest first), gain, bg}.
  */
 export function moodOpts(markers = [], mood = true) {
   const o = mood === true ? {} : mood;
-  const amb = Number(o.ambient ?? 0.26);
+  const amb = Number(o.ambient ?? 0.3);
   const ac = o.ambient_color ? hexRGB(o.ambient_color) : [0.62, 0.7, 1];
   const key = o.key || {};
   const kd = key.dir ? (() => { const d = key.dir.map(Number), l = Math.hypot(...d) || 1; return d.map((v) => v / l); })() : [-0.45, 0.75, 0.48];
-  const gain = Number(o.gain ?? 2);
+  const gain = Number(o.gain ?? 1.6);
   const lights = o.lights === false ? [] : markers.filter((k) => k.kind === 'light').map((k) => ({ pos: k.pos, color: hexRGB(k.data.color), intensity: Number(k.data.intensity ?? 1) * gain, range: Number(k.data.range ?? 160) * 1.25 }));
   const bg = o.bg ? hexRGB(o.bg).map((v) => Math.round(v * 255)) : [9, 11, 16];
-  return { bg, light: kd, ambient: amb, ambient_color: ac.map((v) => v * amb), color: key.color ? hexRGB(key.color) : [0.66, 0.72, 0.9], light_strength: Number(key.strength ?? 0.85), lights };
+  const r = o.rim === false ? null : { ...(o.rim?.dir ? { dir: o.rim.dir.map(Number) } : {}), color: hexRGB(o.rim?.color ?? '#a8c4ff'), strength: Number(o.rim?.strength ?? 1.1) };
+  const f = o.fill === false ? null : { dir: (o.fill?.dir ?? [-kd[0], 0.15, -kd[2]]).map(Number), color: hexRGB(o.fill?.color ?? '#5a78b0'), strength: Number(o.fill?.strength ?? 0.4) };
+  return { mood: true, bg, light: kd, ambient: amb, ambient_color: ac.map((v) => v * amb), color: key.color ? hexRGB(key.color) : [1, 0.94, 0.86], light_strength: Number(key.strength ?? 1.35), lights, ...(r ? { rim: r } : {}), ...(f ? { fill: f } : {}), max_lights: Number(o.max_lights ?? 12) };
 }

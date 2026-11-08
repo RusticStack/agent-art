@@ -146,7 +146,9 @@ test('assemblies: gear, ramp and canopy expand to nodes, sockets and merged clip
   assert.ok(!st.clips);
   assert.ok(st.parts[0].rotate[0] < -90, 'static ramp rotated open');
   // every registered assembly builds with its defaults
-  for (const t of Object.keys(ASSEMBLIES)) assert.doesNotThrow(() => build([{ type: t }]), t);
+  // (glazing fills an opening of a hull, so it gets one)
+  const H0 = { type: 'hull', id: 'h', length: 200, openings: [{ t: [0.6, 0.8], u: [0.9, 0.1] }] };
+  for (const t of Object.keys(ASSEMBLIES)) assert.doesNotThrow(() => build(t === 'glazing' ? [H0, { type: t, hull: 'h', t: [0.6, 0.8], u: [0.9, 0.1] }] : [{ type: t }]), t);
 });
 
 test('templates: four original ships build, stay in their class budget and keep gear contact at y=0', () => {

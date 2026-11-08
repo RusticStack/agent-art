@@ -7,6 +7,10 @@ import { paintKitTextures, paintLivery } from './shipgen.js';
 import { interiorFromHull, miningColony, marketDistrict } from './layoutgen.js';
 import { expandDef } from './kitparts.js';
 import { budgetReport, SCALE_CLASSES } from './modelkit.js';
+import { walkAnalyze } from './walk.js';
+
+/** Assemblies that open: walk_check builds them open (static, unnamed) to test passages. */
+const OPENABLE = new Set(['door', 'ramp', 'cargo_door', 'canopy', 'ring_door', 'airlock']);
 
 const NAME_RE = /^[A-Za-z0-9_\-.]{1,64}$/;
 
@@ -102,6 +106,25 @@ export function kitOps({ getModel, saveModel, build, models }) {
         return { model: a.name, kit_model_names: r.models.map((m) => m.name), triangles: b.mesh.triangles + inst, triangles_root: b.mesh.triangles, triangles_instanced: inst, ...r.report, next: `art_model export {name:"${a.name}", instances:true, collision:"boxes"}` };
       }
       throw new Error('generate kind must be interior (with hull:<ship model>), mining_colony or market');
+    },
+    /**
+     * art_model walk_check {name}: walkability report against the player metrics (blocked doors,
+     * headroom, unreachable areas, floor gaps, interior parts poking through the hull, metric
+     * violations). Doors / ramps / canopies / airlocks are opened for the passage tests.
+     */
+    model_walk_check(a) {
+      const def = getModel(this, a.name);
+      const openDef = { ...def, parts: def.parts.map((p) => { if (!p || !OPENABLE.has(p.type)) return p; const q = { ...p, open: 1, inner_open: 1, outer_open: 1 }; delete q.name; return q; }) };
+      const closed = build(this, def), open = build(this, openDef);
+      const x = expandDef(def);
+      const hulls = [];
+      for (const H of x.parts.filter((p) => p && p.type === 'hull' && (p.shell || p.openings))) {
+        const key = H.id ?? H.name;
+        const inner = def.parts.filter((p) => p && p.inside !== undefined && p.inside === key).map((p) => { const q = { ...p }; delete q.parent; delete q.name; return q; });
+        hulls.push({ part: H, interior: inner.length ? build(this, { name: `${def.name}__interior`, parts: inner, grid: def.grid, scale: def.scale, origin: 'parts' }).mesh : null });
+      }
+      const r = walkAnalyze({ markers: open.markers || [], closed: closed.mesh, open: open.mesh, hulls, scale: Number(def.scale ?? 32) });
+      return { model: def.name, ...r, next: r.ok ? `art_model export {name:"${def.name}", walk:true} (navmesh + colliders + triggers)` : 'fix the listed problems (positions in metres), then walk_check again' };
     },
     /** art_model budget {name, class?, lods?}: triangle / draw-call / LOD report against a scale class. */
     model_budget(a) {

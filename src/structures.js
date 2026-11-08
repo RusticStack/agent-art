@@ -276,8 +276,8 @@ export function grateTex(ctx, color = '#4a5058') {
 export function catwalk(a, ctx) {
   const L = pos(a.len ?? a.d, 96, 'len'), w = pos(a.w, 40, 'w'), th = pos(a.deck, 2, 'deck');
   const rails = a.rails ?? 'both', rh = pos(a.rail_h, 34, 'rail_h'), every = pos(a.post_every, 32, 'post_every');
-  const deckT = a.texture !== undefined ? ctx.tex(a.texture) : grateTex(ctx, a.grate_color ?? '#4a5058');
-  const railT = ctx.tex(a.rail ?? a.rail_texture ?? '#8a6a2a'), frameT = ctx.tex(a.frame ?? '#3a3e45');
+  const deckT = a.texture !== undefined ? ctx.tex(a.texture) : a.grate_color === undefined ? ctx.tex('kit_grate') : grateTex(ctx, a.grate_color);
+  const railT = ctx.tex(a.rail ?? a.rail_texture ?? 'kit_hazard'), frameT = ctx.tex(a.frame ?? 'kit_metal_dark');
   const m = new Mesh();
   boxFaces(m, [-w / 2, -th, -L / 2], [w / 2, 0, L / 2], (n) => (n[1] > 0.5 || n[1] < -0.5 ? deckT : frameT), true);
   // side stringers
@@ -291,6 +291,7 @@ export function catwalk(a, ctx) {
     beamFaces(m, railT, [x, rh * 0.5, -L / 2], [x, rh * 0.5, L / 2], 1.2, { caps: true });
     if (a.kick !== false) boxFaces(m, [x - 0.5, 0, -L / 2], [x + 0.5, 4, L / 2], () => frameT, true);
   }
+  m.markers = [{ kind: 'walk', pos: [0, 0, 0], dir: [0, 0, 1], data: { w, d: L, room: a.room ?? 'catwalk' } }];
   return m;
 }
 
@@ -311,7 +312,8 @@ function containerTex(ctx, color, end) {
 export function container(a, ctx) {
   const w = pos(a.w, 40, 'w'), h = pos(a.h, 40, 'h'), d = pos(a.d, 96, 'd');
   const col = a.color ?? '#8a3a2a';
-  const side = a.texture !== undefined ? ctx.tex(a.texture) : containerTex(ctx, col, false), end = a.texture !== undefined ? side : containerTex(ctx, col, true);
+  const hx = /^#[0-9a-fA-F]{6}$/.test(col) ? col.slice(1).toLowerCase() : null;
+  const side = a.texture !== undefined ? ctx.tex(a.texture) : hx ? ctx.tex(`kit_container_${hx}`) : containerTex(ctx, col, false), end = a.texture !== undefined ? side : hx ? ctx.tex(`kit_container_end_${hx}`) : containerTex(ctx, col, true);
   const m = new Mesh();
   boxFaces(m, [-w / 2, 0, -d / 2], [w / 2, h, d / 2], (n) => (Math.abs(n[2]) > 0.5 ? end : side), true);
   return m;
@@ -603,6 +605,52 @@ export function marker(a) {
   if (!/^[\w.-]{1,32}$/.test(String(a.kind ?? 'marker'))) throw new Error('marker needs kind: "spawn"|"door"|"nav"|"screen"|... (1-32 letters, digits, _ - .)');
   const m = new Mesh();
   m.markers = [{ kind: a.kind ?? 'marker', pos: [0, 0, 0], dir: a.dir ? norm(v3(a.dir, null, 'dir')) : null, data: a.data && typeof a.data === 'object' ? a.data : {} }];
+  return m;
+}
+
+// ---------- decals (stencils, serials, labels, arrows, chevrons, logotypes) ----------
+const ARROW = ['0000100000', '0000110000', '1111111000', '1111111100', '1111111000', '0000110000', '0000100000'];
+/**
+ * A decal: one alpha-cut quad facing +z (put it 0.2 px off a surface) with a pixel texture: text
+ * (pixel font, stencil gaps optional), arrow (dir left|right|up|down), chevrons (warning), stripes
+ * (hazard band) or a logotype (text + underline bar). px = model px per decal pixel (32 px / m:
+ * 0.5 px pixels = 1.6 cm). glow:true makes it emissive (lit headers).
+ */
+export function decal(a, ctx) {
+  const kind = a.kind ?? (a.text !== undefined ? 'text' : 'arrow');
+  const col = rgba(a.color ?? '#e8e4d8'), bg = a.bg ? rgba(a.bg) : null, px = pos(a.px, 0.5, 'px');
+  let w, h, at;
+  if (kind === 'text' || kind === 'logo') {
+    const T = textPixels(String(a.text ?? 'LABEL'), a.font ?? (kind === 'logo' ? '7x9' : '3x5'), 1);
+    const pad = bg ? 1 : 0, bar = kind === 'logo' ? 3 : 0;
+    w = T.w + pad * 2; h = T.h + pad * 2 + bar;
+    at = (x, y) => (y >= T.h + pad + 1 && y < T.h + pad + bar && kind === 'logo' ? 1 : T.at(x - pad, y - pad) ? (a.stencil && (x - pad) % 4 === 2 && (y - pad) === Math.floor(T.h / 2) ? 0 : 1) : 0);
+  } else if (kind === 'arrow') {
+    w = 10; h = 7;
+    const d = a.dir ?? 'right';
+    at = (x, y) => { let X = x, Y = y; if (d === 'left') X = 9 - x; if (d === 'up' || d === 'down') { X = d === 'up' ? 9 - y : y; Y = x; } return ARROW[Y]?.[X] === '1' ? 1 : 0; };
+    if (d === 'up' || d === 'down') { w = 7; h = 10; }
+  } else if (kind === 'chevrons') {
+    const n = Math.max(1, Math.round(num(a.count, 3, 'count')));
+    w = n * 6; h = 8;
+    at = (x, y) => { const k = (x % 6) - Math.abs(y - 3.5) + 0.5; return k >= 0 && k < 3 ? 1 : 0; };
+  } else if (kind === 'stripes') {
+    w = Math.max(4, Math.round(num(a.len, 32, 'len'))); h = 4;
+    at = (x, y) => (((x + y) >> 1) % 2 ? 1 : 2);
+  } else throw new Error('decal kind must be text|logo|arrow|chevrons|stripes');
+  const second = rgba(a.color2 ?? '#1c1d20');
+  const key = `decal:${kind}:${a.text ?? ''}:${a.dir ?? ''}:${a.count ?? ''}:${a.len ?? ''}:${a.color ?? ''}:${a.color2 ?? ''}:${a.bg ?? ''}:${a.font ?? ''}:${a.stencil ? 1 : 0}:${a.glow ? 1 : 0}`;
+  const t = genTex(ctx, key, w, h, (D, W) => {
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const v = at(x, y);
+      if (v === 1) D.set(col, (y * W + x) * 4);
+      else if (v === 2) D.set(second, (y * W + x) * 4);
+      else if (bg) D.set(bg, (y * W + x) * 4);
+    }
+    return a.glow ? { emissive: D } : {};
+  });
+  const m = new Mesh(), W2 = (w * px) / 2, H2 = (h * px) / 2;
+  m.face(t, [[-W2, -H2, 0], [W2, -H2, 0], [W2, H2, 0], [-W2, H2, 0]], [[0, 0, 1], [0, 0, 1], [0, 0, 1], [0, 0, 1]], [[0, 1], [1, 1], [1, 0], [0, 0]], [0, 0, 1], 0);
   return m;
 }
 

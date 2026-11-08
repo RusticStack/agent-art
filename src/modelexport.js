@@ -283,7 +283,7 @@ export function exportExtras(engine, def, built, a, { scale, file, info, meshes,
 
 // ---------- preview extras ----------
 /** preview {ao?, lod?, morph?:{name: weight}, lods?, bump?} and models with GPU greebles. -> image result or null */
-export function previewExtras(def, built, a, { variantDef, buildDef }) {
+export function previewExtras(def, built, a, { variantDef, buildDef, render }) {
   if (!(a.ao || a.lod !== undefined || a.morph)) return null;
   const t0 = performance.now();
   let mesh = built.mesh.clone();
@@ -308,7 +308,7 @@ export function previewExtras(def, built, a, { variantDef, buildDef }) {
   }
   let aoInfo = null;
   if (a.ao) aoInfo = bakeAO([{ meshes: [mesh] }], a.ao === true ? {} : a.ao).stats;
-  const img = renderViews(groupsOf(mesh), { views: a.views, size: a.size ?? (a.views?.length === 1 ? 384 : 192) });
+  const img = renderViews(groupsOf(mesh), { views: a.views, size: a.size ?? (a.views?.length === 1 ? 384 : 192), ...(render ? { render } : {}) });
   return { image: encodePNG(img.width, img.height, img.data), views: img.views, triangles: mesh.triangles, ...(lodInfo ? { lod: lodInfo } : {}), ...(aoInfo ? { ao: aoInfo } : {}), ms: Math.round(performance.now() - t0) };
 }
 

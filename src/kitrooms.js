@@ -20,9 +20,15 @@ const SIDES = ['n', 's', 'e', 'w'];
 export function roomShell(p, opts = {}) {
   const C = n(p.cell, DECK.cell), cw = Math.max(1, Math.round(n(p.cells?.[0] ?? p.cw, opts.cw ?? 1))), cd = Math.max(1, Math.round(n(p.cells?.[1] ?? p.cd, opts.cd ?? 1)));
   const W = cw * C, D = cd * C, H = n(p.h, opts.h ?? DECK.h), th = DECK.wall;
-  const floorT = tx(p, 'floor', opts.floor ?? '#4a4f57'), wallT = tx(p, 'wall', opts.wall ?? '#5b6068'), ceilT = tx(p, 'ceiling', opts.ceiling ?? '#3a3e45'), ribT = tx(p, 'rib', '#33373e'), glassT = tx(p, 'glass', '#7fc8e8');
+  const floorT = tx(p, 'floor', opts.floor ?? 'kit_deck'), wallT = tx(p, 'wall', opts.wall ?? 'kit_wall'), ceilT = tx(p, 'ceiling', opts.ceiling ?? 'kit_ceiling'), ribT = tx(p, 'rib', 'kit_metal_dark'), glassT = tx(p, 'glass', 'kit_glass');
+  const room = p.room ?? p.kind ?? 'room';
   const lightC = p.light_color ?? opts.light ?? '#cfe6ff';
   const parts = [{ type: 'box', w: W, h: DECK.floor, d: D, at: [0, -DECK.floor, 0], texture: floorT, faces: { top: floorT }, material: 'painted_metal' }];
+  // walkable floor + floor collider (walk data: navmesh, walk_check)
+  parts.push({ type: 'marker', kind: 'walk', at: [0, 0, 0], dir: [0, 0, 1], data: { w: W, d: D, room, headroom: Math.min(H - 1, 64) } });
+  parts.push({ type: 'marker', kind: 'collider', at: [0, -DECK.floor / 2, 0], dir: [0, 0, 1], data: { room, w: W, h: DECK.floor, d: D } });
+  // hazard edge trim along the floor where the room meets a wall
+  if (p.trim !== false) for (const sgn of [1, -1]) parts.push(D >= W ? { type: 'box', w: 3, h: 0.3, d: D, at: [sgn * (W / 2 - 8), 0, 0], texture: tx(p, 'hazard', 'kit_hazard') } : { type: 'box', w: W, h: 0.3, d: 3, at: [0, 0, sgn * (D / 2 - 8)], texture: tx(p, 'hazard', 'kit_hazard') });
   if (p.ceiling !== false) parts.push({ type: 'box', w: W, h: DECK.floor, d: D, at: [0, H, 0], texture: ceilT });
   const open = p.openings || {};
   for (const side of SIDES) {
@@ -36,6 +42,7 @@ export function roomShell(p, opts = {}) {
       const mid = (a + b) / 2, len = b - a;
       const at = side === 'n' ? [mid, y0, D / 2 + th / 2] : side === 's' ? [mid, y0, -D / 2 - th / 2] : side === 'e' ? [W / 2 + th / 2, y0, mid] : [-W / 2 - th / 2, y0, mid];
       parts.push({ type: 'box', w: side === 'n' || side === 's' ? len : th, h: y1 - y0, d: side === 'n' || side === 's' ? th : len, at, texture: wallT, material: 'painted_metal' });
+      parts.push({ type: 'marker', kind: 'collider', at: [at[0], y0 + (y1 - y0) / 2, at[2]], dir: [0, 0, 1], data: { room, w: side === 'n' || side === 's' ? len : th, h: y1 - y0, d: side === 'n' || side === 's' ? th : len } });
     };
     let x = -along / 2 - (side === 'e' || side === 'w' ? 0 : th);
     const end = along / 2 + (side === 'e' || side === 'w' ? 0 : th);
@@ -72,9 +79,9 @@ export function roomShell(p, opts = {}) {
   if (p.pipes !== false) for (const sgn of [1, -1]) {
     const y = H - 10;
     const pts = longZ ? [[sgn * (W / 2 - 6), y, -D / 2], [sgn * (W / 2 - 6), y, D / 2]] : [[-W / 2, y, sgn * (D / 2 - 6)], [W / 2, y, sgn * (D / 2 - 6)]];
-    parts.push({ type: 'tube', path: pts, r: 2, sides: 6, texture: tx(p, 'pipe', '#5a5f68'), caps: false });
+    parts.push({ type: 'tube', path: pts, r: 2, sides: 6, texture: tx(p, 'pipe', 'kit_pipe'), caps: false });
   }
-  parts.push({ type: 'marker', kind: 'room', at: [0, 0, 0], data: { room: p.room ?? p.kind ?? 'room', w: W, d: D, h: H } });
+  parts.push({ type: 'marker', kind: 'room', at: [0, 0, 0], data: { room, w: W, d: D, h: H } });
   return { parts, W, D, H, C };
 }
 
@@ -92,17 +99,21 @@ registerAssembly('corridor', (p, k) => {
   const r = roomShell({ ...p, cells: [1, kind === 'straight' || kind === 'end' ? len : 1], openings: { ...CORR[kind], ...(p.openings || {}) }, kind: 'corridor' });
   const parts = r.parts;
   // floor grating strip + cable trays
-  parts.push({ type: 'box', w: r.W * 0.36, h: 0.4, d: r.D, at: [0, 0, 0], texture: tx(p, 'grate', '#2c3036') });
-  if (p.greebles !== false) parts.push({ type: 'greeble', w: r.W * 0.5, d: r.D, at: [0, r.H - 0.01, 0], rotate: [180, 0, 0], seed: Number(p.seed ?? 1), density: 0.35, size: [3, 10], height: [0.5, 2], kinds: ['conduit', 'pipe', 'vent', 'panel', 'cables'], texture: tx(p, 'wall', '#5b6068'), dark: '#2a2d33' });
+  parts.push({ type: 'box', w: r.W * 0.36, h: 0.4, d: r.D, at: [0, 0, 0], texture: tx(p, 'grate', 'kit_grate') });
+  if (p.greebles !== false) {
+    parts.push({ type: 'greeble', w: r.W * 0.5, d: r.D, at: [0, r.H - 0.01, 0], rotate: [180, 0, 0], seed: Number(p.seed ?? 1), density: 0.35, size: [3, 10], height: [0.5, 2], kinds: ['conduit', 'pipe', 'vent', 'panel', 'cables'], texture: tx(p, 'wall', 'kit_metal'), dark: 'kit_metal_dark' });
+    // wall greebles: conduit boxes and vents on the long walls, above head height
+    for (const sgn of [1, -1]) parts.push({ type: 'greeble', w: r.D, d: 14, at: [sgn * (r.W / 2 - 0.2), r.H - 18, 0], rotate: [0, 90, sgn * -90], seed: Number(p.seed ?? 1) + (sgn > 0 ? 11 : 13), density: 0.4, size: [3, 8], height: [0.5, 2.5], kinds: ['conduit', 'vent', 'bolts', 'panel'], texture: 'kit_metal', dark: 'kit_metal_dark', accent: 'kit_hazard' });
+  }
   return { parts };
-}, 'kind?:straight|L|T|X|end (open sides: n always; L adds e, T adds e+w, X all), len?:1 (cells, straight/end), h?:96, textures:{floor,wall,ceiling,rib,pipe,grate}, light_color?, openings? (override per side)');
+}, 'kind?:straight|L|T|X|end (open sides: n always; L adds e, T adds e+w, X all), len?:1 (cells, straight/end; 64 px = 2 m wide, 96 px = 3 m tall: player metrics), h?:96, textures:{floor,wall,ceiling,rib,pipe,grate}, light_color?, openings? (override per side)');
 registerAssembly('room', room('room'), 'cells?:[cw,cd] (64 px cells),h?:96,openings?:{n|s|e|w:"open"|[{at, kind:door|window|open, w?, h?, sill?}]},textures:{floor,wall,ceiling,rib,glass},ribs?,lights?,pipes?,light_color?');
 
 // ---------- doors ----------
 registerAssembly('door', (p, k) => {
   const style = p.style ?? 'bulkhead', w = n(p.w, DECK.door_w), h = n(p.h, DECK.door_h), th = n(p.thick, DECK.wall + 2);
   if (!['bulkhead', 'blast', 'hatch'].includes(style)) throw new Error('door style must be bulkhead|blast|hatch');
-  const frame = tx(p, 'frame', '#2c3036'), leaf = tx(p, 'texture', '#6b717b'), haz = tx(p, 'hazard', '#d09a28');
+  const frame = tx(p, 'frame', 'kit_metal_dark'), leaf = tx(p, 'texture', 'kit_hull_dark'), haz = tx(p, 'hazard', 'kit_hazard');
   const open = k.rig ? 0 : Math.max(0, Math.min(1, n(p.open, 0)));
   const fw = style === 'blast' ? 8 : 5;
   const parts = [
@@ -131,49 +142,55 @@ registerAssembly('door', (p, k) => {
   parts.push({ type: 'light', at: [w / 2 + fw + 2, h + 2, th / 2 + 1], color: '#40ff70', intensity: 0.25, range: 40, bulb: 1.5 });
   if (k.rig) clips[p.clip ?? `${k.id}_open`] = { keys: [{ t: 0, parts: {} }, { t: 0.15, parts: {}, ease: 'step' }, { t: n(p.duration, style === 'blast' ? 2.4 : 0.8), parts: keys, ease: 'smooth' }] };
   parts.push({ type: 'marker', kind: 'door', at: [0, 0, 0], data: { door: k.id, style, w, h }, dir: [0, 0, 1] });
+  parts.push({ type: 'marker', kind: 'trigger', at: [0, h / 2, 0], dir: [0, 0, 1], data: { trigger: 'door', id: k.id, w: w + 8, h, d: 64 } });
   return { parts, clips };
 }, 'style?:bulkhead (2 sliding leaves)|blast (heavy, rises)|hatch (round, swings),w?:40,h?:76,thick?,open?:0..1 (static) -> named: clip <name>_open; door marker; sits in a wall gap (plane xy, facing +z)');
 registerAssembly('airlock', (p, k) => {
   const r = roomShell({ ...p, cells: [1, 1], openings: { n: [{ at: 0, kind: 'door' }], s: [{ at: 0, kind: 'door' }] }, kind: 'airlock', light_color: '#ff5040' });
   const parts = r.parts;
   for (const [side, z] of [['inner', -r.D / 2 - DECK.wall / 2], ['outer', r.D / 2 + DECK.wall / 2]]) parts.push({ type: 'door', ...(k.rig ? { name: `${k.id}_${side}` } : { open: n(p[`${side}_open`], 0) }), style: side === 'outer' ? 'blast' : 'bulkhead', at: [0, 0, z] });
-  parts.push({ type: 'box', w: r.W * 0.8, h: 0.3, d: r.D * 0.8, at: [0, 0, 0], texture: tx(p, 'hazard', '#d09a28') });
+  parts.push({ type: 'box', w: r.W * 0.8, h: 0.3, d: r.D * 0.8, at: [0, 0, 0], texture: tx(p, 'hazard', 'kit_hazard') });
   return { parts };
 }, '1-cell airlock: inner bulkhead (s) + outer blast door (n), red cycle light; named: doors <name>_inner / <name>_outer with their open clips');
 
 // ---------- vertical circulation ----------
 registerAssembly('ladder', (p) => {
-  const h = n(p.h, DECK.h + DECK.floor), w = n(p.w, 16), T = tx(p, 'texture', '#8a6a2a');
-  const parts = [-1, 1].map((s) => ({ type: 'beam', from: [s * w / 2, 0, 0], to: [s * w / 2, h, 0], s: 1.6, texture: T }));
-  const rungs = Math.max(2, Math.round(h / 10));
+  const h = n(p.h, DECK.h + DECK.floor), w = n(p.w, 16), T = tx(p, 'texture', 'kit_accent_8a6a2a');
+  const parts = [-1, 1].map((s) => ({ type: 'beam', from: [s * w / 2, 0, 0], to: [s * w / 2, h + (p.grab === false ? 0 : 32), 0], s: 1.6, texture: T }));
+  const rungs = Math.max(2, Math.round(h / 9.6)); // 0.3 m rung pitch
   for (let i = 1; i < rungs; i++) parts.push({ type: 'beam', from: [-w / 2, (h * i) / rungs, 0], to: [w / 2, (h * i) / rungs, 0], s: 1.1, texture: T });
+  parts.push({ type: 'marker', kind: 'ladder', at: [0, 0, 0], dir: [0, 0, 1], data: { h, w } });
+  parts.push({ type: 'marker', kind: 'trigger', at: [0, h / 2, 6], dir: [0, 0, 1], data: { trigger: 'ladder', w: w + 8, h: h + 32, d: 24 } });
   return { parts };
-}, 'h?:100,w?:16 (rails + rungs in the xy plane)');
+}, 'h?:100,w?:16,grab?:true (rails + 0.3 m rungs in the xy plane, rails run 1 m past the top as grab bars; ladder marker + trigger for climbing)');
 registerAssembly('lift', (p, k) => {
-  const w = n(p.w, 56), d = n(p.d, 56), travel = n(p.travel, DECK.h + DECK.floor), frame = tx(p, 'frame', '#33373e'), deck = tx(p, 'floor', '#4a4f57');
+  const w = n(p.w, 56), d = n(p.d, 56), travel = n(p.travel, DECK.h + DECK.floor), frame = tx(p, 'frame', 'kit_metal_dark'), deck = tx(p, 'floor', 'kit_deck');
   const N = k.node();
   const parts = [];
   for (const [x, z] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) parts.push({ type: 'beam', from: [x * w / 2, 0, z * d / 2], to: [x * w / 2, travel + DECK.h, z * d / 2], s: 3, texture: frame });
   parts.push({ type: 'box', name: N, w: w - 4, h: 3, d: d - 4, at: [0, -3, 0], texture: deck, insets: [{ face: 'top', rect: [2, 2, w - 8, d - 8], depth: 0.6 }] });
   for (const s of [1, -1]) parts.push({ type: 'beam', from: [s * (w / 2 - 3), 0, -d / 2 + 3], to: [s * (w / 2 - 3), 0, d / 2 - 3], s: 1.5, texture: tx(p, 'rail', '#8a6a2a'), ...(N ? { parent: N } : {}) });
   parts.push({ type: 'light', at: [w / 2 + 2, 60, d / 2 + 2], color: '#ffb040', intensity: 0.3, range: 50, bulb: 1.5 });
+  parts.push({ type: 'marker', kind: 'lift', at: [0, 0, 0], dir: [0, 0, 1], data: { travel, w, d } });
+  parts.push({ type: 'marker', kind: 'trigger', at: [0, 32, 0], dir: [0, 0, 1], data: { trigger: 'lift', w: w - 4, h: 64, d: d - 4 } });
   const clips = N ? { [p.clip ?? `${k.id}_up`]: { keys: [{ t: 0, parts: {} }, { t: n(p.duration, 3), parts: { [N]: { at: [0, travel, 0] } }, ease: 'smooth' }] } } : {};
   return { parts, clips };
 }, 'w?:56,d?:56,travel?:100 (one deck),textures:{frame,floor,rail} -> named: platform node, clip <name>_up');
 
 // ---------- furniture + consoles ----------
 registerAssembly('seat', (p) => {
-  const T = tx(p, 'texture', '#3a3e45'), pad = tx(p, 'pad', '#5a3a2a');
+  const T = tx(p, 'texture', 'kit_metal_dark'), pad = tx(p, 'pad', '#5a3a2a');
   return { parts: [
+    { type: 'marker', kind: 'seat', at: [0, 0, 0], dir: [0, 0, 1], data: { seat: p.id ?? 'seat' } },
     { type: 'cylinder', r: 3, h: 12, segments: 6, texture: T },
     { type: 'box', w: 18, h: 4, d: 18, at: [0, 12, 0], texture: pad, bevel: 1 },
     { type: 'box', w: 18, h: 26, d: 4, at: [0, 14, -8], rotate: [-10, 0, 0], texture: pad, bevel: 1 },
     { type: 'box', w: 10, h: 6, d: 3, at: [0, 41, -12], texture: pad, bevel: 1 },
     ...[1, -1].map((s) => ({ type: 'box', w: 2, h: 3, d: 14, at: [s * 10, 18, 0], texture: T })),
   ] };
-}, 'pilot / crew seat facing +z');
+}, 'pilot / crew seat facing +z, player-sized (seat pan 0.5 m, headrest 1.45 m); seat marker (socket for the seated player, canopy head clearance in walk_check)');
 registerAssembly('console', (p, k) => {
-  const w = n(p.w, 56), screens = Math.max(1, Math.round(n(p.screens, 2))), T = tx(p, 'texture', '#2c3036'), scr = tx(p, 'screen', null);
+  const w = n(p.w, 56), screens = Math.max(1, Math.round(n(p.screens, 2))), T = tx(p, 'texture', 'kit_metal_dark'), scr = tx(p, 'screen', null);
   const parts = [{ type: 'box', w, h: 30, d: 16, texture: T, bevel: 1 }, { type: 'box', w, h: 2, d: 22, at: [0, 30, 3], rotate: [-18, 0, 0], texture: T }];
   const sockets = {}, sw = (w - 6) / screens;
   for (let i = 0; i < screens; i++) {
@@ -198,12 +215,12 @@ registerAssembly('bridge', room('bridge', { cw: 3, cd: 2, light: '#a8c8ff' }, (p
 registerAssembly('engine_room', room('engine_room', { cw: 3, cd: 3, h: 160, light: '#ff9a50' }, (p, k, r) => {
   const R = n(p.core_r, Math.min(r.W, r.D) * 0.14), core = p.core_color ?? '#60c8ff', H = r.H;
   const out = [
-    { type: 'cylinder', r: R * 1.6, h: 10, segments: 12, texture: tx(p, 'metal', '#3a3e45') },
-    { type: 'cylinder', r: R * 1.6, h: 10, segments: 12, at: [0, H - 10, 0], texture: tx(p, 'metal', '#3a3e45') },
+    { type: 'cylinder', r: R * 1.6, h: 10, segments: 12, texture: tx(p, 'metal', 'kit_metal') },
+    { type: 'cylinder', r: R * 1.6, h: 10, segments: 12, at: [0, H - 10, 0], texture: tx(p, 'metal', 'kit_metal') },
     { type: 'cylinder', r: R, h: H - 20, segments: 12, at: [0, 10, 0], ...glow(core) },
     { type: 'cylinder', r: R * 1.08, h: H - 20, segments: 12, at: [0, 10, 0], glass: { opacity: 0.25 }, color: '#a0e0ff' },
-    { type: 'beam', from: [R * 1.35, 10, 0], to: [R * 1.35, H - 10, 0], s: 3, texture: tx(p, 'metal', '#3a3e45'), array: { count: 8, rotate: [0, 45, 0], about: [0, 0, 0] } },
-    { type: 'tube', path: [[0, H * 0.7, 0], [r.W / 2 - 6, H * 0.7, 0], [r.W / 2 - 6, H * 0.7, r.D / 3]], r: 5, sides: 8, texture: tx(p, 'pipe', '#5a5f68'), array: { count: 4, rotate: [0, 90, 0], about: [0, 0, 0] } },
+    { type: 'beam', from: [R * 1.35, 10, 0], to: [R * 1.35, H - 10, 0], s: 3, texture: tx(p, 'metal', 'kit_metal'), array: { count: 8, rotate: [0, 45, 0], about: [0, 0, 0] } },
+    { type: 'tube', path: [[0, H * 0.7, 0], [r.W / 2 - 6, H * 0.7, 0], [r.W / 2 - 6, H * 0.7, r.D / 3]], r: 5, sides: 8, texture: tx(p, 'pipe', 'kit_pipe'), array: { count: 4, rotate: [0, 90, 0], about: [0, 0, 0] } },
     { type: 'tube', path: [[0, H * 0.35, 0], [-r.W / 2 + 10, H * 0.2, -r.D / 2 + 10]], r: 3, sides: 6, ...glow('#ff7a30'), array: { count: 3, rotate: [0, 120, 0], about: [0, 0, 0] } },
     { type: 'light', at: [0, H * 0.5, 0], color: core, intensity: 2.2, range: Math.max(r.W, r.D) * 1.1, bulb: false },
     { type: 'fog_card', w: R * 6, h: H * 0.8, at: [0, H * 0.9, 0], color: core, opacity: 0.18, cross: 3 },
@@ -252,18 +269,18 @@ registerAssembly('armoury', room('armoury', { cw: 2, cd: 2, light: '#ffd0a0' }, 
 
 // ---------- exterior industrial kit ----------
 registerAssembly('tower', (p) => {
-  const h = n(p.h, 320), w = n(p.w, 32), T = tx(p, 'texture', '#5a5f68'), lv = Math.max(0, Math.round(n(p.platforms, 2)));
+  const h = n(p.h, 320), w = n(p.w, 32), T = tx(p, 'texture', 'kit_metal'), lv = Math.max(0, Math.round(n(p.platforms, 2)));
   const parts = p.style === 'solid' ? [{ type: 'cylinder', r_bottom: w / 2, r_top: w * 0.35, h, segments: 8, texture: T }] : [{ type: 'truss', from: [0, 0, 0], to: [0, h, 0], w, h: w, bay: w, style: 'x', chord: 2.4, brace: 1.4, texture: T }];
-  for (let i = 1; i <= lv; i++) parts.push({ type: 'box', w: w * 2.2, h: 3, d: w * 2.2, at: [0, (h * i) / (lv + 1), 0], texture: tx(p, 'deck', '#4a4f57') }, { type: 'catwalk', len: w * 2.2, w: 6, at: [w * 1.1 - 3, (h * i) / (lv + 1) + 3, 0], rails: 'left', texture: '#3a3e45' });
+  for (let i = 1; i <= lv; i++) parts.push({ type: 'box', w: w * 2.2, h: 3, d: w * 2.2, at: [0, (h * i) / (lv + 1), 0], texture: tx(p, 'deck', 'kit_deck') }, { type: 'catwalk', len: w * 2.2, w: 6, at: [w * 1.1 - 3, (h * i) / (lv + 1) + 3, 0], rails: 'left', texture: '#3a3e45' });
   if (p.beacon !== false) parts.push({ type: 'light', at: [0, h + 4, 0], color: '#ff3030', intensity: 0.8, range: 120, bulb: 3 });
   parts.push({ type: 'ladder', at: [0, 0, w / 2 + 2], h });
   return { parts };
 }, 'h?:320,w?:32,style?:lattice|solid,platforms?:2,beacon?:true');
 registerAssembly('dish', (p, k) => {
-  const r = n(p.r, 64), depth = n(p.depth, r * 0.3), tilt = n(p.tilt, 35), mh = n(p.mount_h, r * 0.8), T = tx(p, 'texture', '#a8acb0');
+  const r = n(p.r, 64), depth = n(p.depth, r * 0.3), tilt = n(p.tilt, 35), mh = n(p.mount_h, r * 0.8), T = tx(p, 'texture', 'kit_hull_a8acb0');
   const prof = [...Array(7).keys()].map((i) => { const x = (r * i) / 6; return [x, (depth * x * x) / (r * r)]; });
   const N = k.node();
-  const parts = [{ type: 'cylinder', r: r * 0.18, h: mh, segments: 8, texture: tx(p, 'mount', '#4b5059') }];
+  const parts = [{ type: 'cylinder', r: r * 0.18, h: mh, segments: 8, texture: tx(p, 'mount', 'kit_metal') }];
   parts.push({ type: 'revolve', name: N, profile: prof, segments: 16, inside: true, texture: T, at: [0, mh, 0], rotate: [tilt, 0, 0] });
   parts.push({ type: 'beam', from: [0, 0, 0], to: [0, depth * 2.2, 0], s: 1.5, texture: '#3a3e45', at: [0, mh, 0], rotate: [tilt, 0, 0], ...(N ? { parent: N } : {}) });
   parts.push({ type: 'cylinder', r: 2.5, h: 5, segments: 6, at: [0, mh, 0], pivot: [0, -depth * 2.2, 0], rotate: [tilt, 0, 0], ...(N ? { parent: N } : {}), color: '#2a2c30' });
@@ -271,27 +288,27 @@ registerAssembly('dish', (p, k) => {
   return { parts, clips };
 }, 'r?:64,depth?,tilt?:35,mount_h?, textures:{texture,mount} (parabolic comms dish; named: clip <name>_track)');
 registerAssembly('tank', (p) => {
-  const r = n(p.r, 40), h = n(p.h, 96), style = p.style ?? 'cylinder', T = tx(p, 'texture', '#8a8e92'), leg = n(p.leg_h, style === 'sphere' ? r * 0.8 : 8);
+  const r = n(p.r, 40), h = n(p.h, 96), style = p.style ?? 'cylinder', T = tx(p, 'texture', 'kit_hull_8a8e92'), leg = n(p.leg_h, style === 'sphere' ? r * 0.8 : 8);
   const parts = [];
   if (style === 'sphere') parts.push({ type: 'dome', r, sphere: true, rings: 4, segments: 14, at: [0, leg + r, 0], texture: T });
   else if (style === 'capsule') parts.push({ type: 'revolve', profile: [[0, 0], [r * 0.7, r * 0.08], [r, r * 0.4], [r, h - r * 0.4], [r * 0.7, h - r * 0.08], [0, h]], segments: 14, at: [0, leg, 0], texture: T });
   else parts.push({ type: 'cylinder', r, h, segments: 14, at: [0, leg, 0], texture: T }, { type: 'dome', r, h: r * 0.3, at: [0, leg + h, 0], segments: 14, texture: T, base: false });
   const legs = Math.max(0, Math.round(n(p.legs, 4)));
   for (let i = 0; i < legs; i++) { const a = (2 * Math.PI * (i + 0.5)) / legs; parts.push({ type: 'beam', from: [Math.sin(a) * r * 0.9, 0, Math.cos(a) * r * 0.9], to: [Math.sin(a) * r * 0.75, leg + (style === 'sphere' ? r : 6), Math.cos(a) * r * 0.75], s: 4, texture: '#4b5059' }); }
-  if (style !== 'sphere') for (let b = 1; b <= Math.round(n(p.bands, 2)); b++) parts.push({ type: 'cylinder', r: r + 1, h: 3, segments: 14, at: [0, leg + (h * b) / (Math.round(n(p.bands, 2)) + 1), 0], color: tx(p, 'band', '#d09a28') });
+  if (style !== 'sphere') for (let b = 1; b <= Math.round(n(p.bands, 2)); b++) parts.push({ type: 'cylinder', r: r + 1, h: 3, segments: 14, at: [0, leg + (h * b) / (Math.round(n(p.bands, 2)) + 1), 0], color: tx(p, 'band', 'kit_hazard') });
   if (p.ladder !== false && style !== 'sphere') parts.push({ type: 'ladder', at: [0, leg, r + 2], h });
   return { parts };
 }, 'r?:40,h?:96,style?:cylinder|sphere|capsule,legs?:4,bands?:2,ladder?:true,textures:{texture,band}');
 registerAssembly('silo', (p) => {
-  const r = n(p.r, 48), h = n(p.h, 240), T = tx(p, 'texture', '#77736b');
-  return { parts: [{ type: 'cylinder', r, h, segments: 16, texture: T }, { type: 'cone', r: r + 2, h: r * 0.5, segments: 16, at: [0, h, 0], texture: tx(p, 'roof', '#5a5f68') }, { type: 'ladder', at: [0, 0, r + 2], h }, { type: 'catwalk', len: r * 1.2, w: 16, at: [r + 8, h * 0.6, 0], rails: 'left' }, { type: 'light', at: [0, h + r * 0.5 + 4, 0], color: '#ff3030', intensity: 0.5, range: 90, bulb: 2 }] };
+  const r = n(p.r, 48), h = n(p.h, 240), T = tx(p, 'texture', 'kit_concrete');
+  return { parts: [{ type: 'cylinder', r, h, segments: 16, texture: T }, { type: 'cone', r: r + 2, h: r * 0.5, segments: 16, at: [0, h, 0], texture: tx(p, 'roof', 'kit_metal') }, { type: 'ladder', at: [0, 0, r + 2], h }, { type: 'catwalk', len: r * 1.2, w: 16, at: [r + 8, h * 0.6, 0], rails: 'left' }, { type: 'light', at: [0, h + r * 0.5 + 4, 0], color: '#ff3030', intensity: 0.5, range: 90, bulb: 2 }] };
 }, 'r?:48,h?:240 (silo with cone roof, ladder, catwalk, beacon)');
 registerAssembly('crane', (p, k) => {
-  const h = n(p.h, 240), boom = n(p.boom, 200), T = tx(p, 'texture', '#c89a28'), N = k.node();
+  const h = n(p.h, 240), boom = n(p.boom, 200), T = tx(p, 'texture', 'kit_accent_c89a28'), N = k.node();
   const parts = [{ type: 'truss', from: [0, 0, 0], to: [0, h, 0], w: 16, h: 16, bay: 16, style: 'warren', chord: 2, brace: 1.2, texture: T }];
   parts.push({ type: 'truss', name: N, from: [0, h + 8, -boom * 0.3], to: [0, h + 8, boom], w: 10, h: 14, bay: 16, section: 'tri', chord: 1.8, brace: 1, texture: T });
   const at = (q) => (N ? { parent: N, ...q } : q);
-  parts.push({ type: 'box', w: 14, h: 12, d: 14, at: [0, h - 2, 10], texture: tx(p, 'cab', '#3a3e45'), ...(N ? { parent: N } : {}) });
+  parts.push({ type: 'box', w: 14, h: 12, d: 14, at: [0, h - 2, 10], texture: tx(p, 'cab', 'kit_metal_dark'), ...(N ? { parent: N } : {}) });
   parts.push({ type: 'box', w: 18, h: 14, d: 20, at: [0, h - 4, -boom * 0.3], color: '#55585e', ...(N ? { parent: N } : {}) });
   parts.push({ type: 'tube', from: [0, h + 2, boom * 0.8], to: [0, h * 0.4, boom * 0.8], r: 0.5, sides: 4, color: '#1e2024', ...at({}) });
   parts.push({ type: 'box', w: 8, h: 6, d: 8, at: [0, h * 0.4 - 6, boom * 0.8], color: '#d09a28', ...at({}) });
@@ -300,7 +317,7 @@ registerAssembly('crane', (p, k) => {
   return { parts, clips };
 }, 'h?:240,boom?:200 (tower crane: lattice mast, jib, counterweight, cab, hook cable; named: clip <name>_slew)');
 registerAssembly('gantry', (p) => {
-  const span = n(p.span, 192), h = n(p.h, 128), T = tx(p, 'texture', '#c89a28');
+  const span = n(p.span, 192), h = n(p.h, 128), T = tx(p, 'texture', 'kit_accent_c89a28');
   return { parts: [
     { type: 'truss', from: [-span / 2, 0, 0], to: [-span / 2, h, 0], w: 16, bay: 16, texture: T },
     { type: 'truss', from: [span / 2, 0, 0], to: [span / 2, h, 0], w: 16, bay: 16, texture: T },
@@ -309,7 +326,7 @@ registerAssembly('gantry', (p) => {
   ] };
 }, 'span?:192,h?:128,trolley?:0 (gantry: two lattice legs + beam + trolley)');
 registerAssembly('pipeline', (p) => {
-  const path = p.path ?? [[0, 24, -128], [0, 24, 128]], r = n(p.r, 6), every = n(p.supports, 64), T = tx(p, 'texture', '#6a6f78');
+  const path = p.path ?? [[0, 24, -128], [0, 24, 128]], r = n(p.r, 6), every = n(p.supports, 64), T = tx(p, 'texture', 'kit_pipe');
   const parts = [{ type: 'tube', path, r, sides: 8, texture: T, curve: p.curve }];
   for (let i = 0; i < path.length - 1; i++) {
     const a = path[i], b = path[i + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]), k2 = Math.max(1, Math.round(L / every));
@@ -318,7 +335,7 @@ registerAssembly('pipeline', (p) => {
   return { parts };
 }, 'path:[[x,y,z],..],r?:6,supports?:64 px,curve? (pipe + support legs + flanges)');
 registerAssembly('scaffold', (p) => {
-  const w = n(p.w, 96), d = n(p.d, 32), h = n(p.h, 192), levels = Math.max(1, Math.round(n(p.levels, 3))), T = tx(p, 'texture', '#8a8e92');
+  const w = n(p.w, 96), d = n(p.d, 32), h = n(p.h, 192), levels = Math.max(1, Math.round(n(p.levels, 3))), T = tx(p, 'texture', 'kit_metal');
   const parts = [];
   for (const [x, z] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) parts.push({ type: 'beam', from: [x * w / 2, 0, z * d / 2], to: [x * w / 2, h, z * d / 2], s: 2, texture: T });
   for (let i = 1; i <= levels; i++) { const y = (h * i) / levels; parts.push({ type: 'catwalk', len: w, w: d, at: [0, y, 0], rotate: [0, 90, 0], rails: 'both' }); }
@@ -330,14 +347,14 @@ registerAssembly('hangar_shell', (p) => {
   const w = n(p.w, 384), d = n(p.d, 512), h = n(p.h, 192), th = n(p.thick, 8), segs = Math.max(4, Math.round(n(p.segments, 10)));
   const arc = (r, rev) => { const pts = []; for (let i = 0; i <= segs; i++) { const a = Math.PI * (i / segs); pts.push([r2(-Math.cos(a) * r * (w / 2) / (w / 2)), r2(Math.sin(a) * r * (h / (w / 2)))]); } return rev ? pts.reverse() : pts; };
   const outer = arc(w / 2), inner = arc(w / 2 - th, true);
-  const parts = [{ type: 'shape', points: [...outer, ...inner], d, plane: 'xy', texture: tx(p, 'texture', '#6a6f78'), material: 'painted_metal' }];
+  const parts = [{ type: 'shape', points: [...outer, ...inner], d, plane: 'xy', texture: tx(p, 'texture', 'kit_hull'), material: 'painted_metal' }];
   for (let i = 0; i <= 4; i++) parts.push({ type: 'tube', path: arc(w / 2 + 1).map(([x, y]) => [x, y, -d / 2 + (d * i) / 4]), r: 3, sides: 4, texture: '#3a3e45', caps: false });
   parts.push({ type: 'box', w: w * 0.6, h: 3, d: 6, at: [0, h * 0.82, d / 2], ...glow('#ffd890') });
   parts.push({ type: 'light', at: [0, h * 0.8, 0], color: '#d8e8ff', intensity: 1.2, range: w, bulb: false });
   return { parts };
 }, 'w?:384,d?:512,h?:192,thick?:8,segments?:10 (arched hangar shell open at both ends, ribs, door light bar)');
 registerAssembly('hab_module', (p) => {
-  const L = n(p.len, 192), r = n(p.r, 48), T = tx(p, 'texture', '#c8c4b8');
+  const L = n(p.len, 192), r = n(p.r, 48), T = tx(p, 'texture', 'kit_hull_c8c4b8');
   const parts = [{ type: 'hull', length: L, width: r * 2, height: r * 2, plan: [[0, r * 0.8], [0.08, r], [0.92, r], [1, r * 0.8]], profile: [[0, r * 1.8 + 20, 20 + r * 0.2], [0.08, r * 2 + 20, 20], [0.92, r * 2 + 20, 20], [1, r * 1.8 + 20, 20 + r * 0.2]], section: 2, rings: 6, segments: 12, panel_lines: { rings: [0.33, 0.66], width: 2, depth: 1 }, texture: T, rotate: [0, 90, 0] }];
   parts.push({ type: 'box', w: L * 0.7, h: 4, d: 1, at: [0, 20 + r * 1.25, r - 2], ...glow(p.window ?? '#ffd890') }, { type: 'box', w: L * 0.7, h: 4, d: 1, at: [0, 20 + r * 1.25, -r + 2], ...glow(p.window ?? '#ffd890') });
   for (const x of [-L * 0.35, L * 0.35]) for (const z of [r * 0.6, -r * 0.6]) parts.push({ type: 'beam', from: [x, 0, z], to: [x, 24, z * 0.7], s: 4, texture: '#4b5059' });
@@ -346,7 +363,7 @@ registerAssembly('hab_module', (p) => {
 }, 'len?:192,r?:48,window? (colony habitat module: cylinder on legs, window bands, airlock porch)');
 registerAssembly('rock_platform', (p, k) => {
   const w = n(p.w, 256), d = n(p.d, 192), h = n(p.h, 96), seed = Number(p.seed ?? 1);
-  const parts = [{ type: 'rock', w: w * 1.15, h: h * 1.3, d: d * 1.15, at: [0, -h * 1.1, 0], seed, detail: 2, rough: 0.3, texture: tx(p, 'rock', '#5d5650') }];
+  const parts = [{ type: 'rock', w: w * 1.15, h: h * 1.3, d: d * 1.15, at: [0, -h * 1.1, 0], seed, detail: 2, rough: 0.3, texture: tx(p, 'rock', 'kit_rock') }];
   parts.push({ type: 'box', w, h: 6, d, at: [0, 0, 0], texture: tx(p, 'deck', '#4a4f57'), material: 'painted_metal' });
   for (const [x, z] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) parts.push({ type: 'beam', from: [x * w * 0.45, -h * 0.5, z * d * 0.45], to: [x * w * 0.4, 0, z * d * 0.4], s: 6, texture: '#4b5059' });
   for (const [side, len, at, rot] of [['n', w, [0, 6, d / 2 - 2], 90], ['s', w, [0, 6, -d / 2 + 2], 90], ['e', d, [w / 2 - 2, 6, 0], 0], ['w', d, [-w / 2 + 2, 6, 0], 0]]) if (!(p.open || []).includes(side)) parts.push({ type: 'catwalk', len, w: 4, at, rotate: [0, rot, 0], rails: 'left', texture: '#3a3e45', kick: false });
@@ -356,7 +373,7 @@ registerAssembly('rock_platform', (p, k) => {
 
 // ---------- interior city kit ----------
 registerAssembly('shaft', (p) => {
-  const R = n(p.r, 256), depth = n(p.depth, 768), levels = Math.max(1, Math.round(n(p.levels, 3))), sides = Math.max(8, Math.round(n(p.sides, 16))), T = tx(p, 'texture', '#55524c');
+  const R = n(p.r, 256), depth = n(p.depth, 768), levels = Math.max(1, Math.round(n(p.levels, 3))), sides = Math.max(8, Math.round(n(p.sides, 16))), T = tx(p, 'texture', 'kit_concrete_55524c');
   const parts = [{ type: 'revolve', profile: [[R, 0], [R, depth]], segments: sides, smooth: false, inside: 'only', texture: T }];
   for (let i = 0; i < levels; i++) {
     const y = r2((depth * (i + 0.6)) / (levels + 0.4)), wk = n(p.walk_w, 48);
@@ -368,7 +385,7 @@ registerAssembly('shaft', (p) => {
   return { parts };
 }, 'r?:256,depth?:768,levels?:3,sides?:16,walk_w?:48 (vertical city shaft: inward wall, ring walkways with rails, level lights, light shaft)');
 registerAssembly('atrium', (p) => {
-  const w = n(p.w, 384), d = n(p.d, 384), h = n(p.h, 480), levels = Math.max(1, Math.round(n(p.levels, 3))), T = tx(p, 'texture', '#55524c'), bal = n(p.balcony, 48);
+  const w = n(p.w, 384), d = n(p.d, 384), h = n(p.h, 480), levels = Math.max(1, Math.round(n(p.levels, 3))), T = tx(p, 'texture', 'kit_concrete_55524c'), bal = n(p.balcony, 48);
   const parts = [];
   for (const [x, z, ww, dd] of [[0, d / 2, w, 8], [0, -d / 2, w, 8], [w / 2, 0, 8, d], [-w / 2, 0, 8, d]]) parts.push({ type: 'box', w: ww, h, d: dd, at: [x, 0, z], texture: T });
   for (let i = 1; i <= levels; i++) {
@@ -379,13 +396,13 @@ registerAssembly('atrium', (p) => {
 }, 'w?:384,d?:384,h?:480,levels?:3,balcony?:48 (rectangular atrium well with balcony levels)');
 registerAssembly('bridge_walk', (p) => {
   const L = n(p.len, 192), w = n(p.w, 40);
-  return { parts: [{ type: 'catwalk', len: L, w }, { type: 'truss', from: [0, -14, -L / 2], to: [0, -14, L / 2], w: w * 0.8, h: 22, bay: 24, style: 'warren', chord: 2, brace: 1.2, texture: tx(p, 'texture', '#4b5059') }] };
+  return { parts: [{ type: 'catwalk', len: L, w }, { type: 'truss', from: [0, -14, -L / 2], to: [0, -14, L / 2], w: w * 0.8, h: 22, bay: 24, style: 'warren', chord: 2, brace: 1.2, texture: tx(p, 'texture', 'kit_metal') }] };
 }, 'len?:192,w?:40 (walkway bridge: grated deck over a truss)');
 registerAssembly('lift_shaft', (p, k) => {
-  const h = n(p.h, 480), w = n(p.w, 64), T = tx(p, 'texture', '#4b5059'), N = k.node(), ride = n(p.ride, h * 0.7);
+  const h = n(p.h, 480), w = n(p.w, 64), T = tx(p, 'texture', 'kit_metal'), N = k.node(), ride = n(p.ride, h * 0.7);
   const parts = [{ type: 'truss', from: [0, 0, 0], to: [0, h, 0], w, h: w, bay: w, style: 'x', chord: 3, brace: 1.5, texture: T }];
   parts.push({ type: 'box', w: w + 12, h: 8, d: w + 12, at: [0, h, 0], texture: T });
-  parts.push({ type: 'box', name: N, w: w - 10, h: 2, d: w - 10, at: [0, 8, 0], texture: tx(p, 'floor', '#3a3e45') });
+  parts.push({ type: 'box', name: N, w: w - 10, h: 2, d: w - 10, at: [0, 8, 0], texture: tx(p, 'floor', 'kit_grate') });
   const cage = N ? { parent: N } : {};
   for (const [x, z] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) parts.push({ type: 'beam', from: [x * (w / 2 - 5), 8, z * (w / 2 - 5)], to: [x * (w / 2 - 5), 70, z * (w / 2 - 5)], s: 1.5, texture: '#8a6a2a', ...cage });
   parts.push({ type: 'box', w: w - 10, h: 2, d: w - 10, at: [0, 70, 0], texture: T, ...cage });
@@ -405,12 +422,12 @@ registerAssembly('cable_web', (p, k) => {
   return { parts };
 }, 'from,to,count?:6,sag?:24,spread?:32,seed?,lamps?:0 (sagging cable bundle between two anchors; lamps hang from it)');
 registerAssembly('pipe_wall', (p, k) => {
-  const w = n(p.w, 128), h = n(p.h, 96), count = Math.max(1, Math.round(n(p.count, 6))), T = tx(p, 'texture', '#3a3e45');
+  const w = n(p.w, 128), h = n(p.h, 96), count = Math.max(1, Math.round(n(p.count, 6))), T = tx(p, 'texture', 'kit_wall');
   const parts = [{ type: 'box', w, h, d: 4, at: [0, 0, -2], texture: T }];
   for (let i = 0; i < count; i++) {
     const r = r2(1.5 + k.rnd() * 3.5), x = r2(-w / 2 + ((i + 0.5) * w) / count + (k.rnd() - 0.5) * 6);
     const bend = k.rnd() > 0.6;
-    parts.push({ type: 'tube', path: bend ? [[x, 0, r + 1], [x, h * 0.6, r + 1], [x + 12, h * 0.6 + 8, r + 1], [x + 12, h, r + 1]] : [[x, 0, r + 1], [x, h, r + 1]], r, sides: 6, texture: tx(p, 'pipe', '#6a6f78'), caps: false });
+    parts.push({ type: 'tube', path: bend ? [[x, 0, r + 1], [x, h * 0.6, r + 1], [x + 12, h * 0.6 + 8, r + 1], [x + 12, h, r + 1]] : [[x, 0, r + 1], [x, h, r + 1]], r, sides: 6, texture: tx(p, 'pipe', 'kit_pipe'), caps: false });
     if (k.rnd() > 0.5) parts.push({ type: 'cylinder', r: r * 1.5, h: 3, segments: 6, at: [x, r2(h * (0.2 + k.rnd() * 0.3)), r + 1], color: '#a03028' });
   }
   parts.push({ type: 'light', at: [w / 2 - 6, h - 10, 6], color: '#ff6a30', intensity: 0.3, range: 60, bulb: 1.5 });
@@ -418,10 +435,17 @@ registerAssembly('pipe_wall', (p, k) => {
 }, 'w?:128,h?:96,count?:6,seed? (backing wall with vertical / bent pipes and valves)');
 registerAssembly('market_stall', (p, k) => {
   const w = n(p.w, 64), d = n(p.d, 48), h = n(p.h, 72), aw = p.awning ?? ['#a03028', '#2f6a5a', '#c89a28', '#4a3a7a'][Math.floor(k.rnd() * 4)];
-  const parts = [{ type: 'box', w, h: 30, d: 14, at: [0, 0, d / 2 - 7], texture: tx(p, 'counter', '#5a4a3a'), bevel: 1 }];
+  const parts = [{ type: 'box', w, h: 30, d: 14, at: [0, 0, d / 2 - 7], texture: tx(p, 'counter', 'kit_crate_5a4a3a'), bevel: 1 }];
   for (const [x, z] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) parts.push({ type: 'beam', from: [x * w / 2, 0, z * d / 2], to: [x * w / 2, h, z * d / 2], s: 2, texture: '#3a3e45' });
-  parts.push({ type: 'wedge', w: w + 8, h: 10, d: d + 12, top_d: 0, at: [0, h, 0], color: aw });
-  for (let i = 0; i < 3; i++) parts.push({ type: 'box', w: r2(10 + k.rnd() * 8), h: r2(8 + k.rnd() * 8), d: r2(10 + k.rnd() * 6), at: [r2((k.rnd() - 0.5) * w * 0.7), 0, r2(-d / 2 + 10 + k.rnd() * 10)], color: ['#6a5040', '#4a5a3a', '#5a5a60'][i] });
+  const awT = /^#[0-9a-fA-F]{6}$/.test(aw) ? `kit_fabric_${aw.slice(1).toLowerCase()}` : aw;
+  parts.push({ type: 'wedge', w: w + 8, h: 10, d: d + 12, top_d: 0, at: [0, h, 0], texture: awT, material: 'fabric' });
+  // scalloped valance under the awning front
+  parts.push({ type: 'box', w: w + 8, h: 5, d: 0.6, at: [0, h - 5, (d + 12) / 2], texture: awT, material: 'fabric' });
+  // clutter: crates, barrel, stools, a terminal on the counter
+  const cl = ['crate', 'barrel', 'crate'];
+  for (let i = 0; i < 3; i++) parts.push({ type: cl[i], at: [r2((k.rnd() - 0.5) * w * 0.7), 0, r2(-d / 2 + 10 + k.rnd() * 10)], size: r2(10 + k.rnd() * 6), seed: i + 1, color: ['#6a5040', '#2f5a7a', '#5d6a3c'][i] });
+  parts.push({ type: 'stool', at: [r2(-w * 0.22), 0, r2(d / 2 + 10)] }, { type: 'stool', at: [r2(w * 0.22), 0, r2(d / 2 + 10)] });
+  if (k.rnd() > 0.4) parts.push({ type: 'terminal', at: [r2(w * 0.3), 30, r2(d / 2 - 7)], turn: 0, small: true });
   parts.push({ type: 'light', at: [0, h - 6, 0], color: p.lamp ?? '#ffb060', intensity: 0.7, range: 80, bulb: 2.5 });
   if (p.sign !== false) parts.push(k.rnd() > 0.5 || p.neon ? { type: 'neon', text: String(p.sign ?? pickText(k)), px: 2, r: 0.6, color: p.sign_color ?? ['#ff3fd0', '#40e0ff', '#ffd040', '#60ff80'][Math.floor(k.rnd() * 4)], at: [0, h + 12, d / 2 + 2] } : { type: 'sign', text: String(p.sign ?? pickText(k)), h: 12, color: '#ffd040', at: [0, h + 12, d / 2 + 2] });
   return { parts };
@@ -430,9 +454,10 @@ const STALL_WORDS = ['NOODLE', 'FIX', 'AIR', 'PARTS', 'BAR', 'SCRAP', 'TEA', 'CH
 const pickText = (k) => STALL_WORDS[Math.floor(k.rnd() * STALL_WORDS.length)];
 registerAssembly('sign_frame', (p, k) => {
   const style = p.style ?? 'neon', w = n(p.w, 64), h = n(p.h, 24), text = String(p.text ?? 'OPEN'), c = p.color ?? '#ff3fd0';
-  const parts = [{ type: 'beam', from: [0, h + 4, 0], to: [0, h + 4, -16], s: 2, texture: '#2a2c31' }];
+  const parts = [{ type: 'beam', from: [0, h + 4, 0], to: [0, h + 4, -16], s: 2, texture: 'kit_metal_dark' }];
+  if (p.hang) parts.push({ type: 'tube', from: [-w / 3, h + 4, 0], to: [-w / 3, h + 4 + Number(p.hang), 0], r: 0.4, sides: 4, color: '#18191c' }, { type: 'tube', from: [w / 3, h + 4, 0], to: [w / 3, h + 4 + Number(p.hang), 0], r: 0.4, sides: 4, color: '#18191c' });
   if (style === 'neon') parts.push({ type: 'neon', text, px: n(p.px, Math.max(1.5, h / 9)), color: c, at: [0, 2, 1] });
   else if (style === 'blade') parts.push({ type: 'sign', text, h: w, d: 4, color: c, double: true, at: [0, -w / 2 + h, 0], rotate: [0, 90, 90] });
   else parts.push({ type: 'sign', text, h, w, color: c });
   return { parts };
-}, 'text,style?:neon|box|blade,w?,h?,color?,px? (bracket + neon tube text / lit sign box / vertical blade sign)');
+}, 'text,style?:neon|box|blade,w?,h?,color?,px?,hang?:<px> (hanging cables up to a ceiling) (bracket + neon tube text / lit sign box / vertical blade sign)');
