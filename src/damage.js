@@ -496,6 +496,7 @@ function evalAt(fs, p, n, amount, wearD) {
 // ---------- per-face charts ----------
 /** Planar chart per face on its rest positions (faceBasis), shelf-packed with a 1-texel gutter. */
 function packCharts(faces, { texel = 1, maxSize = 1024, blank = true } = {}) {
+  if (!(Number.isFinite(texel) && texel > 0)) throw new Error('damage texel must be a finite number > 0 (px per mask texel)');
   const charts = [];
   for (const F of faces) {
     const { t, b } = faceBasis(F.rec.n);
@@ -516,6 +517,7 @@ function packCharts(faces, { texel = 1, maxSize = 1024, blank = true } = {}) {
     if (W <= maxSize && H <= maxSize) break;
     tx *= 1.5;
   }
+  if (W > maxSize || H > maxSize) throw new Error(`damage mask: the charts need ${W}x${H} px, over max_size ${maxSize}: a larger texel or max_size`);
   for (const c of charts) for (const v of c.F.V) v.cu = [(c.x + 1 + (dot(v.r, c.t) - c.s0) / tx) / W, (c.y + 1 + (dot(v.r, c.b) - c.q0) / tx) / H];
   return { charts, W, H, texel: tx, blankUV: [2 / W, 2 / H] };
 }

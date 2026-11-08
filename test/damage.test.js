@@ -347,3 +347,21 @@ test('roblox damage profile: the intact MeshPart is capped at 20k triangles and 
   assert.equal(man.states[0].simplified_for_roblox, true);
 });
 
+test('damage export validates texel / max_size / lods / lod_screen / mode before writing anything', () => {
+  const e = kit(), dir = tmp(), file = path.join(dir, 'crate.glb');
+  e.run('model_export', { name: 'crate', path: file });
+  const snap = () => Object.fromEntries(fs.readdirSync(dir).map((f) => [f, fs.readFileSync(path.join(dir, f)).toString('base64')]));
+  const before = snap();
+  const bad = [
+    [{ damage: { texel: 0 } }, /texel/], [{ damage: { texel: -1 } }, /texel/], [{ damage: { texel: 0.01 } }, /texel/], [{ damage: { texel: 'x' } }, /texel/],
+    [{ damage: { max_size: 16384 } }, /max_size/], [{ damage: { max_size: 100.5 } }, /max_size/], [{ damage: { max_size: 8 } }, /max_size/],
+    [{ damage: { lods: [1, 0.5, 0.8] } }, /decrease/], [{ damage: { lods: [1, 0.5] }, lod_screen: { height: 'x' } }, /lod_screen/],
+    [{ damage: { mode: 'nope' } }, /damage.mode/], [{ damage: { profile: 'unreal' } }, /damage.profile/],
+    [{ damage: { texel: 0 }, profile: 'three' }, /texel/],
+  ];
+  for (const [args, re] of bad) assert.throws(() => e.run('model_export', { name: 'crate', path: file, ...args }), re, JSON.stringify(args));
+  assert.deepEqual(snap(), before, 'a rejected damage export writes nothing');
+  const ok = e.run('model_export', { name: 'crate', path: file, damage: { texel: 2, max_size: 256 } });
+  assert.ok(ok.damage.mask.split('x').every((v) => Number(v) <= 256), ok.damage.mask);
+});
+

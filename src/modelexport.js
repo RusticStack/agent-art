@@ -88,7 +88,7 @@ function gpuNode(name, meshIndex, it, extras) {
 const flatGpu = (gpu) => { const m = new Mesh(); for (const it of gpu || []) for (const M of it.mats) m.add(it.mesh.clone().transform(M)); return m; };
 
 /** lods:[1, 0.5, 0.2] (first = 1 = LOD0) -> ratios. */
-function normLods(v) {
+export function normLods(v) {
   if (!v) return null;
   const list = v === true ? [1, 0.5, 0.2] : v;
   if (!Array.isArray(list) || list.length < 2 || list.some((x) => !(Number(x) > 0 && Number(x) <= 1))) throw new Error('lods must be a list of triangle ratios 0..1, first 1 = LOD0, e.g. [1, 0.5, 0.2]');
@@ -96,6 +96,12 @@ function normLods(v) {
   for (let i = 1; i < r.length; i++) if (!(r[i] < r[i - 1])) throw new Error('lods ratios must decrease (e.g. [1, 0.5, 0.2])');
   if (r[0] !== 1) r.unshift(1);
   return r;
+}
+/** lod_screen {height?:720, fov?:70, px?:1} -> validated numbers (LOD switch distances). */
+export function normLodScreen(v) {
+  const screen = { height: Number(v?.height ?? 720), fov: Number(v?.fov ?? 70), px: Number(v?.px ?? 1) };
+  if (!(screen.height > 0 && screen.fov > 0 && screen.fov < 180 && screen.px > 0 && Number.isFinite(screen.height) && Number.isFinite(screen.px))) throw new Error('lod_screen must be {height?:720 px > 0, fov?:70 deg (0..180), px?:1 > 0}');
+  return screen;
 }
 const unitsBox = (b, scale) => ({ min: b.min.map((v) => f6(v / scale)), max: b.max.map((v) => f6(v / scale)), size: b.max.map((v, i) => f6((v - b.min[i]) / scale)) });
 
@@ -112,8 +118,7 @@ export function exportExtras(engine, def, built, a, { scale, file, info, meshes,
   const bent = !!(a.bake_ao && typeof a.bake_ao === 'object' && a.bake_ao.bent);
   if (bent && ao) ao.bent = true;
   const cullSpec = a.cull ?? def.cull;
-  const screen = { height: Number(a.lod_screen?.height ?? 720), fov: Number(a.lod_screen?.fov ?? 70), px: Number(a.lod_screen?.px ?? 1) };
-  if (!(screen.height > 0 && screen.fov > 0 && screen.fov < 180 && screen.px > 0)) throw new Error('lod_screen must be {height?:720 px > 0, fov?:70 deg (0..180), px?:1 > 0}');
+  const screen = normLodScreen(a.lod_screen);
   const root = built.mesh;
   const base = file.replace(/\.glb$/i, '');
   if (info || a.instances) {

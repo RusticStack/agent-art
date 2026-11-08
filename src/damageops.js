@@ -15,6 +15,7 @@ import { expandDef } from './kitparts.js';
 import { exportV2, finishV2 } from './matops.js';
 import { ROBUST_THRESHOLD } from './csg.js';
 import { simplifyMesh, switchDistance } from './lod.js';
+import { normLods, normLodScreen } from './modelexport.js';
 
 const f6 = (v) => +(+v).toFixed(6);
 const groupsOf = (mesh) => [...mesh.groups.values()].filter((g) => g.idx.length);
@@ -183,14 +184,6 @@ export function damageOps({ getModel, build, saveModel }) {
 }
 
 // ---------- export ----------
-function normLods(v) {
-  if (!v) return null;
-  const list = v === true ? [1, 0.5, 0.2] : v;
-  if (!Array.isArray(list) || list.length < 2 || list.some((x) => !(Number(x) > 0 && Number(x) <= 1))) throw new Error('lods must be a list of triangle ratios 0..1, first 1 = LOD0, e.g. [1, 0.5, 0.2]');
-  const r = list.map(Number);
-  if (r[0] !== 1) r.unshift(1);
-  return r;
-}
 /** Rotation (quaternion) taking -Z to dir. */
 function quatTo(dir) {
   const a = [0, 0, -1], d = dir, c = a[0] * d[0] + a[1] * d[1] + a[2] * d[2];
@@ -214,6 +207,10 @@ export function wantsDamage(def, a) {
  */
 export function damageExport(engine, def, built, a, { file, scale }) {
   const o = a.damage && typeof a.damage === 'object' ? a.damage : {};
+  const texel = o.texel === undefined ? undefined : Number(o.texel);
+  if (texel !== undefined && !(Number.isFinite(texel) && texel >= 0.05 && texel <= 64)) throw new Error('damage.texel must be a number 0.05..64 (model px per mask texel, default 1)');
+  const maxSize = o.max_size === undefined ? undefined : Number(o.max_size);
+  if (maxSize !== undefined && !(Number.isInteger(maxSize) && maxSize >= 16 && maxSize <= 2048)) throw new Error('damage.max_size must be an integer 16..2048 (mask atlas px, default 1024)');
   const mode = o.mode ?? 'nodes';
   if (!['nodes', 'files', 'blend'].includes(mode)) throw new Error('damage.mode must be nodes (one .damage.glb with state nodes), files (one glb per state) or blend (the intact blend mesh + masks only)');
   // the materials v2 profile:"roblox" export implies the Roblox damage profile; three / minimal do not
@@ -223,18 +220,18 @@ export function damageExport(engine, def, built, a, { file, scale }) {
   const masks = !roblox && o.masks !== false && !!def.damage;
   const vertex = !roblox && o.vertex ? (o.vertex === 'color' ? 'COLOR_0' : '_DAMAGE') : null;
   const lods = normLods(o.lods ?? a.lods);
-  const screen = { height: Number(a.lod_screen?.height ?? 720), fov: Number(a.lod_screen?.fov ?? 70), px: Number(a.lod_screen?.px ?? 1) };
+  const screen = normLodScreen(a.lod_screen);
   const base = file.replace(/\.glb$/i, '');
   const bn = path.basename(base);
   const side = [];
   const spec = def.damage ? normDamage(def.damage) : null;
   const t0 = performance.now();
   // ---- states
-  const states = spec ? spec.states.map((st) => ({ st, s: damageState(built, def, spec, st, { texel: o.texel, maxSize: o.max_size }) })) : [];
+  const states = spec ? spec.states.map((st) => ({ st, s: damageState(built, def, spec, st, { texel, maxSize }) })) : [];
   // ---- blend-ready intact: chart UVs (TEXCOORD_1), dents morph, masks, vertex channel
   let blend = null;
   if (spec && (masks || vertex)) {
-    blend = damageMasks(built, def, spec, { vertex: !!vertex, texel: o.texel, maxSize: o.max_size });
+    blend = damageMasks(built, def, spec, { vertex: !!vertex, texel, maxSize });
     side.push([`${base}.damage_mask.png`, encodePNG(blend.mask.width, blend.mask.height, blend.mask.data)]);
     if (o.mask_channels) for (const [i, ch] of ['r', 'g', 'b', 'a'].entries()) {
       const d = new Uint8ClampedArray(blend.mask.width * blend.mask.height * 4);
