@@ -373,7 +373,7 @@ function placeFrames(engine, outName, FW, FH, tag, imgs, { durations, loop, proj
 }
 
 /** Model-level options kept on create/update (besides name and parts). */
-export const MODEL_KEYS = ['grid', 'scale', 'origin', 'notes', 'project', 'overlays', 'uv_origin', 'rig', 'sockets', 'poses', 'clips', 'weapon', 'arms', 'merge', 'morphs', 'cull', 'greeble_kind'];
+export const MODEL_KEYS = ['grid', 'scale', 'origin', 'notes', 'project', 'overlays', 'uv_origin', 'rig', 'sockets', 'poses', 'clips', 'weapon', 'arms', 'merge', 'morphs', 'cull', 'greeble_kind', 'fp'];
 
 /** Part index from a number or a part name. */
 function partIndex(parts, k, what) {

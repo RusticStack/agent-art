@@ -27,6 +27,17 @@
 - Web UI Layers view: `/api/rig/<name>/layers` and `/debug` are now served by `art_rig layers {tag | all_frames}` (every frame's stack with the rule that placed each part: depth model, weapon layer, z keys, split parts, hidden reasons) and the new `art_rig debug_render` (per-part atlas), instead of the static order derived from the rig definition.
 - Skill `anim-library`; help topic `library`.
 
+### First-person viewmodels (`art_fp`)
+
+- New tool `art_fp` for the fp v2 runtime contract (rigged arms per handling class plus gun, magazine, attachment and item sweeps composed at runtime):
+  - `kit`: editable `art_model` kit, with the standard gun of every class built to its `handling.js` grip geometry, magazines, generic attachments and items.
+  - `sweep`: yaw × pitch sheets (at most 1024 px, split across sheets) with every anchor per cell, written to `fp_guns`, `fp_mags` and `fp_attach`. Moving-part state variants and optic lens layers are included.
+  - `batch`: skins × classes × clips as back and front strips with per-frame gun, magazine and item sockets and events, plus `@vgrip` / `@agrip` variants, written to `fp`.
+  - `composite`: one frame exactly as the game draws it (the `fpv2.ts` cell pick, anchors and render order).
+  - `check` and `paint` (sweep sheets out to canvases and back, anchors kept).
+- Arms: an eye-space skeleton with finger chains and two-bone IK onto the drawn anchors. Bones are part sprites per view bucket with RotSprite rotation. Arm pixels behind a prop go to the back layer.
+- `art_model` keeps an `fp` key on models (kit metadata). Help topic `fp`.
+
 ### Planets and space (`art_planet`)
 
 - New tool `art_planet`: `planet` (presets ice, toxic, bloom, lava, desert, gas, barren; biome rules, fbm / ridged / billow noise with domain warp, continents, craters, canyons, emissive seams, night lights, clouds, rings, atmosphere) writes equirect and cube-face maps (albedo, height, height16, normal, roughness, emissive, night, clouds), a cube-sphere `.glb` with LODs, a cloud shell, an atmosphere shell with shader parameters and a ring annulus, quadtree tiles with a `.tiles.json` index, an octahedral impostor and a disc sprite. All textures are pixel-art palette ramps with ordered dither and at most 1024 px.

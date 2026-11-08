@@ -22,7 +22,7 @@ const log = (...a) => process.stderr.write(`[agent-art] ${a.join(' ')}\n`);
 export const INSTRUCTIONS = `Agent Art: pixel-art editor for agents (sprites, tiles, textures, icons, UI, animations, 2.5D scenes, game assets). The user watches live in a web UI (art_open_ui).
 Workflow: palette ramps first (art_palette ramp) -> flat silhouettes -> shade (auto form shading) -> outline -> hand detail (grid) -> art_critique -> fix -> art_view.
 Multi-asset work: art_project create (shared palette + style notes), review with art_sheet. Any character/creature with more than one view or frame: use art_rig (template:"humanoid"|"humanoid_hd" (detailed 64x96+)|"blob"|"flyer" is fastest; templates are only defaults) instead of hand-drawing frames, so every frame stays the same asset. Several characters sharing motion: art_anim (skeleton + clip library + skins + batch to game strips).
-3D (HD-2D maps, props -> .glb): art_model. Planets, ground terrain, skyboxes, asteroid fields: art_planet.
+3D (HD-2D maps, props -> .glb): art_model. Planets, ground terrain, skyboxes, asteroid fields: art_planet. First-person arms + gun/attachment sweeps: art_fp.
 Audio (SFX, music, mixing; you cannot hear, so read analyze/critique reports): art_audio.
 The user leaves review notes on assets in the web UI: art_review list (replies say when the asset you touch has open notes).
 Orient yourself with art_graph (summary / query: what is part of what, a few hundred chars) instead of art_info on everything; record relations with art_graph link / group / tag / note.
@@ -356,6 +356,22 @@ export const TOOLS = [
       required: ['action'],
     },
     run: (call, a) => call(a.action === 'planet' ? 'planet_create' : `planet_${a.action}`, a),
+  },
+  {
+    name: 'art_fp',
+    description: 'First-person viewmodel (fp v2): rigged 2D arms (bones, hands, fingers) per handling class + separate gun / magazine / attachment / item sweeps the game composes at runtime. kit {guns?, mags?, attachments?, items?} = editable art_model kit; sweep {out, guns?, mags?, attachments?, items?, step?} = yaw x pitch sheets (<=1024 px) + anchors -> fp_guns/fp_mags/fp_attach; batch {out, skins?:[mec|severance], classes?, clips?, variants?} = arms back/front strips + sockets -> fp; composite {out, class, clip, frame, gun?, attachments?:{optic,muzzle,underbarrel}, yaw_offset?, pitch_offset?} = the frame as the game draws it; check {out, classes?}; paint {action:export|import, sweep}. art_help {topic:"fp"}.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['kit', 'sweep', 'batch', 'composite', 'check', 'paint'] }, out: { type: 'string' },
+        guns: { type: ['array', 'object', 'boolean'] }, mags: { type: ['array', 'boolean'] }, attachments: { type: ['array', 'object', 'boolean'] }, items: { type: ['array', 'boolean'] },
+        skins: { type: 'array', items: { type: 'string' } }, classes: { type: 'array', items: { type: 'string' } }, clips: { type: 'array', items: { type: 'string' } }, variants: { type: 'boolean' }, step: { type: 'number' },
+        class: { type: 'string' }, clip: { type: 'string' }, frame: { type: 'integer' }, gun: { type: 'string' }, mag: { type: 'string' }, skin: { type: 'string' }, yaw_offset: { type: 'number' }, pitch_offset: { type: 'number' }, canvas: { type: 'string' },
+        sweep: { type: 'string' }, overwrite: { type: 'boolean' },
+      },
+      required: ['action'],
+    },
+    run: (call, a) => call(`fp_${a.action}`, a),
   },
   {
     name: 'art_graph',
