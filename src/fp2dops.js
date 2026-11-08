@@ -12,15 +12,19 @@ import { PX_PER_M, r1 } from './fp.js';
 import { REF } from './fpsweep.js';
 
 const ARM_POINTS = ['joint', 'end', 'wrist', 'grip'];
+/** Paintable contact layers a key template gets per kind (fp2d.js MASK_LAYERS; opaque = in the zone; height: grey = cm toward the eye). */
+const KIND_MASKS = { gun: ['mask_grip', 'mask_guard', 'mask_fore', 'height'], mag: ['mask_pinch', 'height'], attachment: ['mask_fore', 'height'], item: ['mask_grip', 'height'] };
 const r2 = (v) => Math.round(v * 100) / 100;
 
 /** New canvas with an "art" layer (plus "back" / "front" for hands) under a "guides" layer. */
-function newCanvas(engine, name, width, height, layers, guides, meta, a, source) {
+function newCanvas(engine, name, width, height, layers, guides, meta, a, source, hidden = []) {
   if (engine.docs.has(name) && !a.overwrite) throw new Error(`Canvas "${name}" exists (pass overwrite: true)`);
   if (engine.docs.has(name)) engine.docs.delete(name);
   const d = new Doc({ name, width, height });
   d.layers[0].name = layers[0];
   for (const l of layers.slice(1)) d.layers.push(new Layer(l, width, height));
+  // contact masks / height: paintable, hidden (never part of the art)
+  for (const l of hidden) { const L = new Layer(l, width, height); L.visible = false; d.layers.push(L); }
   if (a.project) { engine.getProject(a.project); d.project = a.project; }
   d.meta = meta;
   engine.attach(d);
@@ -70,7 +74,7 @@ export const FP2D_OPS = {
       const pose = part === 'hand' ? a.pose || 'trigger' : undefined;
       const canvas = a.canvas || `${a.name}_${part}${pose ? `_${pose}` : ''}_${view}`;
       const meta = { fp2d: { kind: 'arm', skin: a.name, part, view, ...(pose ? { pose } : {}), ...(a.side ? { side: a.side } : {}), ...t.points, px_per_cm: t.px_per_cm, ...(part === 'hand' ? { thumb: 'up' } : { up: '-x' }) } };
-      newCanvas(this, canvas, t.width, t.height, part === 'hand' ? ['back', 'front'] : ['art'], t.guides, meta, a, source);
+      newCanvas(this, canvas, t.width, t.height, part === 'hand' ? ['back', 'front', 'trigger'] : ['art'], t.guides, meta, a, source);
       return { canvas, size: `${t.width}x${t.height}`, points: t.points, px_per_cm: t.px_per_cm, note: t.note, next: 'draw on the art layers (art_draw; the guides layer is never used), then art_fp batch {skins:[name]}' };
     }
     if (!KINDS.includes(kind)) throw new Error(`kind "${kind}" (${[...KINDS, 'arm'].join(' | ')})`);
@@ -81,7 +85,7 @@ export const FP2D_OPS = {
     if (kind === 'attachment' && !m.slot) m.slot = ATTACH[a.name]?.slot || 'optic';
     const t = gunTemplate(kind, a.class, m);
     const canvas = a.canvas || `${a.name}_${view || `y${a.yaw ?? 0}_p${a.pitch ?? 0}`}${a.state ? `_${a.state}` : ''}`;
-    newCanvas(this, canvas, t.width, t.height, ['art'], t.guides, { fp2d: { ...m, anchors: t.anchors } }, a, source);
+    newCanvas(this, canvas, t.width, t.height, ['art'], t.guides, { fp2d: { ...m, anchors: t.anchors } }, a, source, KIND_MASKS[kind]);
     const ang = STATION_VIEWS.includes(view) ? stationView(a.class, view) : null;
     return { canvas, size: `${t.width}x${t.height}`, view: view || { yaw: a.yaw ?? 0, pitch: a.pitch ?? 0 }, ...(ang ? { yaw_pitch: ang } : {}), anchors: t.anchors, note: `the guides mark the class standard anchors in this view (draw so grip, support and mag_well land on them and the class hands fit); ${kind === 'gun' ? 'muzzle left, no magazine (it is its own sweep), no stock' : 'reference ' + REF[kind] + ' on its mark'}`, next: 'draw on the art layer (art_draw), then art_fp anchors {canvas, suggest:true} to check / move anchors, art_fp sweep2d {out}' };
   },
@@ -172,6 +176,9 @@ export const FP2D_OPS = {
         const f = new Layer('front', c.width, c.height);
         f.data.set(c.layers.front);
         d.layers.push(f);
+        const tr = new Layer('trigger', c.width, c.height);
+        if (c.layers.trigger) tr.data.set(c.layers.trigger);
+        d.layers.push(tr);
       } else {
         d.layers[0].name = 'art';
         d.layers[0].data.set(c.data);

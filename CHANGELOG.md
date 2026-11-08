@@ -46,7 +46,14 @@
 - `sweep2d`: a few key drawings -> the full yaw × pitch sweep in the same files and manifests as `sweep`. Nearest key, card-plane perspective warp plus a correction field through the anchors, nearest sampling from a Scale2x upscale and re-outlining: source palette only, hard alpha, deterministic; anchors take the same warp and are exact at the keys. Painted cells (`paint` import) are kept as override canvases.
 - 2D arms skins: `batch {skins:[...]}` resolves a skin to its drawings, driven by the same `classClips` / `solveClip`; the hand pose drawing is picked per frame from the finger preset. Locks carry per-hand `pose`, `vis` and `clamped` for 2D skins; `check` warns on hidden hands and clamped reach. `setDeformer(skin, fn)` is the seam for a mesh deformer.
 - `trace`: a 3D arms skin exported as an editable 2D skin.
-- Mixed sources: 2D gun + 3D arms, 3D gun + 2D arms, all 2D.
+- Mixed sources: 2D gun + 3D arms, 3D gun + 2D arms, all 2D. The all-2D path builds no kit 3D model; hand-drawn guns take their prior anchors from the class table (`classSockets`, `CLASS_MAG`; `KIT_BUILDS` counts kit builds).
+- Hands against the gun, for any set with a 2D skin or gun:
+  - Hand drawings have `back` / `front` / `trigger` layers.
+  - Keys carry paintable contact zones (`mask_grip`, `mask_guard`, `mask_fore`, `mask_pinch`; automatic when empty) warped with the sweep, and an optional `height` layer for per-pixel depth (automatic from the distance to the outline).
+  - Front finger pixels over a prop outside its zones go behind it; the trigger finger shows only in the guard opening.
+  - Batch nudges hidden hands and hands that hide the magazine (fallback poses, half-pixel offsets inside the tolerance).
+  - Locks carry `contact` and `mag_visible`. `check` fails on finger pixels outside the zones or a magazine in hand under 50 % visible, and reports `contact_checks`, `worst.finger_out_px` and `worst.mag_visible_min`.
+- New hand pose `pinch` (charging handle), falling back to `mag_pinch`.
 - `fpclips` hands carry the finger preset name (`pose`), additive. #16's 3D outputs are byte-identical (tested).
 - Demos in `docs/fp2d/` (`scripts/fp2d-demos.js`), drawn with Agent Art's own drawing ops (`scripts/fp2d-art.js`).
 

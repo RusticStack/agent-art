@@ -57,6 +57,28 @@ function rail(y, z0, z1, mat = 'gunmetal', w = 2.1) {
 }
 const sockets = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v).map(([k, v]) => [k, Array.isArray(v) ? { at: v } : v]));
 
+/**
+ * Anchors of a class's standard gun straight from the class table (fpGeometry), the same points
+ * gunModel's sockets carry, without building any model: what hand-drawn guns use as their prior.
+ */
+export function classSockets(cls) {
+  const G = fpGeometry(cls);
+  if (!G) return {};
+  const hb = G.bore, S = { grip: G.grip, support: G.support, mag_well: G.mag_well, muzzle: G.muzzle, muzzle_mount: G.muzzle_mount, sight: G.sight, stock: G.stock };
+  if (G.class === 'launcher') S.mag_well = [0, G.bore, 5];
+  if (G.kind === 'long' && G.class !== 'launcher') { S.optic = G.optic; S.underbarrel = G.underbarrel; }
+  if (G.kind === 'pistol') S.underbarrel = G.underbarrel;
+  if (G.class === 'pistol') S.charging = [0, hb + 0.4, G.stock[2] - 1.5];
+  else if (G.class === 'shotgun') S.pump = G.support;
+  else if (G.class === 'sniper') S.bolt_handle = [4.6, hb + 0.6, 1.1];
+  else if (G.class !== 'launcher') S.charging = [0, G.bore + 2.6 + 0.4, G.charging[2] + 2.4];
+  return Object.fromEntries(Object.entries(S).map(([k, v]) => [k, v.slice()]));
+}
+/** Magazine of each class's standard gun (class table). */
+export const CLASS_MAG = { pistol: 'pistol_mag', smg: 'smg_mag', rifle: 'rifle_mag_30', dmr: 'dmr_mag_20', shotgun: 'shotgun_shell', lmg: 'lmg_box_100', sniper: 'sniper_mag_5', launcher: 'rocket' };
+/** How many kit model definitions were built (gun / mag / attachment / item): tests prove the all-2D path builds none. */
+export const KIT_BUILDS = { gun: 0, mag: 0, attachment: 0, item: 0 };
+
 /** Hand grasp frames for gun anchors (gun space): fingers direction, back-of-hand direction, palm offset. */
 export const GRASP = {
   grip: { fingers: [0, -0.32, -1], dorsal: [1, 0.12, 0], palm: [1.9, 0.4, 1.2], preset: 'trigger' },
@@ -74,6 +96,7 @@ export const GRASP = {
 // ---------- guns ----------
 /** Standard gun of a class (art_model definition, cm). */
 export function gunModel(cls, o = {}) {
+  KIT_BUILDS.gun++;
   const G = fpGeometry(cls);
   if (!G) throw new Error(`class "${cls}" has no gun`);
   const name = o.name ?? cls;
@@ -244,6 +267,7 @@ function launcherParts(G) {
 // ---------- magazines (mount = top centre, sits on the gun's mag_well) ----------
 const MAG_OF = { pistol: 'pistol_mag', smg: 'smg_mag', rifle: 'rifle_mag_30', dmr: 'dmr_mag_20', shotgun: 'shotgun_shell', lmg: 'lmg_box_100', sniper: 'sniper_mag_5', launcher: 'rocket' };
 export function magModel(name) {
+  KIT_BUILDS.mag++;
   const mk = {
     rifle_mag_30: () => [
       box([0, -4, -0.6], [2.2, 8.4, 6.2], 'mag_steel', { bevel: 0.3, rotate: [8, 0, 0], pivot: [0, 8.4, 0] }),
@@ -280,6 +304,7 @@ export const ATTACH = {
 };
 /** Attachment model definition. */
 export function attachModel(name) {
+  KIT_BUILDS.attachment++;
   const A = ATTACH[name];
   if (!A) throw new Error(`unknown attachment "${name}" (${Object.keys(ATTACH).join(', ')})`);
   const m = A.make();
@@ -296,6 +321,7 @@ export const ITEMS = {
   tablet: () => ({ parts: [box([0, 0, 0], [22, 1.6, 15], 'rubber', { bevel: 0.8 }), { ...box([0, 0.85, 0], [18.4, 0.2, 11.6], 'screen'), name: 'screen' }, box([-11.4, 0, 0], [1.4, 2.2, 13], 'polymer_od', { bevel: 0.4 }), box([11.4, 0, 0], [1.4, 2.2, 13], 'polymer_od', { bevel: 0.4 })], sockets: { grip: { at: [-11, 0, 0] }, grip_r: { at: [11, 0, 0] }, screen: { part: 'screen', at: [0, 1, 0] } } }),
 };
 export function itemModel(id) {
+  KIT_BUILDS.item++;
   const mk = ITEMS[id];
   if (!mk) throw new Error(`unknown item "${id}" (${Object.keys(ITEMS).join(', ')})`);
   const m = mk();

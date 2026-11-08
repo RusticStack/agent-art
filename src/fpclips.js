@@ -395,7 +395,8 @@ function solveFrame(clip, f, ctx, geo) {
     // the anchor correction travels with the hand: 2D offset + the 3D shift that produced it
     const c2 = [ha.c2[0] + (hb.c2[0] - ha.c2[0]) * u, ha.c2[1] + (hb.c2[1] - ha.c2[1]) * u], shift3 = lerp3(ha.shift3, hb.shift3, u);
     // pose: the finger preset name in force (hand-drawn skins pick their hand drawing by it)
-    hands[side] = { ...sol, target: P, target2, frame: R, c2, shift3, pose: u < 0.5 ? ha.fingers : hb.fingers };
+    // held: on an anchor at both keys around this frame (hand-drawn arms keep their contact layers in between)
+    hands[side] = { ...sol, target: P, target2, frame: R, c2, shift3, pose: u < 0.5 ? ha.fingers : hb.fingers, held: !!(ha.target2 && hb.target2) };
   }
   frame.hands = hands;
   // ---- magazine ----

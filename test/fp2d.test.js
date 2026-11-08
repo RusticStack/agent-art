@@ -11,8 +11,9 @@ import path from 'node:path';
 import { Engine } from '../src/engine.js';
 import { steps, MAX_SHEET, PX_PER_M } from '../src/fp.js';
 import { unpackSheets, anchorJumps, jumpBound } from '../src/fpsweep.js';
-import { bakeClip, sweepOf, classGrid, magGrid } from '../src/fpops.js';
-import { sources2d, sweep2d, colorSet, suggestAnchors, anchorsOffArt, artOf, GUIDES } from '../src/fp2d.js';
+import { bakeClip, sweepOf, classGrid, magGrid, MAG_VISIBLE_MIN } from '../src/fpops.js';
+import { KIT_BUILDS } from '../src/fpkit.js';
+import { sources2d, sweep2d, colorSet, suggestAnchors, anchorsOffArt, artOf, GUIDES, MASKS } from '../src/fp2d.js';
 import { skin2dOf, handPose, POSE_OF, HAND_POSES } from '../src/fp2darms.js';
 import { decodePNG } from '../src/png.js';
 import { drawDemoSet } from '../scripts/fp2d-art.js';
@@ -88,15 +89,18 @@ test('fp2d: anchor tools suggest from the silhouette and warn off-art / inconsis
   assert.ok(acc.anchors.muzzle, 'muzzle re-placed from the suggestion');
 });
 
-test('fp2d: a 2D-only build (drawn gun, magazine and arms) passes fp check with the #16 tolerances', () => {
+test('fp2d: a 2D-only build (drawn SMG and rifle, magazines and arms) passes fp check with the #16 tolerances', () => {
   const e = engine(), out = tmp();
-  drawDemoSet(e);
+  drawDemoSet(e, { rifle: true });
   const s = e.run('fp_sweep2d', { out });
   assert.equal(s.sweeps.vandal.palette_ok, true);
   assert.equal(s.sweeps.vandal_mag.palette_ok, true);
-  const b = e.run('fp_batch', { out, skins: ['ink'], classes: ['smg'], guns: { smg: 'vandal' }, clips: ['idle', 'ads_idle', 'reload_empty'], variants: false });
-  assert.ok(b.frames > 30);
-  const ck = e.run('fp_check', { out, classes: ['smg'] });
+  assert.equal(s.sweeps.warden.palette_ok, true);
+  const b = e.run('fp_batch', { out, skins: ['ink'], classes: ['smg', 'rifle'], guns: { smg: 'vandal', rifle: 'warden' }, clips: ['idle', 'ads_idle', 'reload_empty'], variants: false });
+  assert.ok(b.frames > 60);
+  const ck = e.run('fp_check', { out, classes: ['smg', 'rifle'] });
+  assert.equal(ck.worst.finger_out_px, 0);
+  assert.ok(ck.worst.mag_visible_min >= 0.5, `magazine ${ck.worst.mag_visible_min} visible`);
   assert.equal(ck.pass, true, JSON.stringify(ck.issues));
   assert.ok(ck.worst.hand_px <= 1, `hands ${ck.worst.hand_px} px`);
   assert.ok(ck.worst.ads_px <= 1, `ADS sight ${ck.worst.ads_px} px`);
@@ -189,6 +193,64 @@ test('fp2d: mixed sources (2D gun + 3D arms, 3D gun + 2D arms) pass the unchange
     assert.equal(ck.pass, true, `${gun}: ${JSON.stringify(ck.issues)}`);
     assert.ok(ck.worst.hand_px <= 1 && ck.worst.ads_px <= 1 && ck.worst.mag_handoff_px <= 1, JSON.stringify(ck.worst));
   }
+});
+
+test('fp2d contact: no finger pixels over the gun outside its zones; the trigger finger in the guard; the magazine stays visible', () => {
+  const e = engine();
+  drawDemoSet(e);
+  let held = 0, clipped = 0, pinch = 0;
+  for (const clip of ['idle', 'ads_idle', 'reload_empty', 'fire']) {
+    const b = bakeClip('smg', clip, { skin: 'ink', engine: e, gun: 'vandal' });
+    b.locks.forEach((L, f) => {
+      for (const sd of ['R', 'L']) {
+        if (L[sd]) assert.ok(L[sd].miss <= 1, `${clip} ${f} ${sd}: hand ${L[sd].miss} px (nudges stay in the tolerance)`);
+        const c = L.contact?.[sd];
+        if (L[sd]) assert.ok(c, `${clip} ${f} ${sd}: contact report on a lock`);
+        if (!c) continue;
+        held++;
+        assert.equal(c.out, 0, `${clip} ${f} ${sd}: finger px outside the zones`);
+        clipped += c.clipped;
+      }
+      if (L.mag_visible != null) { pinch++; assert.ok(L.mag_visible >= MAG_VISIBLE_MIN, `${clip} ${f}: magazine ${L.mag_visible} visible`); }
+    });
+    if (clip === 'fire') {
+      // every fire frame: the trigger finger is drawn and shows inside the guard opening
+      b.locks.forEach((L, f) => { const c = L.contact?.R; assert.ok(c?.trigger > 0, `fire ${f}: trigger finger drawn`); assert.ok(c.trigger_guard > 0, `fire ${f}: trigger finger in the guard opening`); });
+    }
+  }
+  assert.ok(held > 40 && pinch > 0, `${held} held hands, ${pinch} pinch frames`);
+  assert.ok(clipped > 0, 'the zones did clip something (the check is live)');
+});
+
+test('fp2d contact: painted masks replace the automatic zones and travel with the sweep', () => {
+  const e = engine();
+  const made = drawDemoSet(e, { arms: false, views: KEY_VIEWS });
+  // no painted grip zone on any key: automatic
+  for (const n of made.gun) e.run('draw', { canvas: n, layer: 'mask_grip', commands: [{ op: 'clear' }] });
+  const auto = sweep2d(sources2d(e).get('vandal'), classGrid('smg'));
+  const def = auto.def, c = cellAt(def, 40, 20);
+  const d = e.get(made.gun[0]), g = d.meta.fp2d.anchors.grip;
+  // a 5x5 grip zone painted at the drawn grip anchor
+  e.run('draw', { canvas: d.name, layer: 'mask_grip', commands: [{ op: 'rect', x: Math.round(g[0]) - 2, y: Math.round(g[1]) - 2, w: 5, h: 5, color: '#ffffff' }] });
+  const sw = sweep2d(sources2d(e).get('vandal'), classGrid('smg'));
+  const z = sw.zones[c], [cw] = sw.def.cell, ga = sw.def.anchors.grip[c];
+  const n = [...z].filter((v) => v & MASKS.grip).length;
+  assert.ok(n > 0 && n < [...auto.zones[c]].filter((v) => v & MASKS.grip).length, `painted grip zone ${n} px (smaller than the auto one)`);
+  assert.ok(z[Math.floor(ga[1]) * cw + Math.floor(ga[0])] & MASKS.grip, 'the painted zone sits on the grip anchor at the key angle');
+  // the guard opening stays automatic (not painted) and is see-through
+  assert.ok([...z].some((v, i) => v & MASKS.guard && !sw.cells[c][i * 4 + 3]), 'auto guard opening');
+});
+
+test('fp2d: the all-2D pipeline builds no kit 3D model (sweep2d, batch, check, composite)', () => {
+  const e = engine(), out = tmp();
+  drawDemoSet(e);
+  for (const k of Object.keys(KIT_BUILDS)) KIT_BUILDS[k] = 0;
+  e.run('fp_sweep2d', { out });
+  e.run('fp_batch', { out, skins: ['ink'], classes: ['smg'], guns: { smg: 'vandal' }, clips: ['idle', 'reload_empty'], variants: false });
+  const ck = e.run('fp_check', { out, classes: ['smg'] });
+  e.run('fp_composite', { out, class: 'smg', clip: 'idle', frame: 0, gun: 'vandal' });
+  assert.deepEqual(KIT_BUILDS, { gun: 0, mag: 0, attachment: 0, item: 0 });
+  assert.ok(ck.contact_checks > 0 && ck.worst.finger_out_px === 0, JSON.stringify(ck.worst));
 });
 
 test('fp2d: #16 3D outputs are byte-identical', () => {

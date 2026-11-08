@@ -23,13 +23,13 @@ const R2D = 180 / Math.PI;
 export const ARM_PX_PER_CM = 6;
 export const LIMB_VIEWS = { toward: 45, side: 90, away: 135 };
 export const HAND_VIEWS = ['back', 'palm', 'edge'];
-export const HAND_POSES = ['trigger', 'trigger_off', 'thumb_release', 'support', 'vgrip', 'agrip', 'mag_pinch', 'open', 'relaxed', 'fist', 'grenade'];
+export const HAND_POSES = ['trigger', 'trigger_off', 'thumb_release', 'support', 'vgrip', 'agrip', 'mag_pinch', 'open', 'relaxed', 'fist', 'grenade', 'pinch'];
 /** Finger preset of a clip key -> hand pose drawing. */
-export const POSE_OF = { trigger: 'trigger', trigger_off: 'trigger_off', support_under: 'support', pistol_cup: 'support', vgrip: 'vgrip', agrip: 'agrip', mag_grasp: 'mag_pinch', pinch: 'mag_pinch', open_palm: 'open', flat_touch: 'open', relaxed: 'relaxed', fist: 'fist', knife_hammer: 'fist', grenade_hold: 'grenade', pin_pull: 'grenade' };
+export const POSE_OF = { trigger: 'trigger', trigger_off: 'trigger_off', support_under: 'support', pistol_cup: 'support', vgrip: 'vgrip', agrip: 'agrip', mag_grasp: 'mag_pinch', pinch: 'pinch', open_palm: 'open', flat_touch: 'open', relaxed: 'relaxed', fist: 'fist', knife_hammer: 'fist', grenade_hold: 'grenade', pin_pull: 'grenade' };
 /** A missing pose drawing falls back along this list (then any pose). */
-export const POSE_FALLBACK = { trigger_off: ['trigger'], thumb_release: ['trigger'], vgrip: ['support'], agrip: ['support', 'vgrip'], relaxed: ['open', 'support'], open: ['relaxed', 'support'], grenade: ['fist', 'mag_pinch'], mag_pinch: ['support', 'fist'], fist: ['grenade', 'trigger'], support: ['open', 'relaxed'], trigger: ['fist', 'support'] };
+export const POSE_FALLBACK = { trigger_off: ['trigger'], thumb_release: ['trigger'], vgrip: ['support'], agrip: ['support', 'vgrip'], relaxed: ['open', 'support'], open: ['relaxed', 'support'], grenade: ['fist', 'mag_pinch'], mag_pinch: ['support', 'fist'], fist: ['grenade', 'trigger'], support: ['open', 'relaxed'], trigger: ['fist', 'support'], pinch: ['mag_pinch', 'fist'] };
 /** Preset a 3D finger pose for each hand pose (trace from the 3D skin). */
-const PRESET_OF = { trigger: 'trigger', trigger_off: 'trigger_off', thumb_release: 'trigger_off', support: 'support_under', vgrip: 'vgrip', agrip: 'agrip', mag_pinch: 'mag_grasp', open: 'open_palm', relaxed: 'relaxed', fist: 'fist', grenade: 'grenade_hold' };
+const PRESET_OF = { trigger: 'trigger', trigger_off: 'trigger_off', thumb_release: 'trigger_off', support: 'support_under', vgrip: 'vgrip', agrip: 'agrip', mag_pinch: 'mag_grasp', open: 'open_palm', relaxed: 'relaxed', fist: 'fist', grenade: 'grenade_hold', pinch: 'pinch' };
 
 const DEFORMERS = new Map();
 /** Optional deformer for a 2D skin (the 2D mesh skinning seam): fn({part, side, pose, view, sprite, bone, frame}) -> sprite | undefined. */
@@ -53,8 +53,9 @@ function partOf(doc) {
   const ax = hand ? [a[0] - b[0], a[1] - b[1]] : [b[0] - a[0], b[1] - a[1]];
   const len = Math.hypot(ax[0], ax[1]) || 1;
   const img = { width: doc.width, height: doc.height, data: doc.composite({ exclude: [GUIDES] }) };
-  const back = layerData(doc, 'back'), front = layerData(doc, 'front');
-  const layers = back || front ? { back: back && { width: doc.width, height: doc.height, data: back }, front: front && { width: doc.width, height: doc.height, data: front } } : null;
+  const lay = (n) => { const d = layerData(doc, n); return d && d.some((v, i) => (i & 3) === 3 && v) ? { width: doc.width, height: doc.height, data: d } : null; };
+  const back = lay('back'), front = lay('front'), trigger = lay('trigger');
+  const layers = back || front || trigger ? { back, front, trigger } : null;
   return { name: doc.name, part: m.part, view: m.view || (hand ? 'back' : 'side'), pose: m.pose || null, side: m.side || 'r', img, layers, origin: a, axis: [ax[0] / len, ax[1] / len], len, px_per_cm: Number(m.px_per_cm ?? ARM_PX_PER_CM), up: m.up || (hand ? null : '-x'), thumb: m.thumb || 'up', version: `${doc.version}:${doc.updated}` };
 }
 /** A 2D arm skin by name (canvases with meta.fp2d {kind:"arm", skin}), or null. */
@@ -98,7 +99,7 @@ function pickView(list, view, side, hand) {
  * along screen angle theta, sa px per sprite px along the axis, sc across it, m = 1 or -1 (mirror
  * across the axis). Nearest sampling at destination pixel centres from the Scale2x upscale.
  */
-function place(buf, sp, img, O, theta, sa, sc, m, depthAt, force, handTag) {
+function place(buf, sp, img, O, theta, sa, sc, m, depthAt, force, handTag, cls = 1) {
   const B = bigOf(img), k = B.k;
   const c = Math.cos(theta), s = Math.sin(theta);
   const ux = sp.axis[0], uy = sp.axis[1], px = -uy, py = ux; // sprite axis + its perpendicular (y down)
@@ -125,6 +126,7 @@ function place(buf, sp, img, O, theta, sa, sc, m, depthAt, force, handTag) {
     buf.depth[o] = depthAt(xx, yy);
     buf.force[o] = force;
     buf.hand[o] = handTag;
+    buf.cls[o] = cls;
     n++;
   }
   return n;
@@ -154,9 +156,10 @@ export function handPose(frame, side) {
  * depth, 1 = back layer, 2 = front layer), hand (1 = R, 2 = L hand pixel), W, H, poses: {R, L},
  * parts: [{side, part, sprite}]}
  */
-export function renderArms2d(frame, skin, size = FRAME) {
+export function renderArms2d(frame, skin, size = FRAME, o = {}) {
   const [W, H] = size;
-  const buf = { W, H, rgba: new Uint8ClampedArray(W * H * 4), depth: new Float32Array(W * H).fill(Infinity), force: new Uint8Array(W * H), hand: new Uint8Array(W * H) };
+  const buf = { W, H, rgba: new Uint8ClampedArray(W * H * 4), depth: new Float32Array(W * H).fill(Infinity), force: new Uint8Array(W * H), hand: new Uint8Array(W * H), cls: new Uint8Array(W * H) };
+  const holding = {}, palms = {};
   const arms = ['R', 'L'].map((side) => {
     const h = frame.hands[side];
     const bones = h.bones;
@@ -194,14 +197,15 @@ export function renderArms2d(frame, skin, size = FRAME) {
     if (!palm) continue;
     const zW = -palm.A[2], zP = -h.palm[2];
     if ((zW + zP) / 2 < NEAR_BONE) continue;
-    const pose = handPose(frame, side);
+    const ov = o.override?.[side] || {};
+    const pose = ov.pose || handPose(frame, side);
     poses[side] = pose;
     const toCam = norm(mul(h.palm, -1));
     const dd = dot(toCam, col(palm.frame, 2));
     const view = dd > 0.35 ? 'back' : dd < -0.35 ? 'palm' : 'edge';
     let sp = pickHand(skin, pose, view, s);
     if (skin.deformer) sp = skin.deformer({ part: 'hand', side, pose, view, sprite: sp, bone: palm, frame }) || sp;
-    const pW = project(palm.A), pP = project(h.palm);
+    const pW = project(palm.A), p0 = project(h.palm), pP = [p0[0] + (ov.dx || 0), p0[1] + (ov.dy || 0)];
     let theta = Math.atan2(pP[1] - pW[1], pP[0] - pW[0]);
     const L2 = Math.hypot(pP[0] - pW[0], pP[1] - pW[1]);
     if (L2 < 0.5) { const pz = project(add(palm.A, mul(col(palm.frame, 1), 2))); theta = Math.atan2(pz[1] - pW[1], pz[0] - pW[0]); }
@@ -210,16 +214,19 @@ export function renderArms2d(frame, skin, size = FRAME) {
     const thumbRef = sub(project(add(palm.A, mul(col(palm.frame, 0), tau * 3))), pW);
     const ss = perpSign(theta, thumbRef), ts = sp.thumb === 'down' ? 1 : -1;
     const m = ss ? ts * ss : side === 'R' ? 1 : -1;
-    const holding = !!h.target2 || frame.item?.hand === side;
+    const hold = !!h.target2 || !!h.held || frame.item?.hand === side || (side === 'L' && frame.mag?.state === 'hand');
+    holding[side] = hold; palms[side] = { at: pP, z: zP, len: (sp.len / sp.px_per_cm) * (F / Math.max(4, zP)) };
     const tag = side === 'R' ? 1 : 2, zh = () => zP;
     // layers back / front decide only while the hand holds something; a free hand splits by depth
+    // cls: 2 = behind the held object (palm, far fingers), 3 = over it (near fingers, thumb), 4 = the trigger finger (through the guard)
     if (sp.layers) {
-      if (sp.layers.back) place(buf, sp, sp.layers.back, pP, theta, sa, sc, m, zh, holding ? 1 : 0, tag);
-      if (sp.layers.front) place(buf, sp, sp.layers.front, pP, theta, sa, sc, m, zh, holding ? 2 : 0, tag);
-    } else place(buf, sp, sp.img, pP, theta, sa, sc, m, zh, holding ? 2 : 0, tag);
+      if (sp.layers.back) place(buf, sp, sp.layers.back, pP, theta, sa, sc, m, zh, hold ? 1 : 0, tag, 2);
+      if (sp.layers.front) place(buf, sp, sp.layers.front, pP, theta, sa, sc, m, zh, hold ? 2 : 0, tag, 3);
+      if (sp.layers.trigger) place(buf, sp, sp.layers.trigger, pP, theta, sa, sc, m, zh, hold ? 2 : 0, tag, 4);
+    } else place(buf, sp, sp.img, pP, theta, sa, sc, m, zh, hold ? 2 : 0, tag, 3);
     used.push({ side, part: 'hand', sprite: sp.name, pose, view });
   }
-  return { ...buf, poses, parts: used };
+  return { ...buf, poses, parts: used, holding, palms };
 }
 
 // ---------- templates and tracing ----------
@@ -288,13 +295,19 @@ export function traceSkin(skin3d, name, o = {}) {
       const wrist = [pw[0], pw[1]], grip = [pp[0], pp[1]];
       // layers: what lies on the eye's side of the held grip (palm centre + 1.9 cm toward the palm side) is front
       const zg = -add(sol.palm, mul(col(R, 1), -1.9))[2];
-      const back = new Uint8ClampedArray(W * H * 4), front = new Uint8ClampedArray(W * H * 4);
-      for (let i = 0; i < W * H; i++) if (buf.rgba[i * 4 + 3]) (buf.depth[i] < zg ? front : back).set(buf.rgba.subarray(i * 4, i * 4 + 4), i * 4);
+      const back = new Uint8ClampedArray(W * H * 4), front = new Uint8ClampedArray(W * H * 4), trig = new Uint8ClampedArray(W * H * 4);
+      // trigger poses: the visible index finger is its own layer (it goes through the guard)
+      const tb = pose === 'trigger' || pose === 'thumb_release' ? renderBones(bones.filter((b) => /^index/.test(b.name)), skin3d, [W, H]) : null;
+      for (let i = 0; i < W * H; i++) {
+        if (!buf.rgba[i * 4 + 3]) continue;
+        const L = tb && tb.rgba[i * 4 + 3] && tb.depth[i] <= buf.depth[i] + 0.05 ? trig : buf.depth[i] < zg ? front : back;
+        L.set(buf.rgba.subarray(i * 4, i * 4 + 4), i * 4);
+      }
       const c = crop(buf.rgba, W, H, [wrist, grip]);
       const cut = (img) => { const d = new Uint8ClampedArray(c.w * c.h * 4); for (let y = 0; y < c.h; y++) for (let x = 0; x < c.w; x++) { const X = c.x0 + x, Y = c.y0 + y; if (X < 0 || Y < 0 || X >= W || Y >= H) continue; d.set(img.subarray((Y * W + X) * 4, (Y * W + X) * 4 + 4), (y * c.w + x) * 4); } return d; };
       const thumbP = project(sol.tips.thumb), ax = [grip[0] - wrist[0], grip[1] - wrist[1]];
       const thumb = -ax[1] * (thumbP[0] - wrist[0]) + ax[0] * (thumbP[1] - wrist[1]) > 0 ? 'down' : 'up';
-      out.push({ name: `${name}_hand_${pose}_${view}`, width: c.w, height: c.h, data: c.d, layers: { back: cut(back), front: cut(front) }, meta: { fp2d: { kind: 'arm', skin: name, part: 'hand', pose, view, wrist: [r1(wrist[0] - c.x0), r1(wrist[1] - c.y0)], grip: [r1(grip[0] - c.x0), r1(grip[1] - c.y0)], px_per_cm: s, thumb, traced_from: skin3d } } });
+      out.push({ name: `${name}_hand_${pose}_${view}`, width: c.w, height: c.h, data: c.d, layers: { back: cut(back), front: cut(front), ...(tb ? { trigger: cut(trig) } : {}) }, meta: { fp2d: { kind: 'arm', skin: name, part: 'hand', pose, view, wrist: [r1(wrist[0] - c.x0), r1(wrist[1] - c.y0)], grip: [r1(grip[0] - c.x0), r1(grip[1] - c.y0)], px_per_cm: s, thumb, traced_from: skin3d } } });
     }
   }
   return out;

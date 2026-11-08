@@ -16,8 +16,8 @@ import { packImages } from './sheet.js';
 import { modelDefs } from './modelops.js';
 import { conform } from './handling.js';
 import { Doc } from './doc.js';
-import { sources2d, sourceKey, sweep2d } from './fp2d.js';
-import { skin2dOf, renderArms2d } from './fp2darms.js';
+import { sources2d, sourceKey, sweep2d, autoZones, MASKS } from './fp2d.js';
+import { skin2dOf, renderArms2d, POSE_FALLBACK, handPose } from './fp2darms.js';
 
 export const GRID_STEP = 10;
 /** Gun grids never go past these (deg): the extreme sprint / melee frames take the nearest cell. */
@@ -192,13 +192,22 @@ function variantAtt(engine, ctx, variant, step) {
  * Render the arms of one solved frame and split them against the props (gun, magazine, foregrip,
  * item cells as the runtime draws them, with their depth): arm pixels behind a prop surface go to
  * the back layer, the rest to the front layer. -> {back, front} RGBA frames.
+ * With a hand-drawn skin or gun (sweeps.contact), held hands also respect the props' contact zones
+ * (fp2d.js autoZones / painted masks): finger pixels over a prop outside its zones (grip wrap, guard
+ * opening, foregrip, magazine pinch) go behind it, the trigger finger shows only in the guard opening
+ * (and on the grip), and the frame reports {contact: {R, L: {front, clipped, out, trigger,
+ * trigger_guard}, mag_visible (share of the magazine in hand, on screen or not, the pinching hand leaves uncovered)}}. o: {override: {R|L: {pose, dx, dy}}} (2D skins; the nudge).
  */
-export function armsLayers(frame, skin, sweeps) {
+export function armsLayers(frame, skin, sweeps, o = {}) {
   const [W, H] = FRAME;
   const bones = [...frame.hands.R.bones, ...frame.hands.L.bones];
   // a hand-drawn skin draws its own sprites; hand drawings can force pixels to the back / front layer
-  const buf = skin?.kind === '2d' ? renderArms2d(frame, skin) : renderBones(bones, skin);
+  const two = skin?.kind === '2d';
+  const buf = two ? renderArms2d(frame, skin, FRAME, o) : renderBones(bones, skin);
+  const contact = !!sweeps.contact;
   const pd = new Float32Array(W * H).fill(Infinity), scratch = new Uint8ClampedArray(W * H * 4);
+  const body = contact ? new Uint8Array(W * H) : null, zs = contact ? new Uint8ClampedArray(W * H * 4) : null;
+  let magTotal = 0;
   for (const p of frame.props) {
     const sw = p.kind === 'gun' ? sweeps.gun : p.kind === 'mag' || p.kind === 'mag_in' ? sweeps.mag : p.kind === 'att' ? sweeps.att : p.kind === 'item' ? sweeps.items?.[p.id] : null;
     if (!sw) continue;
@@ -207,20 +216,110 @@ export function armsLayers(frame, skin, sweeps) {
     const idx = p.kind === 'gun' ? p.idx : cellIndex(sw.def, p.yaw, p.pitch);
     const a = anchorOf(sw.def, p.kind === 'item' ? 'grip' : p.kind === 'gun' ? 'grip' : 'mount', idx);
     if (!a) continue;
-    drawCell(scratch, W, H, sw, idx, a, p.x, p.y, p.rot, 1, { depth: { buf: pd, cells: sw.depths, base: p.depth } });
+    if (!contact) { drawCell(scratch, W, H, sw, idx, a, p.x, p.y, p.rot, 1, { depth: { buf: pd, cells: sw.depths, base: p.depth } }); continue; }
+    drawCell(scratch, W, H, sw, idx, a, p.x, p.y, p.rot, 1, { depth: { buf: pd, cells: sw.depths, base: p.depth }, mask: body, maskValue: BODY_OF[p.kind] });
+    // the whole magazine in hand (also the part outside the frame): what the hand may hide a share of
+    if (p.kind === 'mag') { const c = sw.cells[idx]; magTotal = 0; for (let i = 3; i < c.length; i += 4) if (c[i] >= 128) magTotal++; }
+    drawCell(zs, W, H, { def: sw.def, cells: zoneCells(sw, ZONE_KIND[p.kind]) }, idx, a, p.x, p.y, p.rot, 1);
   }
   const back = new Uint8ClampedArray(W * H * 4), front = new Uint8ClampedArray(W * H * 4);
   const force = buf.force, hand = buf.hand, vis = hand ? { R: [0, 0], L: [0, 0] } : null;
+  // 3D arms on a hand-drawn gun: hand pixels = arm pixels near a holding palm
+  let cls = buf.cls, sideOf = hand;
+  if (contact && !two) {
+    cls = new Uint8Array(W * H); sideOf = new Uint8Array(W * H);
+    const palms = ['R', 'L'].map((sd) => { const h = frame.hands[sd]; if (!h.target2 && !h.held && !(sd === 'L' && frame.mag?.state === 'hand')) return null; const pp = project(h.palm), z = Math.max(4, -h.palm[2]); return { sd, x: pp[0], y: pp[1], r: (11 * F) / z }; }).filter(Boolean);
+    for (let i = 0; i < W * H; i++) {
+      if (!buf.rgba[i * 4 + 3]) continue;
+      const x = i % W, y = (i - x) / W;
+      for (const P of palms) if ((x + 0.5 - P.x) ** 2 + (y + 0.5 - P.y) ** 2 <= P.r * P.r) { cls[i] = 3; sideOf[i] = P.sd === 'R' ? 1 : 2; break; }
+    }
+  }
+  const C = contact ? { R: { front: 0, clipped: 0, out: 0, trigger: 0, trigger_guard: 0 }, L: { front: 0, clipped: 0, out: 0, trigger: 0, trigger_guard: 0 } } : null;
+  const zoneAt = (i) => (zs[i * 4 + 3] ? zs[i * 4] : 0);
+  const held = two ? buf.holding : { R: !!(frame.hands.R.target2 || frame.hands.R.held), L: !!(frame.hands.L.target2 || frame.hands.L.held) || frame.mag?.state === 'hand' };
+  const allowed = (c, z) => (c === 4 ? (z & (MASKS.guard | MASKS.grip)) !== 0 : z !== 0);
   for (let i = 0; i < W * H; i++) {
     if (!buf.rgba[i * 4 + 3]) continue;
     const f = force ? force[i] : 0;
-    const toBack = f === 1 || (f !== 2 && pd[i] < buf.depth[i] - 0.6);
+    let toBack = f === 1 || (f !== 2 && pd[i] < buf.depth[i] - 0.6);
+    const c = cls ? cls[i] : 0;
+    if (contact && !toBack && (c === 3 || c === 4) && (!two || f === 2) && body[i] && !allowed(c, zoneAt(i))) {
+      toBack = true; // a finger over the prop outside its contact zones: behind the prop
+      const sd = sideOf[i] === 1 ? 'R' : sideOf[i] === 2 ? 'L' : null;
+      if (sd) C[sd].clipped++;
+    }
     (toBack ? back : front).set(buf.rgba.subarray(i * 4, i * 4 + 4), i * 4);
     // hand pixels the player sees: front layer, or back layer where no prop covers them
     if (vis && hand[i]) { const v = vis[hand[i] === 1 ? 'R' : 'L']; v[1]++; if (!toBack || pd[i] === Infinity) v[0]++; }
   }
-  if (!vis) return { back, front };
-  return { back, front, vis: { R: vis.R[1] ? vis.R[0] / vis.R[1] : null, L: vis.L[1] ? vis.L[0] / vis.L[1] : null }, poses: buf.poses };
+  let magVisible = null;
+  if (contact) {
+    // the result as the game draws it: finger pixels of the front layer over a prop must sit in its zones
+    let magPx = 0, magHidden = 0;
+    for (let i = 0; i < W * H; i++) {
+      // the magazine in hand must mostly show past the hand pinching it
+      if (body[i] === BODY_OF.mag) { magPx++; if (front[i * 4 + 3] && sideOf?.[i] === 2) magHidden++; }
+      if (!front[i * 4 + 3]) continue;
+      const c = cls[i], sd = sideOf[i] === 1 ? 'R' : sideOf[i] === 2 ? 'L' : null;
+      if (!sd || (c !== 3 && c !== 4)) continue;
+      C[sd].front++;
+      if (c === 4) { C[sd].trigger++; if (zoneAt(i) & MASKS.guard) C[sd].trigger_guard++; }
+      if (body[i] && held[sd] && !allowed(c, zoneAt(i))) C[sd].out++;
+    }
+    if (magPx && magTotal) magVisible = Math.round((1 - magHidden / magTotal) * 100) / 100;
+  }
+  const out = { back, front };
+  if (vis) Object.assign(out, { vis: { R: vis.R[1] ? vis.R[0] / vis.R[1] : null, L: vis.L[1] ? vis.L[0] / vis.L[1] : null }, poses: buf.poses });
+  if (contact) out.contact = { R: C.R, L: C.L, mag_visible: magVisible };
+  return out;
+}
+/** Prop pixel kinds in the contact pass. */
+const BODY_OF = { gun: 1, att: 1, mag: 2, mag_in: 3, item: 4 };
+const ZONE_KIND = { gun: 'gun', att: 'attachment', mag: 'mag', mag_in: 'mag', item: 'item' };
+/** Below this share of the magazine in hand showing, the check fails (the hand hides it). */
+export const MAG_VISIBLE_MIN = 0.5;
+/** Zone cells of a sweep as RGBA (R = zone bits, alpha over the prop or a zone): painted / swept zones, else autoZones. */
+const ZONES = new WeakMap();
+function zoneCells(sw, kind) {
+  let z = ZONES.get(sw);
+  if (z) return z;
+  const [cw, ch] = sw.def.cell;
+  z = sw.cells.map((img, idx) => {
+    const bits = sw.zones?.[idx] || autoZones(img, cw, ch, (n) => sw.def.anchors[n]?.[idx] || null, kind);
+    const out = new Uint8ClampedArray(cw * ch * 4);
+    for (let i = 0; i < cw * ch; i++) if (img[i * 4 + 3] >= 128 || bits[i]) { out[i * 4] = bits[i]; out[i * 4 + 3] = 255; }
+    return out;
+  });
+  ZONES.set(sw, z);
+  return z;
+}
+/**
+ * The arms of a frame with a 2D skin, nudged when a held hand is hidden (< 20 % showing) or hides the
+ * magazine in hand (< MAG_VISIBLE_MIN showing after clipping): the other drawings its pose falls back to
+ * and half-pixel offsets of the hand (inside the 1 px hand tolerance) are tried, best kept. -> armsLayers
+ * result (+ nudge: {R|L: {pose, dx, dy}} when one was applied).
+ */
+function nudgeHands(fr, sk, sweeps) {
+  const base = armsLayers(fr, sk, sweeps);
+  const bad = (r, sd) => ((fr.hands[sd].target2 || fr.hands[sd].held) && r.vis?.[sd] != null && r.vis[sd] < 0.2 ? 1 : 0) + (sd === 'L' && r.contact?.mag_visible != null && fr.mag?.state === 'hand' && r.contact.mag_visible < MAG_VISIBLE_MIN ? 1 : 0);
+  let best = base, nudge = null;
+  for (const sd of ['R', 'L']) {
+    if (!bad(best, sd)) continue;
+    const cur = best.poses?.[sd] || handPose(fr, sd), drawn = new Set(sk.parts.hand.map((p) => p.pose));
+    const poses = [cur, ...(POSE_FALLBACK[cur] || [])].filter((p, i) => i === 0 || drawn.has(p));
+    const score = (r) => [bad(r, sd), -(r.contact?.mag_visible ?? 1), -(r.vis?.[sd] ?? 1), r.contact?.[sd]?.clipped ?? 0];
+    const better = (a, b) => { for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i]; return false; };
+    let bs = score(best);
+    for (const pose of poses) for (const [dx, dy] of [[0, 0], [0.5, 0], [-0.5, 0], [0, 0.5], [0, -0.5]]) {
+      if (pose === cur && !dx && !dy) continue;
+      const ov = { ...(nudge || {}), [sd]: { pose, dx, dy } };
+      const r = armsLayers(fr, sk, sweeps, { override: ov });
+      const sc = score(r);
+      if (better(sc, bs)) { best = r; bs = sc; nudge = ov; }
+    }
+  }
+  return nudge ? { ...best, nudge } : best;
 }
 /** Frames -> horizontal strip {width, height, data}. */
 export function strip(frames) {
@@ -234,7 +333,7 @@ const sockOut = (s) => Object.fromEntries(Object.entries(s).filter(([, v]) => v 
  * Bake one clip of a class: solve, render, split. -> {anim (manifest entry without files), back,
  * front (strips), locks (per-frame hand locks for the check), metrics}
  */
-export function bakeClip(cls, clipName, { skin = 'mec', variant = null, engine = null, step = GRID_STEP, gun } = {}) {
+export function bakeClip(cls, clipName, { skin = 'mec', variant = null, engine = null, step = GRID_STEP, gun, contact } = {}) {
   const C = classClips(cls);
   const clip = C[clipName];
   if (!clip) throw new Error(`class "${cls}" has no clip "${clipName}" (clips: ${Object.keys(C).join(', ')})`);
@@ -245,19 +344,31 @@ export function bakeClip(cls, clipName, { skin = 'mec', variant = null, engine =
   const sk = resolveSkin(engine, skin);
   if (magName) sweeps.mag = anySweep(engine, magName, 'mag', magGrid2(engine, magName, cls, step));
   for (const fr of sol.frames) if (fr.item && !sweeps.items[fr.item.id]) sweeps.items[fr.item.id] = anySweep(engine, fr.item.id, 'item', itemGrid(fr.item.id, step));
+  // hands against the props' contact zones: whenever a hand-drawn skin or gun is involved (3D on 3D stays as it was)
+  sweeps.contact = contact ?? (sk?.kind === '2d' || ctx.source === '2d');
   const backs = [], fronts = [], locks = [];
   let worstMiss = 0, clamped = 0;
   for (const fr of sol.frames) {
-    const { back, front, vis, poses } = armsLayers(fr, sk, sweeps);
+    const lay = sweeps.contact && sk?.kind === '2d' ? nudgeHands(fr, sk, sweeps) : armsLayers(fr, sk, sweeps);
+    const { back, front, vis, poses, contact, nudge } = lay;
     backs.push(back); fronts.push(front);
     const L = {};
     for (const side of ['R', 'L']) {
       const h = fr.hands[side];
-      if (h.target2) { const p = project(h.palm); const miss = Math.hypot(p[0] - h.target2[0], p[1] - h.target2[1]); L[side] = { at: h.target2.map(r1), palm: [r1(p[0]), r1(p[1])], miss: r1(miss) }; worstMiss = Math.max(worstMiss, miss); }
+      if (h.target2) {
+        const p = project(h.palm), n = nudge?.[side];
+        const px = p[0] + (n?.dx || 0), py = p[1] + (n?.dy || 0), miss = Math.hypot(px - h.target2[0], py - h.target2[1]);
+        L[side] = { at: h.target2.map(r1), palm: [r1(px), r1(py)], miss: r1(miss) };
+        worstMiss = Math.max(worstMiss, miss);
+      }
       // hand-drawn skins: the hand drawing used and how much of it shows (fp check warns on a hidden hand)
       if (vis && L[side]) { L[side].vis = vis[side] == null ? 0 : Math.round(vis[side] * 100) / 100; L[side].pose = poses?.[side]; if (h.clamped) L[side].clamped = true; }
+      // contact with the props (2D skin or gun): finger pixels clipped to the zones, any left outside, the trigger finger in the guard
+      // (frame level, for every frame the hand holds something, key or in between)
+      if (contact && (h.target2 || h.held || (side === 'L' && fr.mag?.state === 'hand'))) { const c = contact[side]; (L.contact = L.contact || {})[side] = { clipped: c.clipped, out: c.out, ...(c.trigger ? { trigger: c.trigger, trigger_guard: c.trigger_guard } : {}), ...(nudge?.[side] ? { nudge: nudge[side] } : {}) }; }
       if (h.clamped) clamped++;
     }
+    if (contact && contact.mag_visible != null && fr.mag?.state === 'hand') L.mag_visible = contact.mag_visible;
     locks.push(L);
   }
   const anim = { frames: clip.frames, fps: clip.fps, loop: !!clip.loop };
@@ -365,7 +476,7 @@ export const FP_OPS = {
       const jobs = names.map((n) => [n, null]);
       if (a.variants !== false && VARIANT_CLASSES.includes(cls)) for (const n of variantClips(C).filter((x) => names.includes(x))) for (const v of Object.keys(VARIANTS)) jobs.push([n, v]);
       for (const [n, v] of jobs) {
-        const b = bakeClip(cls, n, { skin, variant: v, engine: this, step, gun: a.guns?.[cls] });
+        const b = bakeClip(cls, n, { skin, variant: v, engine: this, step, gun: a.guns?.[cls], ...(a.contact === false ? { contact: false } : {}) });
         const key = v ? `${n}@${v}` : n, fileKey = v ? `${n}_${v}` : n;
         set.anims[key] = { back: `${dir}/${fileKey}_back.png`, front: `${dir}/${fileKey}_front.png`, ...b.anim };
         writePNG(root, set.anims[key].back, b.back);
@@ -557,6 +668,19 @@ export function checkAssets(root, { classes = null, engine = null, limit = 30 } 
           const s = A.gun[Math.min(f, A.gun.length - 1)];
           if (!s || s.hidden) continue;
           const lk = L[f] || {};
+          // hand-drawn skin / gun: finger pixels over the gun outside its zones (none left after clipping)
+          if (gName === std && lk.contact) for (const [side, c] of Object.entries(lk.contact)) {
+            counts.contact_checks = (counts.contact_checks || 0) + 1;
+            worst.finger_out_px = Math.max(worst.finger_out_px ?? 0, c.out);
+            if (c.out > 0) bad({ set: setName, anim, frame: f, hand: side, issue: `${c.out} finger px over the gun outside its grip / guard / foregrip zones` });
+            if (c.nudge) counts.nudged_hands = (counts.nudged_hands || 0) + 1;
+          }
+          // the magazine in hand must stay visible (the pinching hand over it)
+          if (gName === std && lk.mag_visible != null) {
+            counts.mag_visibility_checks = (counts.mag_visibility_checks || 0) + 1;
+            worst.mag_visible_min = Math.min(worst.mag_visible_min ?? 1, lk.mag_visible);
+            if (lk.mag_visible < MAG_VISIBLE_MIN) bad({ set: setName, anim, frame: f, issue: `the hand hides the magazine (${Math.round(lk.mag_visible * 100)}% visible, min ${MAG_VISIBLE_MIN * 100}%)` });
+          }
           for (const side of ['R', 'L']) {
             const h = lk[side];
             if (!h) continue;

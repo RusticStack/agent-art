@@ -21,7 +21,7 @@
 // override?: {yaw, pitch} + grip: [x, y] (a painted cell that replaces the generated one)}.
 // Layers named "guides" are never sampled.
 import { F, D, MAX_SHEET, cellRotation, anglesOf, mm, mv, tr, rx, ry, rz, norm, dot, sub, add, mul, r1, clamp } from './fp.js';
-import { gunModel, fpGeometry, GUN_CLASSES } from './fpkit.js';
+import { classSockets, CLASS_MAG, fpGeometry, GUN_CLASSES } from './fpkit.js';
 import { ANCHORS, REF } from './fpsweep.js';
 import { upscale } from './pixelops.js';
 import { STATIONS, adsStation } from './fpclips.js';
@@ -35,6 +35,14 @@ export const FIELD_FADE = [30, 60];
 const R2D = 180 / Math.PI;
 export const KINDS = ['gun', 'mag', 'attachment', 'item'];
 export const GUIDES = 'guides';
+/** Contact zones of a key drawing (paintable layers, opaque = in the zone) and their bits in the swept zone maps. */
+export const MASKS = { grip: 1, guard: 2, fore: 4, pinch: 8 };
+export const MASK_LAYERS = Object.keys(MASKS).map((k) => `mask_${k}`);
+/** Paintable height layer (grey 0..255 = 0..HEIGHT_CM toward the eye; empty = from the distance to the outline). */
+export const HEIGHT_LAYER = 'height';
+export const HEIGHT_CM = 3;
+/** Layers that are never part of a key's art. */
+export const NOT_ART = [GUIDES, ...MASK_LAYERS, HEIGHT_LAYER];
 /** Key views (eye-space rotation of the object, as a sweep cell: ry(yaw) * rx(pitch)). */
 export const VIEWS = {
   side: () => cellRotation(90, 0), // muzzle left, the gun's left side toward the eye
@@ -109,7 +117,7 @@ const opaque = (data, i) => data[i * 4 + 3] >= 128;
 /** Image of a canvas without its guides layer: {width, height, data}. */
 export function artOf(doc, layer) {
   if (layer) { const i = doc.layers.findIndex((l) => l.name === layer); if (i < 0) return null; return { width: doc.width, height: doc.height, data: doc.composite({ layer: i }) }; }
-  return { width: doc.width, height: doc.height, data: doc.composite({ exclude: [GUIDES] }) };
+  return { width: doc.width, height: doc.height, data: doc.composite({ exclude: NOT_ART }) };
 }
 /** Dominant outline colour of an image: the colour of most silhouette-edge pixels (when it is a real outline). */
 export function outlineOf(img) {
@@ -132,7 +140,23 @@ export function outlineOf(img) {
 /** Distinct opaque colours (rgb ints). */
 export const colorSet = (...imgs) => { const s = new Set(); for (const d of imgs) for (let i = 0; i < d.length; i += 4) if (d[i + 3] >= 128) s.add((d[i] << 16) | (d[i + 1] << 8) | d[i + 2]); return s; };
 
-/** A key: canvas -> {name, R, n, ref, scale, img, big, anchors, outline, ...}. */
+/**
+ * Painted contact zones and height of a key canvas (hidden layers mask_<zone>, height) -> {bits
+ * (MASKS per drawing px), height (0..255), painted (bits some layer paints), hasHeight} or null.
+ */
+export function auxOf(doc) {
+  const W = doc.width, H = doc.height, bits = new Uint8Array(W * H), height = new Uint8Array(W * H);
+  let painted = 0, hasHeight = false;
+  for (const [zone, bit] of Object.entries(MASKS)) {
+    const L = doc.layers.find((l) => l.name === `mask_${zone}`);
+    if (!L) continue;
+    for (let i = 0; i < W * H; i++) if (L.data[i * 4 + 3] >= 128) { bits[i] |= bit; painted |= bit; }
+  }
+  const HL = doc.layers.find((l) => l.name === HEIGHT_LAYER);
+  if (HL) for (let i = 0; i < W * H; i++) if (HL.data[i * 4 + 3] >= 128) { height[i] = Math.max(1, Math.round((HL.data[i * 4] + HL.data[i * 4 + 1] + HL.data[i * 4 + 2]) / 3)); hasHeight = true; }
+  return painted || hasHeight ? { width: W, rows: H, bits, height, painted, hasHeight } : null;
+}
+/** A key: canvas -> {name, R, n, ref, scale, img, big, anchors, outline, aux, ...}. */
 export function keyOf(doc, kind, cls) {
   const m = { ...(doc.meta?.fp2d || {}) };
   if (!m.class && cls) m.class = cls;
@@ -153,6 +177,7 @@ export function keyOf(doc, kind, cls) {
   for (let y = 0; y < img.height; y++) for (let x = 0; x < img.width; x++) if (opaque(img.data, y * img.width + x)) { x0 = Math.min(x0, x); x1 = Math.max(x1, x + 1); y0 = Math.min(y0, y); y1 = Math.max(y1, y + 1); }
   for (const a of Object.values(anchors)) { x0 = Math.min(x0, a[0]); x1 = Math.max(x1, a[0]); y0 = Math.min(y0, a[1]); y1 = Math.max(y1, a[1]); }
   key.bounds = x0 === Infinity ? [ref[0], ref[1], ref[0] + 1, ref[1] + 1] : [x0, y0, x1, y1];
+  key.aux = auxOf(doc);
   return key;
 }
 
@@ -182,7 +207,7 @@ export const sourceKey = (s) => [s.name, s.kind, ...s.docs.map((d) => `${d.name}
 /** Gun-space prior of the anchors: the class standard gun's sockets (the geometry every gun of a class shares). */
 export function priorSockets(kind, cls) {
   if (kind !== 'gun' || !cls || !GUN_CLASSES.includes(cls)) return {};
-  return Object.fromEntries(Object.entries(gunModel(cls).sockets).filter(([, v]) => v?.at).map(([k, v]) => [k, v.at.slice()]));
+  return classSockets(cls);
 }
 
 /**
@@ -235,6 +260,7 @@ function solve3(A, b) {
 export function warpKey(key, Rt, rect, opts = {}) {
   const [x0, y0, w, h] = rect, N = w * h;
   const rgba = new Uint8ClampedArray(N * 4), depth = new Float32Array(N).fill(Infinity);
+  const aux = key.aux, zones = new Uint8Array(N), heights = aux?.hasHeight ? new Uint8Array(N) : null;
   const A = mm(key.R, tr(Rt)), Nt = mv(Rt, key.n), ND = -D * Nt[2];
   const { data: B, width: BW, height: BH, k } = key.big;
   const s = key.scale, rx0 = key.ref[0], ry0 = key.ref[1];
@@ -260,16 +286,18 @@ export function warpKey(key, Rt, rect, opts = {}) {
     const z = D - Y2;
     if (!(z > 0.5)) continue;
     const u = rx0 + ((F * Y0) / z) * s, v = ry0 + ((-F * Y1) / z) * s;
+    const o = py * w + px;
+    // painted zones / height go through the same mapping (zones also where the art is see-through: the guard opening)
+    if (aux) { const ax = Math.floor(u), ay = Math.floor(v); if (ax >= 0 && ay >= 0 && ax < aux.width && ay < aux.rows) { zones[o] = aux.bits[ay * aux.width + ax]; if (heights) heights[o] = aux.height[ay * aux.width + ax]; } }
     const U = Math.floor(u * k), V = Math.floor(v * k);
     if (U < 0 || V < 0 || U >= BW || V >= BH) continue;
     const si = (V * BW + U) * 4;
     if (B[si + 3] < 128) continue;
-    const o = py * w + px;
     rgba[o * 4] = B[si]; rgba[o * 4 + 1] = B[si + 1]; rgba[o * 4 + 2] = B[si + 2]; rgba[o * 4 + 3] = 255;
     depth[o] = t - D;
   }
   if (opts.outline !== false && key.outline) crispen(rgba, w, h, key.outline);
-  return { rgba, depth };
+  return { rgba, depth, zones, heights };
 }
 /**
  * Keep a drawn outline crisp after resampling: silhouette pixels that are not an outline colour take
@@ -330,6 +358,57 @@ export function nearestKey(keys, Rt) {
   let best = null, bd = Infinity;
   for (const k of keys) { const d = rotDist(k.R, Rt); if (d < bd - 1e-9) { bd = d; best = k; } }
   return { key: best, dist: bd };
+}
+
+// ---------- contact zones (where a hand may be drawn over a prop) ----------
+/** Zones each kind carries. */
+export const ZONE_BITS = { gun: MASKS.grip | MASKS.guard | MASKS.fore, mag: MASKS.pinch, attachment: MASKS.fore, item: MASKS.grip };
+/** Auto zone sizes (cm at the reference depth) around the anchors. */
+export const AUTO_ZONE_CM = { grip: 4.2, guard: 8, fore: 4.6, pinch: 4.2 };
+/**
+ * Contact zones of a cell from its silhouette (any sweep, 2D or 3D): grip = opaque px around the grip
+ * anchor; guard = see-through px enclosed by the gun (holes) near the grip, grown 2 px so the trigger
+ * blade and the inner rim count; fore = opaque px around the support anchor; pinch (magazines) =
+ * opaque px around the mount (the top of the magazine the hand holds). at(name) -> [x, y] | null.
+ * ORs into out (Uint8Array w*h) and returns it.
+ */
+export function autoZones(rgba, w, h, at, kind, want = ZONE_BITS[kind] ?? 0, out = new Uint8Array(w * h)) {
+  const s = F / D, op = (i) => rgba[i * 4 + 3] >= 128;
+  const disk = (p, rcm, bit, pred) => {
+    if (!p) return;
+    const r = rcm * s, X0 = Math.max(0, Math.floor(p[0] - r)), X1 = Math.min(w - 1, Math.ceil(p[0] + r)), Y0 = Math.max(0, Math.floor(p[1] - r)), Y1 = Math.min(h - 1, Math.ceil(p[1] + r));
+    for (let y = Y0; y <= Y1; y++) for (let x = X0; x <= X1; x++) { const dx = x + 0.5 - p[0], dy = y + 0.5 - p[1]; if (dx * dx + dy * dy <= r * r && pred(y * w + x)) out[y * w + x] |= bit; }
+  };
+  if ((kind === 'gun' || kind === 'item') && want & MASKS.grip) disk(at('grip'), AUTO_ZONE_CM.grip, MASKS.grip, op);
+  if (kind === 'gun' && want & MASKS.guard) {
+    // see-through px not reachable from the border = holes in the silhouette
+    const outside = new Uint8Array(w * h), q = [];
+    for (let x = 0; x < w; x++) for (const y of [0, h - 1]) { const i = y * w + x; if (!op(i) && !outside[i]) { outside[i] = 1; q.push(i); } }
+    for (let y = 0; y < h; y++) for (const x of [0, w - 1]) { const i = y * w + x; if (!op(i) && !outside[i]) { outside[i] = 1; q.push(i); } }
+    while (q.length) { const i = q.pop(), x = i % w, y = (i - x) / w; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const X = x + dx, Y = y + dy; if (X < 0 || Y < 0 || X >= w || Y >= h) continue; const j = Y * w + X; if (!outside[j] && !op(j)) { outside[j] = 1; q.push(j); } } }
+    const hole = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) if (!op(i) && !outside[i]) hole[i] = 1;
+    // grow 2 px into the art (trigger blade, the rim the finger crosses)
+    for (let k = 0; k < 2; k++) { const g = hole.slice(); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * w + x; if (hole[i]) continue; if ((x > 0 && hole[i - 1]) || (x < w - 1 && hole[i + 1]) || (y > 0 && hole[i - w]) || (y < h - 1 && hole[i + w])) g[i] = 1; } hole.set(g); }
+    disk(at('grip'), AUTO_ZONE_CM.guard, MASKS.guard, (i) => hole[i] === 1);
+  }
+  if ((kind === 'gun' || kind === 'attachment') && want & MASKS.fore) disk(at('support'), AUTO_ZONE_CM.fore, MASKS.fore, op);
+  if (kind === 'mag' && want & MASKS.pinch) disk(at('mount'), AUTO_ZONE_CM.pinch, MASKS.pinch, op);
+  return out;
+}
+/**
+ * Height of a cell's pixels toward the eye (cm): painted (0..255 = 0..HEIGHT_CM) when given, else from
+ * the distance to the outline (a rounded body: 0 at the silhouette, HEIGHT_CM / 2 at 1.5 cm inside).
+ */
+export function heightOf(rgba, w, h, painted = null) {
+  const out = new Float32Array(w * h);
+  if (painted) { for (let i = 0; i < w * h; i++) out[i] = (painted[i] / 255) * HEIGHT_CM; return out; }
+  const s = F / D, cap = 1.5 * s, dist = new Float32Array(w * h).fill(Infinity), q = [];
+  for (let i = 0; i < w * h; i++) if (rgba[i * 4 + 3] < 128) { dist[i] = 0; q.push(i); }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if ((x === 0 || y === 0 || x === w - 1 || y === h - 1) && dist[y * w + x] > 1) { dist[y * w + x] = 1; q.push(y * w + x); }
+  for (let head = 0; head < q.length; head++) { const i = q[head], x = i % w, y = (i - x) / w; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const X = x + dx, Y = y + dy; if (X < 0 || Y < 0 || X >= w || Y >= h) continue; const j = Y * w + X; if (dist[j] > dist[i] + 1) { dist[j] = dist[i] + 1; q.push(j); } } }
+  for (let i = 0; i < w * h; i++) if (rgba[i * 4 + 3] >= 128) out[i] = (Math.min(dist[i], cap) / cap) * (HEIGHT_CM / 2);
+  return out;
 }
 
 /**
@@ -401,9 +480,20 @@ export function sweep2d(src, grid, o = {}) {
   cw += cw & 1; ch += ch & 1;
   if (o.cell) { const [fw, fh] = o.cell; ux0 -= Math.floor((fw - cw) / 2); uy0 -= Math.floor((fh - ch) / 2); cw = fw; ch = fh; }
   if (cw > MAX_SHEET || ch > MAX_SHEET) throw new Error(`sweep2d "${src.name}": a cell would be ${cw}x${ch} px (max ${MAX_SHEET}): narrow the grid or add key drawings nearer the cells (an edge-on card spreads)`);
-  const cells = [], depths = [], anchors = Object.fromEntries(names.map((n) => [n, []])), overridden = [];
+  const cells = [], depths = [], zones = [], anchors = Object.fromEntries(names.map((n) => [n, []])), overridden = [];
+  // zones the drawings paint (every key of the state); the others come from the cell (autoZones)
+  const painted = keys.reduce((m, k) => m | (k.aux?.painted || 0), 0), paintedHeight = keys.some((k) => k.aux?.hasHeight);
   for (const c of raw) {
-    const img = new Uint8ClampedArray(cw * ch * 4), dep = new Float32Array(cw * ch).fill(Infinity);
+    const img = new Uint8ClampedArray(cw * ch * 4), dep = new Float32Array(cw * ch).fill(Infinity), zb = new Uint8Array(cw * ch), hb = paintedHeight ? new Uint8Array(cw * ch) : null;
+    {
+      const [x0, y0, w, h] = c.rect;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const s0 = y * w + x, X = x0 + x - ux0, Y = y0 + y - uy0;
+        if (X < 0 || Y < 0 || X >= cw || Y >= ch) continue;
+        if (c.zones[s0]) zb[Y * cw + X] = c.zones[s0];
+        if (hb && c.heights) hb[Y * cw + X] = c.heights[s0];
+      }
+    }
     const [x0, y0, w, h] = c.rect;
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       const s = y * w + x;
@@ -426,16 +516,23 @@ export function sweep2d(src, grid, o = {}) {
       }
       overridden.push({ yaw: c.yaw, pitch: c.pitch, canvas: od.name });
     }
-    cells.push(img); depths.push(dep);
     for (const n of names) { const a = c.anchors[n]; anchors[n].push(a ? [r1(a[0] - ux0), r1(a[1] - uy0)] : anchors[n][anchors[n].length - 1] ?? [0, 0]); }
+    // contact zones the keys do not paint: from the cell's silhouette around its anchors
+    const at = (n) => (anchors[n] ? anchors[n][anchors[n].length - 1] : null);
+    autoZones(img, cw, ch, at, kind, ZONE_BITS[kind] & ~painted, zb);
+    for (let i = 0; i < cw * ch; i++) if (!img[i * 4 + 3]) zb[i] &= MASKS.guard; // zones are on the art, except the guard opening
+    // per-pixel height (painted, else from the distance to the outline): the surface bulges toward the eye
+    const hcm = heightOf(img, cw, ch, hb);
+    for (let i = 0; i < cw * ch; i++) if (dep[i] !== Infinity) dep[i] = r1(dep[i] - hcm[i]);
+    cells.push(img); depths.push(dep); zones.push(zb);
   }
   const def = {
     ...(src.class ? { class: src.class } : {}), cell: [cw, ch], yaw: grid.yaw || [0, 0, 1], pitch: grid.pitch || [0, 0, 1], anchors,
-    ...(kind === 'gun' && (src.mag || (src.class && GUN_CLASSES.includes(src.class))) ? { mag: src.mag || gunModel(src.class).fp.mag } : {}), ...(src.slot ? { slot: src.slot } : {}),
+    ...(kind === 'gun' && (src.mag || (src.class && GUN_CLASSES.includes(src.class))) ? { mag: src.mag || CLASS_MAG[src.class] } : {}), ...(src.slot ? { slot: src.slot } : {}),
   };
   const palette = colorSet(...keys.map((k) => k.img.data), ...[...ovr.values()].map((d) => artOf(d).data));
   return {
-    def, cells, depths, kind, ref: refName, fit, palette, keys: raw.map((c) => c.key), overridden,
+    def, cells, depths, zones, kind, ref: refName, fit, palette, keys: raw.map((c) => c.key), overridden,
     stats: { cells: cells.length, cell: [cw, ch], keys: keys.length, ms: Math.round(performance.now() - t0), px_per_m: Math.round((F / D) * 1000) / 10, worst_key_distance_deg: r1(Math.max(...raw.map((c) => c.dist))) },
   };
 }
