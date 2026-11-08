@@ -219,6 +219,11 @@ test('art_audio: fx/reverb/loop schema, info shows resolved layers, delete wildc
   // loopable sfx export carries loop points
   const lp = await json({ action: 'sfx', name: 'hum', recipe: 'drone_rotor' });
   assert.ok(lp.created[0].loop);
+  // info resolves target/loop like the render does, and the tip passes them back
+  const hi = await json({ action: 'info', name: 'hum' });
+  assert.ok(hi.resolved.loop && /resolved.loop/.test(hi.tip) && /resolved.target/.test(hi.tip));
+  await json({ action: 'sfx', name: 'hv', recipe: 'hover', vars: { target: -4 } });
+  assert.equal((await json({ action: 'info', name: 'hv' })).resolved.target, -4);
   const ex = await json({ action: 'export', name: 'hum', format: 'wav' });
   assert.equal(decodeWAV(fs.readFileSync(ex.files[0])).loops.length, 1);
   // broken layers: clear error and no asset left behind

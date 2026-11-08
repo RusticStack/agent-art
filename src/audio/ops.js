@@ -150,9 +150,11 @@ export const AUDIO_OPS = {
     const res = { ...def, cache: store(this).mem.get(a.name)?.meta };
     if (def.kind === 'sfx' && def.recipe) {
       // the layers the recipe resolved to for this seed + vars: copy, edit, re-render as {layers, seed}
-      const { spec } = resolveSfxSpec(def);
-      res.resolved = { layers: spec.layers, fx: spec.fx, reverb: spec.reverb, target: spec.target, tail: spec.tail, loop: spec.loop };
-      res.tip = 'art_audio sfx {name, layers: resolved.layers, fx: resolved.fx, reverb: resolved.reverb, seed} reproduces this sound; edit layers to change it';
+      const { spec, vars } = resolveSfxSpec(def);
+      // target and loop resolve like renderSfx does (def, then vars, then the recipe's own)
+      const loop = def.loop === false ? undefined : def.loop ?? vars.loop ?? spec.loop;
+      res.resolved = { layers: spec.layers, fx: spec.fx, reverb: spec.reverb, target: def.target ?? vars.target ?? spec.target, tail: spec.tail, loop };
+      res.tip = 'art_audio sfx {name, layers: resolved.layers, fx: resolved.fx, reverb: resolved.reverb, target: resolved.target, tail: resolved.tail, loop: resolved.loop, seed} reproduces this sound; edit layers to change it';
     }
     return res;
   },
