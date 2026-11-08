@@ -232,7 +232,14 @@ export const MODEL_OPS = {
     def.created = Date.now();
     const s = summary(def, build(this, def));
     saveModel(this, def, source, 'model created');
-    return { model: def.name, ...s, next: `art_model preview {name:"${def.name}"} to look at it, update {set:{i:{..}}|add|remove} to iterate, export {name} for .glb` };
+    let next = `art_model preview {name:"${def.name}"} to look at it, update {set:{i:{..}}|add|remove} to iterate, export {name} for .glb`;
+    // origin "auto" keeps part coordinates (kit pieces snap to the grid); a standalone prop or vehicle
+    // that is off-centre is easier to place in an engine with origin:"bottom"
+    if (def.origin === 'auto' && s.origin === 'parts') {
+      const { min, max } = s.bounds_px, cx = (min[0] + max[0]) / 2, cz = (min[2] + max[2]) / 2;
+      if (Math.abs(cx) > 0.5 || Math.abs(cz) > 0.5 || Math.abs(min[1]) > 0.5) next += `. Not centred (bbox centre x ${r4(cx)}, z ${r4(cz)}, bottom y ${r4(min[1])}): for a prop / ship / vehicle use update {name:"${def.name}", origin:"bottom"} (centre on X/Z, bottom on y=0)`;
+    }
+    return { model: def.name, ...s, next };
   },
   model_update(a, source) {
     const def = getModel(this, a.name);
@@ -303,7 +310,7 @@ export const MODEL_OPS = {
       units: { px_per_unit: scale, up: a.up === 'z' ? 'Z (root node rotated +90deg about X)' : 'Y (glTF standard)', front: a.up === 'z' ? '-Y' : '+Z', note: 'Z-up engines (Three.js with camera.up = Z): object.rotation.x = Math.PI / 2 maps glTF +Y up to +Z up, or export with up:"z"' },
       origin: built.origin, grid_px: Number(def.grid ?? 32), ...stats, instances: a.instances ? built.instances.length : undefined,
       parts: built.parts, baked: built.baked || undefined, ctm: ctmFile ? path.basename(ctmFile) : undefined,
-      materials_note: 'NEAREST filters + REPEAT wrap; alphaMode MASK (cutoff 0.5) where the texture has transparency; emissive from layer "emissive" / <canvas>_emissive; overlay materials (name overlay_*) sample TEXCOORD_1, strength = COLOR_0 alpha',
+      materials_note: 'NEAREST filters + REPEAT wrap; alphaMode MASK (cutoff 0.5) where the texture has transparency; BLEND (baseColorFactor alpha = opacity, extras.depthWrite false) for parts with opacity < 1 or glass, doubleSided for glass / double_sided; emissive from layer "emissive" / <canvas>_emissive; overlay materials (name overlay_*) sample TEXCOORD_1, strength = COLOR_0 alpha',
     };
     const metaFile = file.replace(/\.glb$/i, '.meta.json');
     fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2));

@@ -30,6 +30,15 @@ const S = {
   frame: { type: 'integer' },
 };
 const region = { x: { type: 'integer' }, y: { type: 'integer' }, w: { type: 'integer' }, h: { type: 'integer' } };
+/** art_model part: placement / material options (builder args are open: art_help {topic:"3d"}). */
+const MODEL_PART = {
+  type: 'object',
+  properties: {
+    type: { type: 'string' }, pivot: { type: 'array', description: '[x,y,z] rotate about' }, mirror: { type: ['string', 'array'], description: 'x|y|z|[..]' },
+    opacity: { type: 'number', minimum: 0, maximum: 1 }, glass: { type: ['boolean', 'object'] }, plane: { enum: ['xy', 'xz', 'zy'] },
+  },
+  required: ['type'],
+};
 const BLENDS = ['normal', 'multiply', 'screen', 'add', 'overlay', 'darken', 'lighten', 'soft-light'];
 
 export const TOOLS = [
@@ -245,13 +254,13 @@ export const TOOLS = [
   },
   {
     name: 'art_model',
-    description: '3D low-poly models textured with pixel art (HD-2D, nearest filter) -> glTF .glb. Units px (32 px = 1 unit). create {name, parts:[{type, ...args, at?:[x,y,z], cell?:[gx,gy,gz] (x grid), turn?:0-3, rotate?:[x,y,z]deg, scale?, array?:{count, step|cell_step, turn?}}]}. Kit: floor wall corner pillar column arch vault stairs ledge balustrade roof rubble box cylinder plane shape; props: extrude lathe; layout: model (place other models). texture|faces{top,front,..}|side|top|color; world UVs, seamless across pieces. Ruins: broken, holes:<mask>. overlays:[{texture,where:bottom|top|corners|edges}]. ctm {name:<new canvas>, ctm:{base, method:full|compact|horizontal|vertical|random|repeat|overlay, border?}} = connected textures. update {name, parts|add|set:{i:{..}}|remove:[i]}; info; list; delete; preview {name, views?, size?} (game = 38° camera); export {name, path?, instances?, atlas?, up?:"z", normal_maps?}. art_help {topic:"3d"}.',
+    description: '3D low-poly models textured with pixel art (HD-2D, nearest filter) -> glTF .glb. Units px (32 px = 1 unit). create {name, parts:[{type, ...args, at?:[x,y,z], cell?:[gx,gy,gz] (x grid), turn?:0-3, rotate?:[x,y,z]deg (X,Y,Z about origin or pivot?), scale?, mirror?, array?:{count, step|cell_step, turn?, rotate?, about?}, opacity?|glass?}]}. Kit: floor wall corner pillar column arch vault stairs ledge balustrade roof rubble box (taper|bevel|insets) wedge inset cylinder (r_top/r_bottom, wrap) cone plane shape loft; props: extrude lathe; layout: model (place other models). texture|faces{top,front,..}|side|top|color; world UVs, seamless across pieces. Ruins: broken, holes:<mask>. overlays:[{texture,where:bottom|top|corners|edges}]. ctm {name:<new canvas>, ctm:{base, method:full|compact|horizontal|vertical|random|repeat|overlay, border?}} = connected textures. update {name, parts|add|set:{i:{..}}|remove:[i]}; info; list; delete; preview {name, views?, size?} (game = 38° camera); export {name, path?, instances?, atlas?, up?:"z", normal_maps?}. art_help {topic:"3d"}.',
     inputSchema: {
       type: 'object',
       properties: {
         action: { type: 'string', enum: ['create', 'update', 'info', 'list', 'delete', 'preview', 'export', 'ctm'] }, name: { type: 'string' },
-        parts: { type: 'array', items: { type: 'object' } }, add: { type: 'array', items: { type: 'object' } }, set: { type: 'object' }, remove: { type: 'array', items: { type: 'integer' } },
-        grid: { type: 'number' }, scale: { type: 'number', description: 'px per unit (32)' }, origin: { type: ['string', 'array'], description: 'auto|bottom|center|pivot|[x,y,z]' }, notes: { type: 'string' }, overwrite: { type: 'boolean' },
+        parts: { type: 'array', items: MODEL_PART }, add: { type: 'array', items: { type: 'object' } }, set: { type: 'object' }, remove: { type: 'array', items: { type: 'integer' } },
+        grid: { type: 'number' }, scale: { type: 'number', description: 'px per unit (32)' }, origin: { type: ['string', 'array'], description: 'auto (part coords)|bottom (props, ships)|center|pivot|[x,y,z]' }, notes: { type: 'string' }, overwrite: { type: 'boolean' },
         overlays: { type: 'array', items: { type: 'object' } }, uv_origin: { type: 'array', items: { type: 'number' } },
         views: { type: 'array', items: { type: ['string', 'object'] }, description: 'game front back side left top iso' }, size: { type: 'integer' }, preview: { type: 'boolean' },
         path: { type: 'string' }, instances: { type: 'boolean' }, atlas: { type: 'boolean' }, up: { type: 'string', enum: ['y', 'z'] }, normal_maps: { type: 'boolean' },

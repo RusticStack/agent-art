@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`art_model` ship and vehicle kit:**
+  - Translucent materials: `opacity:0..1` and `glass:true` export glTF `alphaMode:"BLEND"` (opacity in `baseColorFactor`, texture alpha respected). Glass is double-sided, and extras carry `depthWrite:false`. The image is shared with the opaque material, atlas skips these materials, and the preview blends them. `double_sided:true` is also available on its own.
+  - New primitives:
+    - `wedge` (`top_w`, `top_d`, `shift:[x,z]`).
+    - Box `taper` (front-face scale), `bevel` (chamfer px) and `insets` (recessed or raised panels, no CSG), plus the `inset` part.
+    - Cylinder `r_top`/`r_bottom` (frustum), and `cone`.
+    - `loft` (`shape` with `scale_end`, `shift_end`, `about`).
+  - `shape` `plane:"zy"`: side profile `[z,y]`, extruded along x.
+  - Part `mirror:"x"|"y"|"z"|[...]` emits mirrored copies with correct winding and normals.
+  - `pivot:[x,y,z]` rotates and scales about a local point.
+  - Radial arrays: `array.about:[x,y,z]`.
+  - Cylinder `wrap:"once"|"repeat"` (`repeat:n`) and `u_offset` (turns).
+  - `art_model create` suggests `origin:"bottom"` for off-centre models.
+  - `art_help 3d` and the README document the transform order: scale, then rotate X then Y then Z about the part origin or pivot, then turn, then `at`.
+  - `art_model` schema: a typed part object (`pivot`, `mirror`, `opacity`, `glass`, `plane`).
+
+### Fixed
+
+- `shape` with an unknown `plane` (for example `"zy"` before this release) silently built `xy` geometry. `zy` is now supported, and any other plane throws a clear error.
+
 ## 0.3.0
 
 Everything since 0.2.1.

@@ -99,7 +99,7 @@ For 8+ frames or several directions use the rig skill.`,
    art_model ${J({ action: 'create', name: 'arch_a', parts: [{ type: 'arch', span: 24, spring: 20, d: 8, texture: 'stone' }] })}
    art_model ${J({ action: 'create', name: 'floor_a', parts: [{ type: 'floor', texture: 'floor_tile' }] })}
    Ruined variants: ${J({ type: 'wall', texture: 'stone', broken: { amount: 24, step: 4, seed: 3 }, holes: 'crack' })}, arch with broken:true, plus ${J({ type: 'rubble', count: 10, texture: 'stone', at: [0, 0, 12] })}.
-   Others: corner, pillar, column, vault, stairs {steps, rise, run, tread}, ledge, balustrade, roof {style: gable|shed}. art_help {topic:"3d"} lists every option.
+   Others: corner, pillar, column, vault, stairs {steps, rise, run, tread}, ledge, balustrade, roof {style: gable|shed}. Ships/vehicles: wedge, box taper|bevel|insets, cone, loft {scale_end}, mirror:"x", glass:true, origin:"bottom". art_help {topic:"3d"} lists every option.
 3. Look: art_model ${J({ action: 'preview', name: 'wall_a' })} (game = the 38° game camera, plus front/side/top/iso). Iterate with update ${J({ action: 'update', name: 'wall_a', set: { 0: { h: 96 } } })}.
 4. Export each piece: art_model ${J({ action: 'export', name: 'wall_a' })} -> exports/wall_a.glb + wall_a.meta.json. Z-up engine: object.rotation.x = Math.PI/2, or up:"z".
 5. Diorama section from placed pieces (cell = grid coords, turn = 90° steps):

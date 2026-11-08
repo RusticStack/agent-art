@@ -1,5 +1,6 @@
 // glTF 2.0 binary (.glb) writer, no dependencies. Pixel-art materials: NEAREST samplers, REPEAT
-// wrap, embedded PNGs, alpha MASK (cutoff 0.5) when a texture has transparency, emissive and
+// wrap, embedded PNGs, alpha MASK (cutoff 0.5) when a texture has transparency (BLEND for parts with
+// opacity < 1 or glass, doubleSided for double_sided / glass), emissive and
 // normal textures. glTF is Y-up, metres = units (px / scale). up:"z" adds a +90° X root rotation.
 import { encodePNG } from './png.js';
 import { weld, applyP } from './model3d.js';
@@ -54,7 +55,7 @@ function buildAtlas(meshes, maxSize = 256) {
     if (!users.has(k)) users.set(k, { tex: p.tex, prims: [], ok: true });
     const u = users.get(k);
     u.prims.push(p);
-    if (p.overlay) { u.ok = false; continue; } // decal shells keep their own texture (TEXCOORD_1)
+    if (p.overlay || p.tex.material) { u.ok = false; continue; } // decal shells keep their own texture (TEXCOORD_1); glass/opacity keep their own material
     if (p.tex.width * p.tex.height > 1) for (const v of p.uv) if (v < -1e-4 || v > 1 + 1e-4) { u.ok = false; break; }
   }
   const items = [...users.values()].filter((u) => u.ok && u.tex.width <= maxSize && u.tex.height <= maxSize);
@@ -173,12 +174,23 @@ export function writeGLB(scene, opts = {}) {
     const mk = overlay ? `ov:${t.key}` : t.key;
     if (matOf.has(mk)) return matOf.get(mk);
     const name = (overlay ? 'overlay_' : '') + (t.name || t.key);
-    const m = { name, pbrMetallicRoughness: { baseColorTexture: texture(t.key, t.width, t.height, t.data, t.name || t.key), metallicFactor: 0, roughnessFactor: 1 } };
+    const ik = t.imageKey ?? t.key; // material variants (glass, opacity) share the image
+    const m = { name, pbrMetallicRoughness: { baseColorTexture: texture(ik, t.width, t.height, t.data, t.name || t.key), metallicFactor: 0, roughnessFactor: 1 } };
+    const spec = !overlay && t.material;
     // overlay (grime/moss/...): own UV set TEXCOORD_1, strength in COLOR_0 alpha, cut out by MASK
-    if (overlay) { m.pbrMetallicRoughness.baseColorTexture.texCoord = 1; m.extras = { overlay: true }; }
-    if (overlay || needsAlpha(t)) { m.alphaMode = 'MASK'; m.alphaCutoff = 0.5; }
-    if (t.emissive) { m.emissiveTexture = texture(t.key + '#e', t.width, t.height, t.emissive, name + '_emissive'); m.emissiveFactor = [1, 1, 1]; }
-    if (t.normal) m.normalTexture = texture(t.key + '#n', t.width, t.height, t.normal, name + '_normal');
+    if (overlay) m.pbrMetallicRoughness.baseColorTexture.texCoord = 1;
+    if (spec && spec.blend) {
+      // translucent (opacity / glass): BLEND, alpha = texture alpha x opacity. Engines draw BLEND after
+      // opaque geometry without depth writes (three.js GLTFLoader: transparent, depthWrite false).
+      m.alphaMode = 'BLEND';
+      m.pbrMetallicRoughness.baseColorFactor = [1, 1, 1, spec.opacity];
+      if (spec.glass) { m.pbrMetallicRoughness.roughnessFactor = 0.1; }
+      m.extras = { transparent: true, depthWrite: false, opacity: spec.opacity, ...(spec.glass ? { glass: true } : {}) };
+    } else if (overlay || needsAlpha(t)) { m.alphaMode = 'MASK'; m.alphaCutoff = 0.5; }
+    if (overlay) m.extras = { overlay: true };
+    if (spec && spec.double_sided) m.doubleSided = true;
+    if (t.emissive) { m.emissiveTexture = texture(ik + '#e', t.width, t.height, t.emissive, name + '_emissive'); m.emissiveFactor = [1, 1, 1]; }
+    if (t.normal) m.normalTexture = texture(ik + '#n', t.width, t.height, t.normal, name + '_normal');
     json.materials.push(m);
     matOf.set(mk, json.materials.length - 1);
     return json.materials.length - 1;

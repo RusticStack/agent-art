@@ -1,5 +1,5 @@
 // Software rasterizer for model previews: z-buffer, nearest texture sampling, alpha test (0.5),
-// backface culling, Lambert light from the top-left plus ambient, emissive. Orthographic views
+// alpha BLEND for translucent parts (drawn last, no depth write), backface culling (not on double_sided), Lambert light from the top-left plus ambient, emissive. Orthographic views
 // share one scale (sizes compare across views); "game" is a 38° pitch perspective 3/4 camera.
 import { packImages } from './sheet.js';
 import { cross, dot, norm } from './model3d.js';
@@ -45,8 +45,12 @@ function raster(groups, proj, k, cx, cy, S) {
   for (let i = 0; i < S * S; i++) img.set(BG, i * 4), (img[i * 4 + 3] = 255);
   const zbuf = new Float32Array(S * S).fill(-Infinity);
   let drawn = 0;
-  groups.forEach((g, gi) => {
+  // opaque / alpha-tested groups first, then translucent ones (opacity, glass) blended over them
+  const order = groups.map((g, gi) => gi).sort((a, b) => (groups[a].tex.material?.blend ? 1 : 0) - (groups[b].tex.material?.blend ? 1 : 0));
+  for (const gi of order) {
+    const g = groups[gi];
     const { X, Y, Z, W } = proj[gi];
+    const mat = g.tex.material, blend = !!mat?.blend, twoSided = !!mat?.double_sided, opacity = blend ? mat.opacity : 1;
     const n = X.length, sx = new Float32Array(n), sy = new Float32Array(n);
     for (let i = 0; i < n; i++) { sx[i] = S / 2 + (X[i] - cx) * k; sy[i] = S / 2 - (Y[i] - cy) * k; }
     const t = g.tex, tw = t.width, th = t.height, td = t.data, te = t.emissive;
@@ -54,7 +58,7 @@ function raster(groups, proj, k, cx, cy, S) {
     for (let f = 0; f < idx.length; f += 3) {
       const a = idx[f], b = idx[f + 1], c = idx[f + 2];
       const area = (sx[b] - sx[a]) * (sy[c] - sy[a]) - (sx[c] - sx[a]) * (sy[b] - sy[a]);
-      if (area > -1e-9) continue; // back-facing or degenerate
+      if (Math.abs(area) < 1e-9 || (area > 0 && !twoSided)) continue; // degenerate or back-facing
       const x0 = Math.max(0, Math.floor(Math.min(sx[a], sx[b], sx[c]))), x1 = Math.min(S - 1, Math.ceil(Math.max(sx[a], sx[b], sx[c])));
       const y0 = Math.max(0, Math.floor(Math.min(sy[a], sy[b], sy[c]))), y1 = Math.min(S - 1, Math.ceil(Math.max(sy[a], sy[b], sy[c])));
       if (x0 > x1 || y0 > y1) continue;
@@ -81,17 +85,25 @@ function raster(groups, proj, k, cx, cy, S) {
           if (ty < 0) ty += th;
           const p = (ty * tw + tx) * 4;
           const k = al ? (l0 * al[a] * wa + l1 * al[b] * wb + l2 * al[c] * wc) / iw : 1;
-          if (td[p + 3] * k < 128) continue; // alpha test (MASK 0.5; overlays x COLOR_0 alpha)
-          zbuf[o] = z;
           const shade = l0 * sa + l1 * sb + l2 * sc;
           let r = td[p] * shade, gg = td[p + 1] * shade, bb = td[p + 2] * shade;
           if (te && te[p + 3]) { const ea = te[p + 3] / 255; r += te[p] * ea; gg += te[p + 1] * ea; bb += te[p + 2] * ea; }
+          if (blend) {
+            // BLEND: alpha = texel alpha x opacity, no depth write (like glTF BLEND in engines)
+            const a = (td[p + 3] / 255) * opacity;
+            if (a <= 0) continue;
+            img[o * 4] = img[o * 4] * (1 - a) + r * a; img[o * 4 + 1] = img[o * 4 + 1] * (1 - a) + gg * a; img[o * 4 + 2] = img[o * 4 + 2] * (1 - a) + bb * a;
+            drawn++;
+            continue;
+          }
+          if (td[p + 3] * k < 128) continue; // alpha test (MASK 0.5; overlays x COLOR_0 alpha)
+          zbuf[o] = z;
           img[o * 4] = r; img[o * 4 + 1] = gg; img[o * 4 + 2] = bb;
           drawn++;
         }
       }
     }
-  });
+  }
   return { width: S, height: S, data: img, drawn };
 }
 

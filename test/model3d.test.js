@@ -305,3 +305,245 @@ test('art_model through runTool (MCP path), help topic and skill', async () => {
   assert.match(helpText({ topic: '3d' }), /gothic|Gothic/);
   assert.ok(SKILLS['3d-kit']);
 });
+
+// ---------- ship / vehicle kit: translucency, tapered + bevelled primitives, loft, planes, mirror, pivot, radial arrays, wrap, insets ----------
+const near = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps * Math.max(1, Math.abs(b));
+function assertSolid(name, m, vol) {
+  const s = solidStats(m);
+  assert.ok(s.open < 1e-6, `${name} not closed (${s.open})`);
+  assert.equal(s.bad, 0, `${name}: ${s.bad} triangles with inward normals`);
+  assert.ok(s.vol > 0, `${name} volume ${s.vol}`);
+  if (vol !== undefined) assert.ok(near(s.vol, vol), `${name} volume ${s.vol} vs ${vol}`);
+  return s;
+}
+const ngon = (r, N) => (N / 2) * r * r * Math.sin((2 * Math.PI) / N);
+
+test('glass / opacity: glTF BLEND with opacity factor, double-sided glass, shared image, preview blends', () => {
+  const e = setup();
+  const dir = tmp();
+  e.run('model_create', { name: 'canopy', parts: [
+    { type: 'box', texture: 'stone', w: 32, h: 8, d: 32 },
+    { type: 'box', texture: 'stone', w: 16, h: 8, d: 16, at: [0, 8, 0], glass: true },
+    { type: 'box', color: '#3af', w: 8, h: 8, d: 8, at: [0, 16, 0], opacity: 0.5 },
+  ] });
+  const r = e.run('model_export', { name: 'canopy', path: path.join(dir, 'canopy.glb') });
+  const json = parseGLB(fs.readFileSync(r.file));
+  const byName = Object.fromEntries(json.materials.map((m) => [m.name, m]));
+  assert.equal(byName.stone.alphaMode, undefined, 'opaque part stays OPAQUE');
+  assert.equal(byName.stone.doubleSided, undefined);
+  const glass = byName.stone_glass;
+  assert.equal(glass.alphaMode, 'BLEND');
+  assert.equal(glass.doubleSided, true, 'glass is double-sided');
+  assert.equal(glass.pbrMetallicRoughness.baseColorFactor[3], 0.35, 'glass default opacity');
+  assert.equal(glass.extras.depthWrite, false);
+  assert.equal(glass.alphaCutoff, undefined, 'BLEND has no cutoff');
+  const tint = json.materials.find((m) => m.name.endsWith('_a50'));
+  assert.equal(tint.alphaMode, 'BLEND');
+  assert.equal(tint.pbrMetallicRoughness.baseColorFactor[3], 0.5);
+  assert.ok(!tint.doubleSided, 'plain opacity stays single-sided');
+  // glass and the opaque box sample the same PNG
+  assert.equal(json.images.length, 2, 'stone image shared by the glass variant');
+  assert.equal(glass.pbrMetallicRoughness.baseColorTexture.index, byName.stone.pbrMetallicRoughness.baseColorTexture.index);
+  // atlas leaves translucent materials alone
+  const at = parseGLB(fs.readFileSync(e.run('model_export', { name: 'canopy', path: path.join(dir, 'canopy_at.glb'), atlas: true }).file));
+  assert.ok(at.materials.some((m) => m.alphaMode === 'BLEND'));
+  // preview: the glass box tints, it does not hide what is behind it
+  const p = e.run('model_preview', { name: 'canopy', views: ['front'] });
+  assert.ok(p.views[0].pixels > 50);
+  assert.throws(() => e.run('model_create', { name: 'bad', parts: [{ type: 'box', opacity: 2 }] }), /opacity must be a number 0\.\.1/);
+});
+
+test('wedge, tapered box, bevelled box, frustum and cone: closed, outward, exact volumes and triangle counts', () => {
+  const e = setup();
+  // default wedge = ramp: top collapsed to the back edge
+  const ramp = build(e, [{ type: 'wedge', w: 32, h: 16, d: 32 }]);
+  assertSolid('ramp', ramp, (32 * 32 * 16) / 2);
+  assert.equal(ramp.triangles, 8, 'bottom, back, slope (2 each) + 2 triangular sides');
+  assert.deepEqual(ramp.bounds(), { min: [-16, 0, -16], max: [16, 16, 16] });
+  // ridge (top_w 0), and a trapezoid top shifted forward
+  assertSolid('ridge', build(e, [{ type: 'wedge', w: 32, h: 16, d: 32, top_w: 0, top_d: 32, shift: [0, 0] }]), (32 * 32 * 16) / 2);
+  const trap = build(e, [{ type: 'wedge', w: 32, h: 16, d: 32, top_w: 16, top_d: 16, shift: [4, 8] }]);
+  assertSolid('trapezoid wedge', trap, (16 / 6) * (32 * 32 + 4 * 24 * 24 + 16 * 16));
+  assert.deepEqual(trap.bounds().max, [16, 16, 16]);
+  // taper: front face (+z) scaled about its centre (a nose)
+  const nose = build(e, [{ type: 'box', w: 16, h: 16, d: 32, taper: 0.5 }]);
+  assertSolid('taper', nose, (32 / 6) * (16 * 16 + 4 * 12 * 12 + 8 * 8));
+  assert.equal(nose.triangles, 12);
+  const zs = [];
+  const g = [...nose.groups.values()][0];
+  for (let i = 0; i < g.pos.length; i += 3) if (near(g.pos[i + 2], 16)) zs.push([g.pos[i], g.pos[i + 1]]);
+  assert.ok(zs.length && zs.every(([x, y]) => Math.abs(x) <= 4 + 1e-9 && y >= 4 - 1e-9 && y <= 12 + 1e-9), 'nose face is 8x8 centred');
+  assertSolid('taper to a point', build(e, [{ type: 'box', w: 16, h: 16, d: 32, taper: [0, 0] }]), (32 * 16 * 16) / 3);
+  // bevel: 6 faces + 12 chamfer strips (2 tris) + 8 corner triangles; volume = box - edge prisms - corners
+  const bev = build(e, [{ type: 'box', w: 16, h: 16, d: 16, bevel: 2 }]);
+  assertSolid('bevel', bev, 16 ** 3 - 12 * (4 / 2) * (16 - 4) - (8 * (5 * 8)) / 6);
+  assert.equal(bev.triangles, 44);
+  assert.deepEqual(bev.bounds(), { min: [-8, 0, -8], max: [8, 16, 8] });
+  assert.throws(() => build(e, [{ type: 'box', bevel: 2, taper: 0.5 }]), /cannot be combined/);
+  // frustum + cone (exact N-gon volumes)
+  const N = 12;
+  const fr = build(e, [{ type: 'cylinder', r_bottom: 8, r_top: 4, h: 16, segments: N }]);
+  const A0 = ngon(8, N), A1 = ngon(4, N);
+  assertSolid('frustum', fr, (16 / 3) * (A0 + A1 + Math.sqrt(A0 * A1)));
+  assert.equal(fr.triangles, 2 * N + 2 * (N - 2));
+  const cone = build(e, [{ type: 'cone', r: 8, h: 12, segments: N }]);
+  assertSolid('cone', cone, (12 / 3) * ngon(8, N));
+  assert.equal(cone.triangles, N + (N - 2), 'cone: one triangle per segment, no top cap');
+  // slanted smooth normals: the cone side leans outward and up
+  const cg = [...cone.groups.values()][0];
+  let up = 0;
+  for (let i = 0; i < cg.nrm.length; i += 3) if (cg.nrm[i + 1] > 0.1 && cg.nrm[i + 1] < 0.99) up++;
+  assert.ok(up > 0, 'cone side normals tilt up');
+  assertSolid('inverted cone (r_bottom 0)', build(e, [{ type: 'cylinder', r_top: 6, r_bottom: 0, h: 10, segments: 8 }]), (10 / 3) * ngon(6, 8));
+  assert.throws(() => build(e, [{ type: 'cylinder', r_top: 0, r_bottom: 0 }]), /must be > 0/);
+});
+
+test('shape: plane "zy" side profiles, loft (scale_end), clear error for unknown planes', () => {
+  const e = setup();
+  const tri = [[0, 0], [16, 0], [0, 8]];
+  // zy: profile [z, y], thickness along x (centred)
+  const side = build(e, [{ type: 'shape', plane: 'zy', points: tri, d: 4 }]);
+  assertSolid('shape zy', side, 64 * 4);
+  assert.deepEqual(side.bounds(), { min: [-2, 0, 0], max: [2, 8, 16] });
+  // xy and xz unchanged
+  assert.deepEqual(build(e, [{ type: 'shape', points: tri, d: 4 }]).bounds(), { min: [0, 0, -2], max: [16, 8, 2] });
+  assert.deepEqual(build(e, [{ type: 'shape', plane: 'xz', points: tri, d: 4 }]).bounds(), { min: [0, 0, 0], max: [16, 4, 8] });
+  assert.throws(() => build(e, [{ type: 'shape', plane: 'yz', points: tri }]), /shape plane must be "xy".*"xz".*"zy".*got "yz"/s);
+  // loft: square hull section 16x16 narrowing to 8x8 at the nose (+z), 32 long
+  const sq = [[-8, 0], [8, 0], [8, 16], [-8, 16]];
+  const hull = build(e, [{ type: 'shape', points: sq, d: 32, scale_end: [0.5, 0.5] }]);
+  assertSolid('loft', hull, (32 / 6) * (256 + 4 * 144 + 64));
+  assert.deepEqual(hull.bounds(), { min: [-8, 0, -16], max: [8, 16, 16] });
+  const hg = [...hull.groups.values()][0];
+  for (let i = 0; i < hg.pos.length; i += 3) if (near(hg.pos[i + 2], 16)) assert.ok(Math.abs(hg.pos[i]) <= 4 + 1e-9 && hg.pos[i + 1] >= 4 - 1e-9 && hg.pos[i + 1] <= 12 + 1e-9, 'nose section 8x8 about the bbox centre');
+  // loft type (default 0.5), non-uniform scale (bent walls are split into triangles), a point nose, a zy loft
+  assertSolid('loft type', build(e, [{ type: 'loft', points: sq, d: 32 }]), (32 / 6) * (256 + 4 * 144 + 64));
+  assertSolid('loft non-uniform', build(e, [{ type: 'loft', points: sq, d: 32, scale_end: [0.25, 1] }]), (32 / 6) * (256 + 4 * (10 * 16) + 4 * 16));
+  assertSolid('loft to a point', build(e, [{ type: 'loft', points: sq, d: 30, scale_end: 0 }]), (30 * 256) / 3);
+  const zl = build(e, [{ type: 'loft', plane: 'zy', points: [[0, 0], [32, 0], [32, 8], [0, 8]], d: 16, scale_end: [1, 0.5] }]);
+  assertSolid('loft zy', zl, (16 / 6) * (256 + 4 * 32 * 6 + 32 * 4));
+});
+
+test('mirror: mirrored copies keep outward winding and normals; lists give every combination', () => {
+  const e = setup();
+  // an asymmetric wedge off to the right
+  const part = { type: 'wedge', w: 16, h: 8, d: 16, top_w: 4, top_d: 8, shift: [5, 2], at: [20, 0, 0] };
+  const one = build(e, [part]);
+  const both = build(e, [{ ...part, mirror: 'x' }]);
+  const v1 = assertSolid('wedge', one).vol;
+  assertSolid('mirrored wedge', both, 2 * v1);
+  assert.equal(both.triangles, 2 * one.triangles);
+  assert.equal(both.bounds().min[0], -28);
+  assert.equal(both.bounds().max[0], 28);
+  // the mirrored copy faces the other way: its outer side normals point to -x
+  for (const g of both.groups.values()) for (let i = 0; i < g.pos.length; i += 3) if (near(g.pos[i], -28) && Math.abs(g.nrm[i + 1]) < 0.5 && Math.abs(g.nrm[i + 2]) < 0.5) assert.ok(g.nrm[i] < -0.9, 'outer side of the mirrored copy faces -x');
+  // glb stays valid (unit normals, indices in range)
+  e.run('model_create', { name: 'wings', parts: [{ type: 'wedge', w: 16, h: 4, d: 16, top_w: 4, shift: [6, 0], at: [16, 0, 0], mirror: 'x' }] });
+  parseGLB(fs.readFileSync(e.run('model_export', { name: 'wings', path: path.join(tmp(), 'wings.glb') }).file));
+  // ["x","z"] = four copies (quadrants); y mirror flips upside down
+  const quad = build(e, [{ type: 'box', w: 4, h: 4, d: 4, at: [10, 0, 10], mirror: ['x', 'z'] }]);
+  assertSolid('quad mirror', quad, 4 * 64);
+  assert.deepEqual(quad.bounds(), { min: [-12, 0, -12], max: [12, 4, 12] });
+  assertSolid('y mirror', build(e, [{ type: 'box', w: 4, h: 4, d: 4, at: [0, 2, 0], mirror: 'y' }]), 2 * 64);
+  assert.throws(() => build(e, [{ type: 'box', mirror: 'w' }]), /mirror must be "x", "y", "z"/);
+});
+
+test('rotation pivot and radial arrays about a centre', () => {
+  const e = setup();
+  const r6 = (b) => ({ min: b.min.map((v) => +v.toFixed(6) + 0), max: b.max.map((v) => +v.toFixed(6) + 0) });
+  // rotate about the part origin (bottom-centre) vs about its centre via pivot
+  assert.deepEqual(r6(build(e, [{ type: 'box', w: 16, h: 16, d: 16, rotate: [0, 0, 90] }]).bounds()), { min: [-16, -8, -8], max: [0, 8, 8] });
+  assert.deepEqual(r6(build(e, [{ type: 'box', w: 16, h: 16, d: 16, rotate: [0, 0, 90], pivot: [0, 8, 0] }]).bounds()), { min: [-8, 0, -8], max: [8, 16, 8] });
+  // pivot + at: rotation happens about the pivot, then the part moves by at
+  assert.deepEqual(r6(build(e, [{ type: 'box', w: 16, h: 16, d: 16, rotate: [0, 0, 90], pivot: [0, 8, 0], at: [5, 0, 0] }]).bounds()), { min: [-3, 0, -8], max: [13, 16, 8] });
+  // order X then Y then Z (fixed axes): a +y bar rotated X 90 points +z, then Y 90 turns it to +x
+  const bar = r6(build(e, [{ type: 'box', w: 2, h: 16, d: 2, rotate: [90, 90, 0] }]).bounds());
+  assert.ok(near(bar.max[0], 16) && near(bar.min[0], 0), `X then Y: ${JSON.stringify(bar)}`);
+  // radial array: 4 engines at 90° about the world origin
+  const ring = build(e, [{ type: 'box', w: 4, h: 4, d: 4, at: [20, 0, 0], array: { count: 4, rotate: [0, 90, 0], about: [0, 0, 0] } }]);
+  assertSolid('ring', ring, 4 * 64);
+  const centres = [[20, 0], [0, -20], [-20, 0], [0, 20]], hit = new Set();
+  for (const g of ring.groups.values()) for (let i = 0; i < g.pos.length; i += 3) {
+    const k = centres.findIndex(([x, z]) => Math.abs(g.pos[i] - x) <= 2 + 1e-9 && Math.abs(g.pos[i + 2] - z) <= 2 + 1e-9);
+    assert.ok(k >= 0, `vertex ${g.pos[i]},${g.pos[i + 2]} is on one of the 4 engines`);
+    hit.add(k);
+  }
+  assert.equal(hit.size, 4, 'every copy placed around the centre');
+  // about off the origin, plus a step (spiral)
+  assert.deepEqual(r6(build(e, [{ type: 'box', w: 2, h: 2, d: 2, at: [10, 0, 5], array: { count: 2, rotate: [0, 180, 0], about: [0, 0, 5], step: [0, 4, 0] } }]).bounds()), { min: [-11, 0, 4], max: [11, 6, 6] });
+  // without about the copies still turn in place (old behaviour)
+  assert.deepEqual(r6(build(e, [{ type: 'box', w: 4, h: 4, d: 4, at: [20, 0, 0], array: { count: 4, rotate: [0, 90, 0] } }]).bounds()), { min: [18, 0, -2], max: [22, 4, 2] });
+  assert.throws(() => build(e, [{ type: 'box', array: { count: 2, about: 5 } }]), /array.about must be/);
+});
+
+test('cylinder wrap:"once"|"repeat" and u_offset place the texture on one side', () => {
+  const e = setup();
+  const sideUV = (part) => {
+    const out = [];
+    for (const g of build(e, [part]).groups.values()) {
+      if (g.tex.canvas !== 'sq') continue;
+      for (let i = 0; i < g.nrm.length / 3; i++) out.push({ n: [g.nrm[i * 3], g.nrm[i * 3 + 2]], u: g.uv[i * 2], v: g.uv[i * 2 + 1] });
+    }
+    return out;
+  };
+  const span = (s, k) => Math.max(...s.map((p) => p[k])) - Math.min(...s.map((p) => p[k]));
+  const base = { type: 'cylinder', r: 8, h: 16, segments: 12, side: 'sq', cap: '#444' };
+  // once: one copy round, image centre (u 0.5) facing the front (+z); v fitted 0..1
+  let s = sideUV({ ...base, wrap: 'once' });
+  const front = s.filter((p) => p.n[1] > 0.99);
+  assert.ok(front.length && front.every((p) => near(p.u, 0.5) || near(p.u, 1.5)), `front u ${front.map((p) => p.u)}`);
+  assert.ok(near(span(s, 'u'), 1), 'exactly one copy round');
+  assert.ok(s.every((p) => p.v === 0 || p.v === 1));
+  // u_offset 0.25: the image centre turns a quarter toward +x
+  s = sideUV({ ...base, wrap: 'once', u_offset: 0.25 });
+  const right = s.filter((p) => p.n[0] > 0.99);
+  assert.ok(right.length && right.every((p) => near(p.u, 0.5)), `right u ${right.map((p) => p.u)}`);
+  // repeat: an integer number of copies (seamless); default from the circumference, or repeat:n
+  s = sideUV({ ...base, wrap: 'repeat' });
+  assert.ok(near(span(s, 'u'), Math.round((2 * Math.PI * 8) / 16)));
+  s = sideUV({ ...base, wrap: 'repeat', repeat: 2 });
+  assert.ok(near(span(s, 'u'), 2));
+  assert.ok(near(span(s, 'v'), 1), 'repeat: v tiles with the world (16 px = 1)');
+  // default unchanged (tile:false = stretched, u 0 at the front)
+  s = sideUV({ ...base, tile: false });
+  assert.ok(s.filter((p) => p.n[1] > 0.99).some((p) => near(p.u, 0) || near(p.u, 1)));
+  assert.throws(() => build(e, [{ ...base, wrap: 'clamp' }]), /wrap must be "once" or "repeat"/);
+});
+
+test('inset panels: recesses and raised panels on box faces without CSG', () => {
+  const e = setup();
+  const B = 32 ** 3;
+  assertSolid('recess', build(e, [{ type: 'box', texture: 'stone', w: 32, h: 32, d: 32, insets: [{ face: 'front', rect: [8, 8, 16, 16], depth: 4 }] }]), B - 16 * 16 * 4);
+  assertSolid('raised', build(e, [{ type: 'box', w: 32, h: 32, d: 32, insets: [{ face: 'top', rect: [4, 4, 8, 8], depth: -2 }] }]), B + 8 * 8 * 2);
+  // hangar mouth touching the bottom edge, a hatch in the side's corner, two intakes on the back
+  const hull = build(e, [{ type: 'box', texture: 'stone', w: 32, h: 32, d: 32, insets: [
+    { face: 'front', rect: [8, 16, 16, 16], depth: 24, texture: 'sq' },
+    { face: 'right', rect: [0, 0, 8, 8], depth: 2 },
+    { face: 'back', rect: [2, 2, 8, 4], depth: 3 }, { face: 'back', rect: [22, 2, 8, 4], depth: 3 },
+  ] }]);
+  assertSolid('hull', hull, B - 16 * 16 * 24 - 64 * 2 - 2 * 32 * 3);
+  assert.ok(hull.triangles < 120, `${hull.triangles} tris`);
+  assert.ok([...hull.groups.values()].some((g) => g.tex.canvas === 'sq'), 'panel texture on the recess floor');
+  // the standalone inset part: box + one panel (panel = floor texture); default rect = centred half
+  const ins = build(e, [{ type: 'inset', w: 32, h: 16, d: 16, face: 'front', rect: [4, 4, 24, 8], depth: 3, texture: 'stone', panel: 'sq' }]);
+  assertSolid('inset part', ins, 32 * 16 * 16 - 24 * 8 * 3);
+  assert.ok([...ins.groups.values()].some((g) => g.tex.canvas === 'sq'));
+  assertSolid('inset default rect', build(e, [{ type: 'inset', w: 32, h: 32, d: 32, depth: 2 }]), B - 16 * 16 * 2);
+  assert.throws(() => build(e, [{ type: 'box', w: 16, h: 16, d: 16, insets: [{ face: 'front', rect: [8, 8, 16, 16], depth: 2 }] }]), /must lie inside the front face/);
+  assert.throws(() => build(e, [{ type: 'box', w: 16, h: 16, d: 16, insets: [{ face: 'front', rect: [0, 0, 8, 8], depth: 16 }] }]), /less than the box thickness/);
+  assert.throws(() => build(e, [{ type: 'box', insets: [{ face: 'side', rect: [0, 0, 4, 4] }] }]), /inset face must be one of/);
+});
+
+test('origin hint, art_help 3d and the art_model schema document the ship kit', () => {
+  const e = setup();
+  const r = e.run('model_create', { name: 'ship', parts: [{ type: 'box', w: 8, h: 8, d: 8, at: [40, 4, 0] }] });
+  assert.match(r.next, /origin:"bottom"/);
+  const c = e.run('model_create', { name: 'kit', parts: [{ type: 'wall' }] });
+  assert.doesNotMatch(c.next, /origin:"bottom"/, 'centred kit pieces get no hint');
+  const b = e.run('model_update', { name: 'ship', origin: 'bottom' });
+  assert.deepEqual(b.bounds_px.min, [-4, 0, -4]);
+  const help = helpText({ topic: '3d' });
+  for (const k of ['wedge', 'taper', 'bevel', 'r_top', 'loft', 'scale_end', '"zy"', 'mirror', 'pivot', 'X then Y then Z', 'about', 'origin:"bottom"', 'wrap', 'u_offset', 'inset', 'glass', 'opacity', 'BLEND']) assert.ok(help.includes(k), `art_help 3d mentions ${k}`);
+  const tool = TOOLS.find((t) => t.name === 'art_model');
+  for (const k of ['wedge', 'loft', 'inset', 'glass', 'mirror', 'pivot', 'about']) assert.ok(tool.description.includes(k), `art_model description mentions ${k}`);
+});

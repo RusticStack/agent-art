@@ -225,6 +225,144 @@ function boxFaces(m, min, max, ft, tile = true) {
   for (const [n, P] of F) { const t = ft(n); m.face(t, P, n, uvFace(P, n, t, tile), null, tile ? 1 : 0); }
 }
 
+/** Newell normal of a polygon (robust for quads with a collapsed edge). */
+function polyNormal(P) {
+  let n = [0, 0, 0];
+  for (let i = 0; i < P.length; i++) {
+    const a = P[i], b = P[(i + 1) % P.length];
+    n = add(n, [(a[1] - b[1]) * (a[2] + b[2]), (a[2] - b[2]) * (a[0] + b[0]), (a[0] - b[0]) * (a[1] + b[1])]);
+  }
+  return n;
+}
+/**
+ * Convex hexahedron from 8 corners (bottom x0z0,x1z0,x1z1,x0z1 then the same on top; y may differ
+ * per corner): wedges and tapered boxes. Normals point away from the centroid; collapsed faces
+ * (a ridge top) drop out.
+ */
+function hexaFaces(m, C, ft, tile = true) {
+  const c = C.reduce(add).map((v) => v / 8);
+  const F = [[3, 2, 6, 7], [1, 0, 4, 5], [2, 1, 5, 6], [0, 3, 7, 4], [4, 5, 6, 7], [0, 1, 2, 3]];
+  for (const q of F) {
+    const P = q.map((i) => C[i]);
+    let n = polyNormal(P);
+    if (len(n) < 1e-9) continue;
+    n = norm(n);
+    const fc = P.reduce(add).map((v) => v / 4);
+    if (dot(sub(fc, c), n) < 0) n = n.map((v) => -v);
+    const t = ft(n);
+    m.face(t, P, n, uvFace(P, n, t, tile), null, tile ? 1 : 0);
+  }
+}
+
+/** Box with chamfered edges and corners (bevel px): 6 faces + 12 edge strips + 8 corner triangles. */
+function bevelBoxFaces(m, min, max, e, ft, tile = true) {
+  const c = [0, 1, 2].map((k) => (min[k] + max[k]) / 2), h = [0, 1, 2].map((k) => (max[k] - min[k]) / 2);
+  const mode = tile ? 1 : 0;
+  const pt = (v) => add(c, v);
+  const emit = (P, n) => { const t = ft(n); m.face(t, P, n, uvFace(P, n, t, tile), n, mode); };
+  for (let k = 0; k < 3; k++) for (const s of [-1, 1]) {
+    const i = (k + 1) % 3, j = (k + 2) % 3, P = [];
+    for (const [si, sj] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { const v = [0, 0, 0]; v[k] = s * h[k]; v[i] = si * (h[i] - e); v[j] = sj * (h[j] - e); P.push(pt(v)); }
+    const n = [0, 0, 0]; n[k] = s;
+    emit(P, n);
+  }
+  for (let l = 0; l < 3; l++) for (const si of [-1, 1]) for (const sj of [-1, 1]) {
+    const i = (l + 1) % 3, j = (l + 2) % 3;
+    const at = (ai, aj, sl) => { const v = [0, 0, 0]; v[i] = si * ai; v[j] = sj * aj; v[l] = sl * (h[l] - e); return pt(v); };
+    const P = [at(h[i], h[j] - e, -1), at(h[i], h[j] - e, 1), at(h[i] - e, h[j], 1), at(h[i] - e, h[j], -1)];
+    const n = [0, 0, 0]; n[i] = si; n[j] = sj;
+    emit(P, norm(n));
+  }
+  for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) {
+    const S = [sx, sy, sz];
+    const P = [0, 1, 2].map((k) => pt(S.map((s, q) => s * (q === k ? h[q] : h[q] - e))));
+    emit(P, norm(S));
+  }
+}
+
+const FACE_NAMES = ['front', 'back', 'right', 'left', 'top', 'bottom'];
+/** Face frame of an axis-aligned box: top-left corner (as seen from outside), right + down unit vectors, size, outward normal. */
+function boxFaceFrame(face, w, h, d, y0 = 0) {
+  const x0 = -w / 2, x1 = w / 2, z0 = -d / 2, z1 = d / 2, y1 = y0 + h;
+  const F = {
+    front: [[x0, y1, z1], [1, 0, 0], [0, -1, 0], w, h, [0, 0, 1]],
+    back: [[x1, y1, z0], [-1, 0, 0], [0, -1, 0], w, h, [0, 0, -1]],
+    right: [[x1, y1, z1], [0, 0, -1], [0, -1, 0], d, h, [1, 0, 0]],
+    left: [[x0, y1, z0], [0, 0, 1], [0, -1, 0], d, h, [-1, 0, 0]],
+    top: [[x0, y1, z0], [1, 0, 0], [0, 0, 1], w, d, [0, 1, 0]],
+    bottom: [[x0, y0, z1], [1, 0, 0], [0, 0, -1], w, d, [0, -1, 0]],
+  }[face];
+  if (!F) throw new Error(`inset face must be one of ${FACE_NAMES.join('|')} (got ${JSON.stringify(face)})`);
+  const [o, r, dn, fw, fh, n] = F;
+  return { at: (u, v, k = 0) => [o[0] + r[0] * u + dn[0] * v - n[0] * k, o[1] + r[1] * u + dn[1] * v - n[1] * k, o[2] + r[2] * u + dn[2] * v - n[2] * k], r, dn, fw, fh, n, thick: face === 'front' || face === 'back' ? d : face === 'left' || face === 'right' ? w : h };
+}
+function normInsets(a) {
+  const list = [].concat(a.insets ?? []);
+  if (a.type === 'inset' || a.rect) list.push({ face: a.face, rect: a.rect, depth: a.depth, texture: a.panel ?? a.inset_texture, side: a.inset_side, tile: a.panel_tile });
+  return list.map((s, k) => {
+    if (!s || typeof s !== 'object') throw new Error(`insets[${k}] must be {face, rect:[u,v,w,h], depth, texture?}`);
+    const r = s.rect;
+    if (r === undefined || r === null) return { face: s.face ?? 'front', rect: null, depth: num(s.depth, 2, 'depth'), texture: s.texture, side: s.side, tile: s.tile };
+    if (!Array.isArray(r) || r.length !== 4 || r.some((v) => !Number.isFinite(Number(v)))) throw new Error(`inset rect must be [u,v,w,h] px on the face (top-left as seen from outside), got ${JSON.stringify(r)}`);
+    const depth = num(s.depth, 2, 'depth');
+    if (!depth) throw new Error('inset depth must be non-zero (> 0 recess, < 0 raised panel)');
+    return { face: s.face ?? 'front', rect: r.map(Number), depth, texture: s.texture, side: s.side, tile: s.tile };
+  });
+}
+/**
+ * Box with recessed (depth > 0) or raised (depth < 0) rectangular panels on its faces: the face
+ * gets a hole per recess, plus 4 inner walls and a floor (no CSG). Raised panels are closed boxes
+ * standing on the face.
+ */
+function insetBoxFaces(m, w, h, d, y0, ft, insets, ctx, tile = true) {
+  const mode = tile ? 1 : 0;
+  const byFace = new Map();
+  for (const s of insets) {
+    const fr = boxFaceFrame(s.face, w, h, d, y0);
+    if (!s.rect) s.rect = [fr.fw / 4, fr.fh / 4, fr.fw / 2, fr.fh / 2]; // default: centred, half the face
+    const [u, v, pw, ph] = s.rect;
+    if (!s.depth) throw new Error('inset depth must be non-zero (> 0 recess, < 0 raised panel)');
+    if (pw <= 0 || ph <= 0 || u < 0 || v < 0 || u + pw > fr.fw + 1e-6 || v + ph > fr.fh + 1e-6) throw new Error(`inset rect [${s.rect}] must lie inside the ${s.face} face (${fr.fw}x${fr.fh} px)`);
+    if (s.depth > 0 && s.depth >= fr.thick) throw new Error(`inset depth ${s.depth} must be less than the box thickness ${fr.thick} behind the ${s.face} face`);
+    if (!byFace.has(s.face)) byFace.set(s.face, []);
+    byFace.get(s.face).push(s);
+  }
+  for (const face of FACE_NAMES) {
+    const fr = boxFaceFrame(face, w, h, d, y0), list = byFace.get(face) || [], t = ft(fr.n);
+    // face minus the recess holes: split on every hole edge, keep the cells outside the holes and
+    // greedy-merge them into rectangles (holes may touch the face border or each other)
+    const holes = list.filter((s) => s.depth > 0).map((s) => s.rect);
+    if (!holes.length) {
+      const P = [fr.at(0, 0), fr.at(fr.fw, 0), fr.at(fr.fw, fr.fh), fr.at(0, fr.fh)];
+      m.face(t, P, fr.n, uvFace(P, fr.n, t, tile), null, mode);
+    } else {
+      const cuts = (vals, max) => [...new Set([0, max, ...vals].map((x) => Math.max(0, Math.min(max, x))))].sort((x, y) => x - y);
+      const us = cuts(holes.flatMap(([u, , pw]) => [u, u + pw]), fr.fw), vs = cuts(holes.flatMap(([, v, , ph]) => [v, v + ph]), fr.fh);
+      const inHole = (cu, cv) => holes.some(([u, v, pw, ph]) => cu > u && cu < u + pw && cv > v && cv < v + ph);
+      greedy(us.length - 1, vs.length - 1, (i, j) => (inHole((us[i] + us[i + 1]) / 2, (vs[j] + vs[j + 1]) / 2) ? 0 : 1), (i0, i1, j0, j1) => {
+        const P = [fr.at(us[i0], vs[j0]), fr.at(us[i1 + 1], vs[j0]), fr.at(us[i1 + 1], vs[j1 + 1]), fr.at(us[i0], vs[j1 + 1])];
+        m.face(t, P, fr.n, uvFace(P, fr.n, t, tile), null, mode);
+      });
+    }
+    for (const s of list) {
+      const [u, v, pw, ph] = s.rect, k = s.depth;
+      const pt = s.texture != null ? ctx.tex(s.texture) : t, st = s.side != null ? ctx.tex(s.side) : s.texture != null ? pt : t;
+      const ptile = s.tile ?? (s.texture == null ? tile : false);
+      // panel floor (recess) or panel top (raised): faces outward
+      const F = [fr.at(u, v, k), fr.at(u + pw, v, k), fr.at(u + pw, v + ph, k), fr.at(u, v + ph, k)];
+      m.face(pt, F, fr.n, ptile ? uvFace(F, fr.n, pt, true) : [[0, 0], [1, 0], [1, 1], [0, 1]], null, ptile ? 1 : 0);
+      if (k < 0) { const B = [fr.at(u, v, 0), fr.at(u, v + ph, 0), fr.at(u + pw, v + ph, 0), fr.at(u + pw, v, 0)], nb = fr.n.map((x) => -x); m.face(t, B, nb, uvFace(B, nb, t, tile), null, mode); }
+      // walls: recess walls face the panel centre, raised walls face away from it
+      const sg = k > 0 ? -1 : 1;
+      const edges = [[[u, v], [u + pw, v], fr.dn.map((x) => -x)], [[u + pw, v], [u + pw, v + ph], fr.r], [[u + pw, v + ph], [u, v + ph], fr.dn], [[u, v + ph], [u, v], fr.r.map((x) => -x)]];
+      for (const [[ua, va], [ub, vb], out] of edges) {
+        const W = [fr.at(ua, va, 0), fr.at(ub, vb, 0), fr.at(ub, vb, k), fr.at(ua, va, k)], n = out.map((x) => x * sg);
+        m.face(st, W, n, uvFace(W, n, st, true), null, 1);
+      }
+    }
+  }
+}
+
 /** Extrude 2D shapes ({outer CCW, holes CW} or a bare polygon) from z0 to z1: caps + a wall per loop edge. */
 function prismShapes(m, shapes, z0, z1, ft, tile = true) {
   const mode = tile ? 1 : 0;
@@ -444,6 +582,9 @@ const num = (v, d, name) => {
 };
 const pos = (v, d, name) => { const x = num(v, d, name); if (x <= 0) throw new Error(`"${name}" must be > 0`); return x; };
 
+/** extrude/lathe pivot:[x,y] = canvas pixel; a 3-element pivot is the part rotation pivot instead. */
+const canvasPivot = (a) => (Array.isArray(a.pivot) && a.pivot.length === 2 ? a.pivot.map(Number) : null);
+
 function imageRef(a) {
   if (a.canvas) return { canvas: a.canvas, frame: a.frame, layer: a.layer, region: a.region, overlay: a.overlay };
   if (a.texture) return a.texture;
@@ -457,7 +598,7 @@ function extrude(a, ctx) {
   const thr = Number(a.alpha_threshold ?? 128);
   const solid = (x, y) => x >= 0 && y >= 0 && x < W && y < H && data[(y * W + x) * 4 + 3] >= thr;
   const D = pos(a.depth, 4, 'depth');
-  const [px, py] = a.pivot || tex.pivot || [W / 2, H];
+  const [px, py] = canvasPivot(a) || tex.pivot || [W / 2, H];
   const zb = a.center === false ? 0 : -D / 2;
   const m = new Mesh();
   const uvOf = (p) => [(p[0] + px) / W, (py - p[1]) / H];
@@ -508,7 +649,7 @@ function lathe(a, ctx) {
   const r = [];
   for (let y = 0; y < H; y++) { let rr = 0; for (let x = W - 1; x >= axis; x--) if (data[(y * W + x) * 4 + 3] >= 128) { rr = x + 1 - axis; break; } r.push(rr); }
   if (!r.some((v) => v > 0)) throw new Error(`lathe: no opaque pixels right of axis x=${axis}`);
-  const py = (a.pivot || prof.pivot)?.[1] ?? H;
+  const py = (canvasPivot(a) || prof.pivot)?.[1] ?? H;
   const Y = (y) => py - y;
   const side = a.texture ? ctx.tex(a.texture) : null, capT = a.cap ? ctx.tex(a.cap) : side;
   const rmax = Math.max(...r);
@@ -597,7 +738,23 @@ function block(defaults) {
     const ft = faceTexer(a, ctx, defaults.color);
     const y0 = defaults.topAtZero ? -h : 0;
     const m = new Mesh();
-    if (!a.broken && !a.holes) { boxFaces(m, [-w / 2, y0, -d / 2], [w / 2, y0 + h, d / 2], ft, a.tile !== false); return m; }
+    if (!a.broken && !a.holes) {
+      const tile = a.tile !== false, insets = normInsets(a), bevel = Math.max(0, num(a.bevel, 0, 'bevel'));
+      const taper = a.taper === undefined || a.taper === null ? null : [].concat(a.taper, a.taper).slice(0, 2).map((v) => num(v, 1, 'taper'));
+      if ([bevel > 0, !!taper, insets.length > 0].filter(Boolean).length > 1) throw new Error('bevel, taper and insets cannot be combined on one box (use separate parts)');
+      if (taper) {
+        if (taper.some((v) => v < 0)) throw new Error('taper scales must be >= 0');
+        const [sx, sy] = taper, yc = y0 + h / 2;
+        const C = [[-w / 2, y0, -d / 2], [w / 2, y0, -d / 2], [w / 2, y0, d / 2], [-w / 2, y0, d / 2], [-w / 2, y0 + h, -d / 2], [w / 2, y0 + h, -d / 2], [w / 2, y0 + h, d / 2], [-w / 2, y0 + h, d / 2]];
+        for (const i of [2, 3, 6, 7]) C[i] = [C[i][0] * sx, yc + (C[i][1] - yc) * sy, C[i][2]];
+        hexaFaces(m, C, ft, tile);
+      } else if (bevel > 0) {
+        const e = Math.min(bevel, Math.min(w, h, d) / 2 - 1e-3);
+        bevelBoxFaces(m, [-w / 2, y0, -d / 2], [w / 2, y0 + h, d / 2], e, ft, tile);
+      } else if (insets.length) insetBoxFaces(m, w, h, d, y0, ft, insets, ctx, tile);
+      else boxFaces(m, [-w / 2, y0, -d / 2], [w / 2, y0 + h, d / 2], ft, tile);
+      return m;
+    }
     const plane = a.plane ?? (h <= d && h <= w ? 'xz' : 'xy');
     const [PW, PH, thick, edges] = plane === 'xz' ? [w, d, h, ['top', 'bottom', 'left', 'right']] : [w, h, d, ['top']];
     const [fp, fn] = plane === 'xz' ? toXZ(y0 + h / 2, d) : [(p) => [p[0], p[1] + y0, p[2]], XY[1]];
@@ -612,31 +769,70 @@ function block(defaults) {
   };
 }
 
+/**
+ * Cylinder / frustum / cone: r_top and r_bottom (default r) may differ, 0 = a point (cone, no cap).
+ * Side UVs: tile (world, 1 texel = 1 px), tile:false (one copy stretched round from +z), or
+ * wrap:"once" (one copy round, image centre facing +z) / wrap:"repeat" (repeat:n copies, default
+ * from the circumference; v tiles with the world) turned by u_offset (turns, + = toward +x).
+ */
 function cylinder(a, ctx) {
   const t0 = texSize(a, ctx);
-  const R = pos(a.r ?? a.radius, t0 ? t0.width / (2 * Math.PI) : 8, 'r'), h = pos(a.h, t0?.height ?? 16, 'h');
+  const R = num(a.r ?? a.radius, t0 ? t0.width / (2 * Math.PI) : 8, 'r'), h = pos(a.h, t0?.height ?? 16, 'h');
+  const Rt = num(a.r_top, R, 'r_top'), Rb = num(a.r_bottom, R, 'r_bottom');
+  if (Rt < 0 || Rb < 0 || Math.max(Rt, Rb) <= 0) throw new Error('"r" (or r_top / r_bottom) must be > 0 (one of r_top / r_bottom may be 0 for a cone)');
   const N = Math.max(3, Math.round(num(a.segments, 12, 'segments')));
   const flat = a.flat ?? N <= 8, tile = a.tile !== false;
+  const wrap = a.wrap ?? null;
+  if (wrap !== null && wrap !== 'once' && wrap !== 'repeat') throw new Error(`cylinder wrap must be "once" or "repeat" (got ${JSON.stringify(wrap)})`);
+  const uOff = num(a.u_offset, 0, 'u_offset');
   const sideT = ctx.tex(a.side ?? a.texture ?? a.color ?? '#8a8a94');
   const topT = ctx.tex(a.top ?? a.cap ?? a.texture ?? a.color ?? '#8a8a94'), botT = ctx.tex(a.bottom ?? a.cap ?? a.texture ?? a.color ?? '#8a8a94');
   const y0 = a.center ? -h / 2 : 0, y1 = y0 + h;
   const m = new Mesh();
   const at = (j) => { const th = (2 * Math.PI * j) / N; return [Math.sin(th), Math.cos(th)]; };
-  const circ = 2 * Math.PI * R;
+  const circ = 2 * Math.PI * Math.max(Rt, Rb);
+  const reps = wrap === 'repeat' ? Math.max(1, Math.round(num(a.repeat, Math.max(1, Math.round(circ / sideT.width)), 'repeat'))) : 1;
+  // slanted side normal: radial h, up (Rb - Rt)
+  const sl = norm([h, Rb - Rt]);
+  const nrm = (s, c) => [s * sl[0], sl[1], c * sl[0]];
   for (let j = 0; j < N; j++) {
     const [s0, c0] = at(j), [s1, c1] = at(j + 1), [sm, cm] = at(j + 0.5);
-    const P = [[R * s0, y1, R * c0], [R * s1, y1, R * c1], [R * s1, y0, R * c1], [R * s0, y0, R * c0]];
-    const N4 = flat ? [sm, 0, cm] : [[s0, 0, c0], [s1, 0, c1], [s1, 0, c1], [s0, 0, c0]];
-    const u0 = tile ? (circ * j) / N / sideT.width : j / N, u1 = tile ? (circ * (j + 1)) / N / sideT.width : (j + 1) / N;
-    const v0 = tile ? -y1 / sideT.height : 0, v1 = tile ? -y0 / sideT.height : 1;
-    // flat facets tile like walls (mode 1); smooth sides unwrap u and take v from the world (mode 2)
-    m.face(sideT, P, N4, [[u0, v0], [u1, v0], [u1, v1], [u0, v1]], [sm, 0, cm], tile ? (flat ? 1 : 2) : 0);
+    const P = [[Rt * s0, y1, Rt * c0], [Rt * s1, y1, Rt * c1], [Rb * s1, y0, Rb * c1], [Rb * s0, y0, Rb * c0]];
+    const N4 = flat ? nrm(sm, cm) : [nrm(s0, c0), nrm(s1, c1), nrm(s1, c1), nrm(s0, c0)];
+    let u0, u1, v0, v1, mode;
+    if (wrap) {
+      u0 = reps * (j / N - uOff) + (wrap === 'once' ? 0.5 : 0); u1 = u0 + reps / N;
+      [v0, v1] = wrap === 'repeat' ? [-y1 / sideT.height, -y0 / sideT.height] : [0, 1];
+      mode = wrap === 'repeat' ? 2 : 0;
+    } else {
+      u0 = tile ? (circ * j) / N / sideT.width : j / N; u1 = tile ? (circ * (j + 1)) / N / sideT.width : (j + 1) / N;
+      v0 = tile ? -y1 / sideT.height : 0; v1 = tile ? -y0 / sideT.height : 1;
+      // flat facets tile like walls (mode 1); smooth sides unwrap u and take v from the world (mode 2)
+      mode = tile ? (flat ? 1 : 2) : 0;
+    }
+    m.face(sideT, P, N4, [[u0, v0], [u1, v0], [u1, v1], [u0, v1]], nrm(sm, cm), mode);
   }
-  for (const [y, n, t] of [[y1, [0, 1, 0], topT], [y0, [0, -1, 0], botT]]) {
-    const P = [...Array(N).keys()].map((j) => { const [s, c] = at(j); return [R * s, y, R * c]; });
-    const uv = tile ? uvFace(P, n, t, true) : P.map((p) => [p[0] / (2 * R) + 0.5, (n[1] > 0 ? p[2] : -p[2]) / (2 * R) + 0.5]);
+  for (const [y, n, t, r] of [[y1, [0, 1, 0], topT, Rt], [y0, [0, -1, 0], botT, Rb]]) {
+    if (r <= 0) continue;
+    const P = [...Array(N).keys()].map((j) => { const [s, c] = at(j); return [r * s, y, r * c]; });
+    const uv = tile ? uvFace(P, n, t, true) : P.map((p) => [p[0] / (2 * r) + 0.5, (n[1] > 0 ? p[2] : -p[2]) / (2 * r) + 0.5]);
     m.polygon(t, P, n, uv, [...Array(N - 2).keys()].map((k) => [0, k + 1, k + 2]), tile ? 1 : 0);
   }
+  return m;
+}
+
+/** Wedge: box whose top face is resized (top_w, top_d; 0 = a ridge) and moved (shift:[x,z]). Default = ramp rising to the back. */
+function wedge(a, ctx) {
+  const w = pos(a.w, 32, 'w'), h = pos(a.h, 16, 'h'), d = pos(a.d, 32, 'd');
+  const tw = num(a.top_w, w, 'top_w'), td = num(a.top_d, 0, 'top_d');
+  if (tw < 0 || td < 0) throw new Error('top_w / top_d must be >= 0');
+  if (a.shift !== undefined && !Array.isArray(a.shift)) throw new Error('shift must be [x, z] px');
+  // default shift: top centred on x and flush with the back face (a ramp / nose sloping down to the front)
+  const sh = [num(a.shift?.[0], 0, 'shift'), num(a.shift?.[1] ?? -(d - td) / 2, 0, 'shift')];
+  const C = [[-w / 2, 0, -d / 2], [w / 2, 0, -d / 2], [w / 2, 0, d / 2], [-w / 2, 0, d / 2],
+    [sh[0] - tw / 2, h, sh[1] - td / 2], [sh[0] + tw / 2, h, sh[1] - td / 2], [sh[0] + tw / 2, h, sh[1] + td / 2], [sh[0] - tw / 2, h, sh[1] + td / 2]];
+  const m = new Mesh();
+  hexaFaces(m, C, faceTexer(a, ctx), a.tile !== false);
   return m;
 }
 
@@ -789,17 +985,83 @@ function rubble(a, ctx) {
   return m;
 }
 
-/** Custom outline extruded: points [[x,y],...] px; plane "xy" (wall-like) or "xz" (floor-like). */
+/**
+ * Loft: a 2D outline extruded from z0 to z1 while its cross-section is scaled (and shifted) from
+ * the z0 outline to the z1 outline, about `about` (2D). Caps reuse one triangulation; walls are
+ * split into two triangles each (non-uniform scaling bends the quads).
+ */
+function loftPoly(m, poly, z0, z1, ft, tile, end, start = { s: [1, 1], t: [0, 0] }, about = [0, 0]) {
+  let pts = poly.map((p) => [Number(p[0]), Number(p[1])]);
+  pts = pts.filter((p, i) => { const q = pts[(i + pts.length - 1) % pts.length]; return Math.hypot(p[0] - q[0], p[1] - q[1]) > 1e-6; });
+  if (area2(pts) < 0) pts = pts.reverse();
+  const mode = tile ? 1 : 0;
+  const { pts: cp, tris } = triangulateShape({ outer: pts, holes: [] });
+  const at = (p, e, z) => [about[0] + (p[0] - about[0]) * e.s[0] + e.t[0], about[1] + (p[1] - about[1]) * e.s[1] + e.t[1], z];
+  for (const [z, n, e] of [[z1, [0, 0, 1], end], [z0, [0, 0, -1], start]]) {
+    if (e.s[0] * e.s[1] === 0) continue; // collapsed to a line / point: no cap
+    const P = cp.map((p) => at(p, e, z)), t = ft(n);
+    m.polygon(t, P, n, uvFace(P, n, t, tile), tris, mode);
+  }
+  const ctr = [0, 0, (z0 + z1) / 2];
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    const A1 = at(a, end, z1), B1 = at(b, end, z1), B0 = at(b, start, z0), A0 = at(a, start, z0);
+    const out = norm([b[1] - a[1], -(b[0] - a[0]), 0]); // outward in 2D (CCW outline)
+    for (const T of [[A1, B1, B0], [A1, B0, A0]]) {
+      let n = cross(sub(T[1], T[0]), sub(T[2], T[0]));
+      if (len(n) < 1e-9) continue;
+      n = norm(n);
+      if (dot(n, out) < 0 && Math.abs(dot(n, out)) > 1e-9) n = n.map((v) => -v);
+      else if (Math.abs(dot(n, out)) <= 1e-9 && dot(sub(T[0], ctr), n) < 0) n = n.map((v) => -v);
+      const t = ft(n);
+      m.face(t, T, n, uvFace(T, n, t, tile), null, mode);
+    }
+  }
+  return m;
+}
+
+// shape planes: local outline (a, b) + extrusion e -> world (all proper rotations, outward normals kept)
+const SHAPE_PLANES = {
+  xy: { fp: (p) => p, z: (d) => [-d / 2, d / 2] }, // outline in x,y; depth along z (centred)
+  xz: { fp: (p) => [p[0], p[2], -p[1]], pre: ([x, z]) => [Number(x), -Number(z)], z: (d) => [0, d] }, // floor outline x,z; height up y from 0
+  zy: { fp: (p) => [-p[2], p[1], p[0]], z: (d) => [-d / 2, d / 2] }, // side profile z,y; thickness along x (centred)
+};
+/**
+ * Custom outline extruded: points [[x,y],...] px; plane "xy" (wall-like), "xz" (floor-like) or
+ * "zy" (side profile [z,y], extruded along x). scale_end:[sx,sy] (and shift_end) = loft: the far
+ * cross-section (xy: front +z, xz: top, zy: -x side) is scaled about `about` (default the outline's
+ * bbox centre), e.g. a hull that narrows toward the nose.
+ */
 function shape(a, ctx) {
   if (!Array.isArray(a.points) || a.points.length < 3) throw new Error('shape needs points: [[x,y], ...] (3+ points, px)');
-  const d = pos(a.d, 8, 'd'), ft = faceTexer(a, ctx);
-  if (a.plane === 'xz') return floorPrism(a.points, d, ft, a);
-  return prism(new Mesh(), a.points, -d / 2, d / 2, ft, a.tile !== false);
+  const plane = a.plane ?? 'xy';
+  const P = SHAPE_PLANES[plane];
+  if (!P) throw new Error(`shape plane must be "xy" (outline x,y; depth z), "xz" (outline x,z; height y) or "zy" (outline z,y; thickness x), got ${JSON.stringify(plane)}`);
+  const d = pos(a.d, 8, 'd'), ft = faceTexer(a, ctx), tile = a.tile !== false;
+  const pts = a.points.map((p) => (P.pre ? P.pre(p) : [Number(p[0]), Number(p[1])]));
+  if (pts.some((p) => !Number.isFinite(p[0]) || !Number.isFinite(p[1]))) throw new Error('shape points must be [[x,y], ...] numbers');
+  const [z0, z1] = P.z(d);
+  const loft = a.scale_end !== undefined || a.shift_end !== undefined;
+  const local = new Mesh();
+  // textures are picked on world normals
+  const fl = (nl) => ft(P.fp(nl));
+  if (!loft) prism(local, pts, z0, z1, fl, tile);
+  else {
+    const s = [].concat(a.scale_end ?? 1, a.scale_end ?? 1).slice(0, 2).map((v) => num(v, 1, 'scale_end'));
+    if (s.some((v) => v < 0)) throw new Error('scale_end must be >= 0');
+    let sh = a.shift_end ? [num(a.shift_end[0], 0, 'shift_end'), num(a.shift_end[1], 0, 'shift_end')] : [0, 0];
+    if (P.pre) sh = P.pre(sh);
+    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+    const about = a.about ? (P.pre ? P.pre(a.about) : a.about.map(Number)) : [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
+    loftPoly(local, pts, z0, z1, fl, tile, { s, t: sh }, undefined, about);
+  }
+  return local.map(P.fp, P.fp);
 }
 
 export const BUILDERS = {
-  extrude, lathe, plane, cylinder, arch, vault, stairs, roof, corner, rubble, shape, balustrade,
+  extrude, lathe, plane, cylinder, arch, vault, stairs, roof, corner, rubble, shape, balustrade, wedge,
   box: block({ fromTexture: true }),
+  inset: block({ fromTexture: true }),
   wall: block({ w: 32, h: 64, d: 8, color: '#9a948a' }),
   floor: block({ w: 32, h: 4, d: 32, color: '#6e6a62', topAtZero: true }),
   slab: block({ w: 32, h: 4, d: 32, color: '#6e6a62' }),
@@ -808,6 +1070,8 @@ export const BUILDERS = {
   column: pillar(true),
 };
 BUILDERS.prism = (a, ctx) => cylinder({ segments: 6, flat: true, ...a }, ctx);
+BUILDERS.cone = (a, ctx) => cylinder({ r_top: 0, ...a }, ctx);
+BUILDERS.loft = (a, ctx) => shape({ scale_end: 0.5, ...a }, ctx);
 
 /** One-line signatures (art_help topic 3d + error hints). px units; ? = optional. */
 export const PART_DOCS = {
@@ -823,17 +1087,21 @@ export const PART_DOCS = {
   balustrade: 'w?:32,h?:16,d?:6,rail?:3,count?,baluster?:<profile canvas for lathe>',
   roof: 'w?:32 (ridge length),d?:32 (span),h?:16 (rise),style?:gable|shed, texture (slopes),side (gables)',
   rubble: 'w?:32,d?:32,count?:8,size?:[3,8],seed?,flatness?,tilt?',
-  box: 'w,h,d (default texture size), texture|faces|top|side, tile?:true, broken?, holes?',
-  cylinder: 'r?,h?,segments?:12,flat?,texture|side,cap|top|bottom, tile?:true',
+  box: 'w,h,d (default texture size), texture|faces|top|side, tile?:true, broken?, holes?, taper?:s|[sx,sy] (front +z face scaled about its centre: noses), bevel?:px (chamfered edges+corners), insets?:[{face,rect,depth,texture?,side?}] (one of taper|bevel|insets)',
+  wedge: 'w?:32,h?:16,d?:32, top_w?:w, top_d?:0 (0 = ridge), shift?:[x,z] (top centre; default flush with the back face = ramp sloping down to the front), texture|faces',
+  inset: 'box (w,h,d,texture|faces) with one panel: face?:front|back|left|right|top|bottom, rect:[u,v,w,h] px from the face top-left as seen from outside, depth?:2 (> 0 recess, < 0 raised), panel?:<texture> (panel floor, fitted once), inset_side? (panel walls); more panels: insets:[{face,rect,depth,texture,side}]',
+  cylinder: 'r?,h?,r_top?,r_bottom? (frustum; 0 = cone point),segments?:12,flat?,texture|side,cap|top|bottom, tile?:true, wrap?:once|repeat (once = one copy round, centred on +z; repeat = repeat?:n copies, seamless), u_offset?:0 (turns, + = toward +x)',
+  cone: 'cylinder with r_top:0 (r = base radius)',
   prism: 'cylinder with segments:6 flat',
   plane: 'texture,w?,h? (texture size), facing?:front|up, double_sided?, tile?',
-  shape: 'points:[[x,y],...],d?:8,plane?:xy|xz, texture|faces',
+  shape: 'points:[[x,y],...],d?:8,plane?:xy (outline x,y; depth z centred)|xz (outline x,z; height y from 0)|zy (side profile [z,y]; thickness x centred), scale_end?:[sx,sy] + shift_end?:[x,y] + about?:[x,y] (loft: far cross-section scaled; xy far = +z front, xz = top, zy = -x), texture|faces',
+  loft: 'shape with scale_end (default 0.5): points,d,plane?,scale_end?:[sx,sy],shift_end?,about? (default bbox centre); e.g. a hull narrowing toward the nose',
   extrude: 'canvas,frame?,layer?,region?,depth?:4,center?:true, depth_map?:<canvas> (luminance = thickness, voxel relief), levels?, invert?, min_depth?:1, mode?:voxel',
   lathe: 'canvas (right-half profile),axis?:0,segments?:12,smooth?,simplify?:0.75 px (0 = exact pixel steps),texture?,wrap?,cap?',
   model: 'model:"<other model>" = place another model (layouts / dioramas)',
 };
 export const PART_TYPES = [...Object.keys(BUILDERS), 'model'];
-export const PART_COMMON = 'at?:[x,y,z]|cell?:[gx,gy,gz]|turn?|rotate?|scale?|array?|overlays?:[{texture,where,map,scale,falloff,amount}]|ctm_tag?';
+export const PART_COMMON = 'at?:[x,y,z]|cell?:[gx,gy,gz]|turn?|rotate?:[x,y,z] (deg, X then Y then Z about the part origin)|pivot?:[x,y,z] (rotate/scale about this local point)|scale?|mirror?:x|y|z|[..] (adds mirrored copies)|array?:{count,step|cell_step,rotate?,turn?,about?:[x,y,z]}|opacity?:0..1|glass?|double_sided?|overlays?:[{texture,where,map,scale,falloff,amount}]|ctm_tag?';
 
 // ---------- world UVs (after placement) ----------
 /** Recompute UVs of world-tiled faces from their final positions: seamless across pieces. */
@@ -1064,10 +1332,57 @@ function rebuildGroup(g, drop) {
   Object.assign(g, { pos, nrm, uv, idx, faces });
 }
 
+// ---------- part materials: opacity / glass / double_sided ----------
+/** Material options of a part -> null (plain) or {opacity, glass, double_sided}. */
+export function materialSpec(p) {
+  const glass = p.glass === true || (p.glass && typeof p.glass === 'object') ? (typeof p.glass === 'object' ? p.glass : {}) : null;
+  const op = p.opacity ?? glass?.opacity ?? (glass ? 0.35 : 1);
+  const opacity = Number(op);
+  if (!Number.isFinite(opacity) || opacity < 0 || opacity > 1) throw new Error(`opacity must be a number 0..1 (got ${JSON.stringify(op)})`);
+  const ds = p.double_sided ?? glass?.double_sided ?? (glass ? true : undefined);
+  const doubleSided = ds === true && p.type !== 'plane'; // plane double_sided builds a real back face
+  if (opacity >= 1 && !glass && !doubleSided) return null;
+  return { opacity, glass: !!glass, double_sided: doubleSided, blend: opacity < 1 || !!glass };
+}
+/** Re-key a built part's base groups onto material variants of their textures (same image, own glTF material). */
+function applyMaterial(mesh, p, ctx) {
+  const spec = materialSpec(p);
+  if (!spec) return mesh;
+  const cache = ctx.matCache || (ctx.matCache = new Map());
+  const groups = new Map();
+  for (const [k, g] of mesh.groups) {
+    if (g.overlay) { groups.set(k, g); continue; }
+    const key = `${g.tex.key}|mat:${spec.opacity}:${spec.glass ? 'g' : ''}${spec.double_sided ? 'd' : ''}`;
+    if (!cache.has(key)) {
+      const base = g.tex;
+      const suffix = spec.glass ? '_glass' : spec.blend ? `_a${Math.round(spec.opacity * 100)}` : '_2s';
+      cache.set(key, { ...base, key, name: `${base.name || base.key}${suffix}`, imageKey: base.imageKey ?? base.key, material: spec });
+    }
+    g.tex = cache.get(key);
+    // base keys are unique per mesh, so the variant keys are too
+    groups.set(key, g);
+  }
+  mesh.groups = groups;
+  return mesh;
+}
+
 // ---------- transforms + assembly ----------
 const vec3 = (v, d = 0) => (v === undefined || v === null ? [d, d, d] : typeof v === 'number' ? [v, v, v] : [Number(v[0] ?? d), Number(v[1] ?? d), Number(v[2] ?? d)]);
 
-/** at (px) + cell * grid, turn (90° steps about y), rotate [x,y,z] degrees (X then Y then Z), scale. */
+/** Rotation pivot of a part: transform.pivot, rotate_about, or a 3-element pivot (a 2-element pivot is the extrude/lathe canvas pivot). */
+function rotPivot(p) {
+  const t = p.transform || {};
+  const v = t.pivot ?? p.rotate_about ?? (Array.isArray(p.pivot) && p.pivot.length === 3 ? p.pivot : null);
+  if (v === null || v === undefined) return null;
+  if (!Array.isArray(v) || v.length !== 3 || v.some((x) => !Number.isFinite(Number(x)))) throw new Error('pivot must be [x,y,z] px (part-local point to rotate and scale about)');
+  return v.map(Number);
+}
+/**
+ * Part placement: scale, then rotate [x,y,z] degrees about the FIXED axes X, then Y, then Z (= R
+ * = Rz * Ry * Rx), then turn (90° steps about y), all about the part's own origin (its local
+ * 0,0,0: bottom-centre for most builders) or about pivot:[x,y,z] (local px); then translate by
+ * at (px) + cell * grid.
+ */
 export function partMatrix(p, grid = 32) {
   const t = p.transform || {};
   const at = vec3(t.translate ?? t.at ?? p.at), cell = vec3(t.cell ?? p.cell), rot = vec3(t.rotate ?? p.rotate), sc = vec3(t.scale ?? p.scale, 1);
@@ -1075,16 +1390,32 @@ export function partMatrix(p, grid = 32) {
   let M = mS(...sc);
   M = matMul(mRX(rot[0]), M); M = matMul(mRY(rot[1]), M); M = matMul(mRZ(rot[2]), M);
   if (turn) M = matMul(mRY(turn * 90), M);
+  const pv = rotPivot(p);
+  if (pv) M = matMul(mT(pv[0], pv[1], pv[2]), matMul(M, mT(-pv[0], -pv[1], -pv[2])));
   return matMul(mT(at[0] + cell[0] * grid, at[1] + cell[1] * grid, at[2] + cell[2] * grid), M);
+}
+const MIRROR = { x: [-1, 1, 1], y: [1, -1, 1], z: [1, 1, -1] };
+/** mirror:x|y|z|[..]: every placement also gets copies mirrored across the model's x=0 / y=0 / z=0 planes (all combinations for a list). */
+function mirrorMatrices(p, mats) {
+  if (p.mirror === undefined || p.mirror === null || p.mirror === false) return mats;
+  const axes = [...new Set([].concat(p.mirror).map((v) => String(v).toLowerCase()))];
+  for (const ax of axes) if (!MIRROR[ax]) throw new Error(`mirror must be "x", "y", "z" or a list of them (got ${JSON.stringify(p.mirror)})`);
+  let out = mats;
+  for (const ax of axes) out = out.flatMap((M) => [M, matMul(mS(...MIRROR[ax]), M)]);
+  return out;
 }
 function arrayMatrices(p, M, grid) {
   const arr = p.array;
   if (!arr) return [M];
   const count = Math.max(1, Math.min(1000, Math.round(Number(arr.count ?? 2))));
   const step = vec3(arr.step), cstep = vec3(arr.cell_step), rot = vec3(arr.rotate), turn = Number(arr.turn ?? 0);
+  if (arr.about !== undefined && arr.about !== null && (!Array.isArray(arr.about) || arr.about.length !== 3)) throw new Error('array.about must be [x,y,z] px (centre of a radial array, model coordinates)');
+  const about = arr.about ? vec3(arr.about) : null;
   const out = [];
   for (let k = 0; k < count; k++) {
     const R = matMul(mRY(turn * 90 * k), matMul(mRZ(rot[2] * k), matMul(mRY(rot[1] * k), mRX(rot[0] * k))));
+    // radial array: copy k = the placed part rotated k steps about the world point `about`, then stepped
+    if (about) { out.push(matMul(mT((step[0] + cstep[0] * grid) * k + about[0], (step[1] + cstep[1] * grid) * k + about[1], (step[2] + cstep[2] * grid) * k + about[2]), matMul(R, matMul(mT(-about[0], -about[1], -about[2]), M)))); continue; }
     // copy k: rotated about its own origin (local), then stepped in world space
     out.push(matMul(mT((step[0] + cstep[0] * grid) * k, (step[1] + cstep[1] * grid) * k, (step[2] + cstep[2] * grid) * k), matMul(M, R)));
   }
@@ -1126,7 +1457,7 @@ export function buildModel(def, ctx) {
       if (!type) throw new Error(`missing "type" (one of ${PART_TYPES.join(', ')})`);
       if (p.hidden) { parts.push({ i, type, triangles: 0, hidden: true }); return; }
       const M = partMatrix(p, grid);
-      const mats = arrayMatrices(p, M, grid);
+      const mats = mirrorMatrices(p, arrayMatrices(p, M, grid));
       const partOv = p.overlays === false ? [] : (p.overlays || []).map(normOverlay);
       let local, tris = 0;
       if (type === 'model') {
@@ -1146,11 +1477,13 @@ export function buildModel(def, ctx) {
           return;
         }
         local = buildModel(sub, subCtx).mesh;
+        applyMaterial(local, p, ctx);
         if (partOv.length) for (const { f } of local.faces) f.ov = [...(f.ov || []), ...partOv];
       } else {
         const b = BUILDERS[type];
         if (!b) throw new Error(`unknown part type "${type}" (one of ${PART_TYPES.join(', ')})`);
         local = b(p, ctx);
+        applyMaterial(local, p, ctx);
         local.tagFaces({ pid: ids.n++, tag: p.ctm_tag ?? p.tag, ov: partOv.length ? partOv : undefined });
         if (!firstTex && (type === 'extrude' || type === 'lathe')) firstTex = ctx.tex(p.canvas ? imageRef(p) : p.profile ?? p.texture);
       }
