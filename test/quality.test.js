@@ -140,7 +140,7 @@ test('mcp: help tool, prompts and compact tool list', async () => {
   assert.ok(replies.get(1).result.capabilities.prompts);
   const tools = replies.get(2).result.tools;
   const size = JSON.stringify(tools).length;
-  assert.ok(size < 20600, `tool list ${size} chars`); // 17000 before art_model (+~2k), 19000 before art_audio (+~1.4k)
+  assert.ok(size < 20800, `tool list ${size} chars`); // 17000 before art_model (+~2k), 19000 before art_audio (+~1.4k), 20600 before rig hd params (+~150)
   assert.ok(tools.some((t) => t.name === 'art_critique'));
   assert.match(replies.get(3).result.content[0].text, /^cells \{/);
   assert.ok(replies.get(4).result.prompts.length >= 5);

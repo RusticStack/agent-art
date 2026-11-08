@@ -453,6 +453,8 @@ const OPS = {
         json.meta.frameTags.push({ name: t, from: fr[0], to: fr[fr.length - 1], direction: tag.direction, loop: tag.loop, row: 0 });
       }
       fs.writeFileSync(base + '.png', encodePNG(W, H, sheet));
+      // json:false skips the sidecar (frames, tags, anchors) for engines that only take the png
+      if (a.json === false) return { png: base + '.png', json: null, size: `${W}x${H}`, rows: uniqueRows.length, frames: k };
       fs.writeFileSync(base + '.json', JSON.stringify(json, null, 2));
       return { png: base + '.png', json: base + '.json', size: `${W}x${H}`, rows: uniqueRows.length, frames: k };
     }

@@ -40,6 +40,11 @@ Multiple views or animations of this sprite -> use the "rig" skill so it stays i
    art_rig ${J({ action: 'create', name: 'knight', frame: [32, 32], template: 'humanoid', parts: { head: { w: 12, h: 10 }, cape: { w: 8, h: 12, pivot: [4, 0], parent: 'body', at: [-2, -6], z: -4 } } })}
    draw every listed cell (step 2), art_rig preview, then one call per animation:
    art_rig ${J({ action: 'animate', name: 'knight', preset: 'walk', view: 'side' })}  (override any field: frames, fps, keys, loop)
+High-detail character (64x96 .. 160x240, 8 directions, bending elbows/knees, IK, cape follow-through):
+   art_rig ${J({ action: 'create', name: 'soldier', frame: [128, 192], template: 'humanoid_hd' })}
+   draw every cell in all 5 drawn views, then one call per preset and view (one canvas each: a frame strip is at most 8192 px tall):
+   art_rig ${J({ action: 'animate', name: 'soldier', preset: 'walk', view: 'front_side', canvas: 'soldier_walk_front_side' })}  (presets: idle walk run crouch_walk aim shoot reload hurt death throw blink)
+   Fix one view only: art_rig ${J({ action: 'pose', name: 'soldier', pose: 'aim', merge: true, views: { front: { head: { rot: 0 } } } })}; hands on props with ik:{hand_b:{target:{part:'weapon', at:[14,-2]}, bend:-1}}.
 Custom rig (anything else: quadrupeds, vehicles, props with moving parts):
 1. Create the rig (parts are drawn once per view; frames are generated from them):
    art_rig ${J({ action: 'create', name: 'knight', frame: [32, 32], views: ['side', 'front', 'back'], parts: { body: { w: 12, h: 12, pivot: [6, 10] }, head: { w: 12, h: 12, pivot: [6, 11], parent: 'body', at: [0, -9] }, arm_f: { w: 5, h: 9, pivot: [2, 1], parent: 'body', at: [2, -8], z: 2 }, arm_b: { w: 5, h: 9, pivot: [2, 1], parent: 'body', at: [-2, -8], z: -1 }, leg_f: { w: 5, h: 8, pivot: [2, 1], parent: 'body', at: [1, 0], z: 1 }, leg_b: { w: 5, h: 8, pivot: [2, 1], parent: 'body', at: [-2, 0], z: -2 } }, root: [16, 22] })}

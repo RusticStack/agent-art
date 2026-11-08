@@ -19,7 +19,7 @@ const log = (...a) => process.stderr.write(`[agent-art] ${a.join(' ')}\n`);
 
 export const INSTRUCTIONS = `Agent Art: pixel-art editor for agents (sprites, tiles, textures, icons, UI, animations, 2.5D scenes, game assets). The user watches live in a web UI (art_open_ui).
 Workflow: palette ramps first (art_palette ramp) -> flat silhouettes -> shade (auto form shading) -> outline -> hand detail (grid) -> art_critique -> fix -> art_view.
-Multi-asset work: art_project create (shared palette + style notes), review with art_sheet. Any character/creature with more than one view or frame: use art_rig (template:"humanoid"|"blob"|"flyer" is fastest; templates are only defaults) instead of hand-drawing frames, so every frame stays the same asset.
+Multi-asset work: art_project create (shared palette + style notes), review with art_sheet. Any character/creature with more than one view or frame: use art_rig (template:"humanoid"|"humanoid_hd" (detailed 64x96+)|"blob"|"flyer" is fastest; templates are only defaults) instead of hand-drawing frames, so every frame stays the same asset.
 3D (HD-2D maps, props -> .glb): art_model.
 Audio (SFX, music, mixing; you cannot hear, so read analyze/critique reports): art_audio.
 Details on demand: art_help {topic: workflow|textures|characters|animation|rig|scenes|hires|minecraft|3d|audio|music|mixing|perception} or {op:"<draw command>"}.`;
@@ -206,7 +206,7 @@ export const TOOLS = [
   },
   {
     name: 'art_animation',
-    description: 'Frame strip animation. list; tag {name, from,to|frames, duration|durations|fps, loop?, direction?}; untag; insert {at?, count?, copy_from?}; duplicate {frame, to?}; move {frame, to}; delete {frame|frames}; set_frame_size; filmstrip {animation?} (image of all frames); export {format: gif|spritesheet|frames, animation?, scale?, path?}.',
+    description: 'Frame strip animation. list; tag {name, from,to|frames, duration|durations|fps, loop?, direction?}; untag; insert {at?, count?, copy_from?}; duplicate {frame, to?}; move {frame, to}; delete {frame|frames}; set_frame_size; filmstrip {animation?} (image of all frames); export {format: gif|spritesheet|frames, animation?, scale?, path?, json?:false (no sidecar)}.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -215,7 +215,7 @@ export const TOOLS = [
         frame: { type: 'integer' }, at: { type: 'integer' }, count: { type: 'integer' }, copy_from: { type: 'integer' },
         duration: { type: 'integer' }, durations: { type: 'array', items: { type: 'integer' } }, fps: { type: 'number' }, loop: { type: 'boolean' },
         direction: { type: 'string', enum: ['forward', 'reverse', 'pingpong'] }, frame_height: { type: 'integer' }, animation: { type: 'string' },
-        onion: { type: 'integer' }, scale: { type: 'integer' }, format: { type: 'string', enum: ['gif', 'spritesheet', 'frames'] }, path: { type: 'string' }, layout: { type: 'string', enum: ['rows', 'strip'] },
+        onion: { type: 'integer' }, scale: { type: 'integer' }, format: { type: 'string', enum: ['gif', 'spritesheet', 'frames'] }, path: { type: 'string' }, layout: { type: 'string', enum: ['rows', 'strip'] }, json: { type: 'boolean' },
       },
       required: ['canvas', 'action'],
     },
@@ -227,13 +227,13 @@ export const TOOLS = [
   },
   {
     name: 'art_rig',
-    description: 'Rigs keep a character identical across views and animations: parts drawn once per view, poses tweened into frames (any fps). Fastest: create {name, frame, template:"humanoid"|"blob"|"flyer"} (a starting point: override/add/remove any part, view, pose or preset), draw the listed cells, then animate {preset:"walk", view}. templates = list them. Custom: create {name, frame:[w,h], views?, mirror?:{side_left:"side"}, parts:{p:{w,h,pivot,parent?,at? (pivot offset from parent pivot),z?,variants?,views?:{view:{at,z,hidden}}}}, root?}; info; update; pose {pose, parts:{p:{x,y,rot,sx,sy,variant,hide}}, from?}; preview {pose?, view?}; turnaround {pose?, views?} = one frame per view on one canvas; animate {preset} or {animation, view, keys:[{pose,t?,ease?,mirror_pairs?}], frames, fps, loop?, plant_feet?, canvas?, only?/hide?:[parts] (paper-doll layers with identical timing)}; every animate saves per-frame part anchors (pivot x,y,rot) into spritesheet json. art_help {skill:"rig"}.',
+    description: 'Rigs: parts drawn once per view, poses tweened into frames, so a character stays identical across views and animations. Fastest: create {name, frame, template:"humanoid"|"humanoid_hd" (64x96+, 8 directions, IK)|"blob"|"flyer"} (override/add/remove parts, views, poses, presets), draw the cells, animate {preset, view}. Custom: create {name, frame, views?, mirror?, parts:{p:{w,h,pivot,parent?,at?,z?,variants?,views?:{view:{at,z,hidden,pivot}}}}, root?, sampling?, secondary?:{part:{stiffness,damping}}, scale_children?}; info; update; templates; pose {pose, parts:{p:{x,y,rot,sx,sy,variant,hide}}, views?:{view:{p:{..}}}, ik?:{end:{target:[x,y]|{part,at},bend?,rot?}}, from?}; preview; turnaround; animate {preset} or {animation, view, keys:[{pose|parts,t?,ease?,mirror_pairs?}], frames, fps, loop?, plant?, secondary?, plant_feet?, canvas?, only?/hide?}. art_help {topic:"rig"}.',
     inputSchema: {
       type: 'object',
       properties: {
         action: { type: 'string', enum: ['create', 'info', 'update', 'pose', 'preview', 'animate', 'turnaround', 'templates'] }, name: { type: 'string' },
-        template: { type: 'string', enum: ['humanoid', 'blob', 'flyer'] }, preset: { type: 'string' }, presets: { type: 'object' }, poses: { type: 'object' }, plant_feet: { type: 'boolean' }, only: { type: 'array', items: { type: 'string' } }, hide: { type: 'array', items: { type: 'string' } },
-        frame: { type: 'array', items: { type: 'integer' } }, views: { type: 'array', items: { type: 'string' } }, mirror: { type: 'object' },
+        template: { type: 'string', enum: ['humanoid', 'humanoid_hd', 'blob', 'flyer'] }, preset: { type: 'string' }, presets: { type: 'object' }, poses: { type: 'object' }, plant_feet: { type: 'boolean' }, plant: { type: ['boolean', 'array'] }, secondary: { type: ['boolean', 'object'] }, ik: { type: 'object' }, sampling: { type: 'string', enum: ['nearest8', 'rotsprite', 'smooth'] }, scale_children: { type: 'boolean' }, feet: { type: 'array' }, only: { type: 'array', items: { type: 'string' } }, hide: { type: 'array', items: { type: 'string' } },
+        frame: { type: 'array', items: { type: 'integer' } }, views: { type: ['array', 'object'] }, mirror: { type: 'object' },
         parts: { type: 'object' }, root: { type: 'array', items: { type: 'number' } }, pairs: { type: 'array' }, project: { type: 'string' }, palette: { type: 'object' },
         pose: { type: 'string' }, from: { type: 'string' }, merge: { type: 'boolean' }, view: { type: 'string' }, scale: { type: 'integer' },
         animation: { type: 'string' }, keys: { type: 'array', items: { type: 'object' } }, frames: { type: 'integer' }, fps: { type: 'number' },
