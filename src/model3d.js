@@ -172,14 +172,15 @@ export function weld(g) {
   const q = (v) => Math.round(v * 1e5);
   const ov = !!g.overlay;
   // optional per-vertex data (baked AO, AO lightmap UVs, morph targets) joins the key only when present
-  const hasAO = !ov && !!g.ao, hasUV1 = !ov && !!g.uv1, morphs = !ov && g.morphs ? g.morphs : null;
-  const ao = [], uv1 = [], mpos = morphs ? morphs.map(() => []) : null, mnrm = morphs ? morphs.map(() => []) : null;
+  const hasAO = !ov && !!g.ao, hasUV1 = !ov && !!g.uv1, morphs = !ov && g.morphs ? g.morphs : null, skin = g.skin || null;
+  const sj = [], sw = [], ao = [], uv1 = [], mpos = morphs ? morphs.map(() => []) : null, mnrm = morphs ? morphs.map(() => []) : null;
   for (let i = 0; i < g.pos.length / 3; i++) {
     let key = `${q(g.pos[i * 3])},${q(g.pos[i * 3 + 1])},${q(g.pos[i * 3 + 2])},${q(g.nrm[i * 3])},${q(g.nrm[i * 3 + 1])},${q(g.nrm[i * 3 + 2])},${q(g.uv[i * 2])},${q(g.uv[i * 2 + 1])}`;
     if (ov) key += `,${q(g.uv0[i * 2])},${q(g.uv0[i * 2 + 1])},${q(g.alpha[i])}`;
     if (hasAO) key += `,a${q(g.ao[i])}`;
     if (hasUV1) key += `,l${q(g.uv1[i * 2])},${q(g.uv1[i * 2 + 1])}`;
     if (morphs) for (const t of morphs) key += `,m${q(t.pos[i * 3])},${q(t.pos[i * 3 + 1])},${q(t.pos[i * 3 + 2])}`;
+    if (skin) for (let k = 0; k < 4; k++) key += `,s${skin.j[i * 4 + k]}:${skin.w[i * 4 + k]}`;
     let j = map.get(key);
     if (j === undefined) {
       j = pos.length / 3; map.set(key, j);
@@ -188,6 +189,7 @@ export function weld(g) {
       if (hasAO) ao.push(g.ao[i]);
       if (hasUV1) uv1.push(g.uv1[i * 2], g.uv1[i * 2 + 1]);
       if (morphs) morphs.forEach((t, k) => { mpos[k].push(t.pos[i * 3], t.pos[i * 3 + 1], t.pos[i * 3 + 2]); mnrm[k].push(t.nrm[i * 3], t.nrm[i * 3 + 1], t.nrm[i * 3 + 2]); });
+      if (skin) for (let k = 0; k < 4; k++) { sj.push(skin.j[i * 4 + k]); sw.push(skin.w[i * 4 + k]); }
     }
     remap[i] = j;
   }
@@ -196,6 +198,8 @@ export function weld(g) {
   if (hasAO) out.ao = new Float32Array(ao);
   if (hasUV1) out.uv1 = new Float32Array(uv1);
   if (morphs) out.morphs = morphs.map((t, k) => ({ name: t.name, pos: new Float32Array(mpos[k]), nrm: new Float32Array(mnrm[k]) }));
+  // skin weights (art_model skin): JOINTS_0 / WEIGHTS_0, 4 per vertex
+  if (skin) out.skin = { j: Uint16Array.from(sj), w: Float32Array.from(sw) };
   return out;
 }
 
@@ -1684,6 +1688,7 @@ export function buildModel(def, ctx) {
         applyMaterial(local, p, ctx);
         applySurface(local, p, ctx);
         if (partOv.length) for (const { f } of local.faces) f.ov = [...(f.ov || []), ...partOv];
+        if (!ctx.nested) for (const { f } of local.faces) f.pi = i;
         if (p.cast_shadow !== undefined || p.receive_shadow !== undefined) for (const { f } of local.faces) { if (p.cast_shadow !== undefined) f.cs = !!p.cast_shadow; if (p.receive_shadow !== undefined) f.rs = !!p.receive_shadow; }
       } else {
         const b = BUILDERS[type];
@@ -1693,6 +1698,7 @@ export function buildModel(def, ctx) {
         applyMaterial(local, p, ctx);
         applySurface(local, p, ctx);
         if (p.trim !== undefined) applyTrim(local, p, ctx);
+        if (!ctx.nested) for (const { f } of local.faces) f.pi = i; // owning part (skin weights)
         local.tagFaces({ pid: ids.n++, tag: p.ctm_tag ?? p.tag, ov: partOv.length ? partOv : undefined, cs: p.cast_shadow === undefined ? undefined : !!p.cast_shadow, rs: p.receive_shadow === undefined ? undefined : !!p.receive_shadow });
         if (local.gpu) for (const pr of local.gpu) { applyMaterial(pr.mesh, p, ctx); applySurface(pr.mesh, p, ctx); pr.mesh.tagFaces({ pid: ids.n++, tag: p.ctm_tag ?? p.tag, cs: p.cast_shadow === undefined ? undefined : !!p.cast_shadow, rs: p.receive_shadow === undefined ? undefined : !!p.receive_shadow }); }
         if (!firstTex && (type === 'extrude' || type === 'lathe')) firstTex = ctx.tex(p.canvas ? imageRef(p) : p.profile ?? p.texture);

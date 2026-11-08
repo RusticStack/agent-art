@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Skeletal skinning in `art_model`
+
+- `skeleton`: bone hierarchies with rest poses, joint limits, IK chains (two-bone with pole, or CCD), aim / look_at / copy_rotation constraints and bone sockets.
+  - Sources: templates (`humanoid`, `exosuit`, `quadruped`, `chain`, `landing_gear`), rigid-rig parts (`from_parts`), an art_anim library skeleton (`library`) or explicit bones.
+  - The humanoid and exosuit templates use the art_anim humanoid_hd bone names.
+  - `cable` builds a tube along a chain, with automatic weights.
+- `skin`: vertex weights with at most 4 influences, normalised.
+  - Methods: `heat` (diffusion), `distance` and `rigid` (blended seams), plus smoothing and `subdivide`.
+  - Painting by region (box, sphere, part, below, above) or from a weight canvas.
+  - Blend shapes: sculpted shapes or variants, and correctives driven by a joint angle.
+- `weights`: the weights check (unweighted vertices, more than 4 influences, non-normalised weights) and a per-bone heat map.
+- `animate` / `pose` on skinned models:
+  - Bone keys, easing, events, morph weights, IK targets and foot plants.
+  - `retarget` maps art_anim clips onto 3D bones by name.
+- `preview` and `render` deform skinned clips, so `render` sweeps bake one 3D body into 8-direction pixel sprites with the same quantize and outline options.
+- `export`: glTF `skins` (joints, inverseBindMatrices), JOINTS_0 / WEIGHTS_0, morph targets on skinned primitives, and TRS + weights animations.
+  - Every skinned export is checked by a new structural validator (`src/gltfvalidate.js`).
+  - `profile:"roblox"`: at most `max_bones` joints per mesh (default 50, assumed), split across several skins when needed; sanitised names; R15 names; no morphs.
+- Exports of models without a skeleton and skin are byte-identical.
+- The tool-list size limit rises from 32650 to 33000 (32847 measured).
+
 ### Animation library (`art_anim`) and 2D rotated-sprite tooling
 
 - New tool `art_anim`:

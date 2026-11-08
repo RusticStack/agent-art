@@ -16,6 +16,7 @@ import { rigInfo, rigSummary, rigScene, rigMeta, resolveOffsets, clipKeys, sampl
 import { MODEL_TEMPLATES } from './modeltemplates.js';
 import { normPBR, normBump, bumpNormal, mrTexture, heightFromData } from './surface.js';
 import { exportExtras, previewExtras, wantsExtras, MODEL_EXTRA_OPS } from './modelexport.js';
+import { skinOps, skinCtx, skinnedOf, skinSamples, skinPosed, assembleSkinned, isSkinned, skelAnimate, skelPose, skeletonInfo } from './skinops.js';
 
 const NAME_RE = /^[A-Za-z0-9_\-.]{1,64}$/;
 
@@ -198,6 +199,7 @@ function summary(def, built) {
     size_units: size.map((v) => r4(v / scale)), size_cells: size.map((v) => r4(v / grid)), px_per_unit: scale, grid,
     ...(warnings.length ? { warnings } : {}),
     ...(rigOf(def, built) ? { rig: rigSummary(def, rigOf(def, built)) } : {}),
+    ...(def.skeleton ? { skeleton: skeletonInfo(def) } : {}),
   };
 }
 /** Rig node tree of a built model (cached on the build), or null for plain models. */
@@ -235,6 +237,23 @@ function clipSamples(def, info, clipName, n, fps) {
 function previewImage(engine, def, a) {
   const t0 = performance.now();
   const built = build(engine, def, a.bump !== undefined ? { bump: a.bump } : {});
+  if (isSkinned(def) && (a.clip !== undefined || a.pose !== undefined || a.bones || a.morph)) {
+    // skinned: deformed mesh (LBS) for a pose, or a contact sheet of a skeleton clip
+    const { S, sk } = skinnedOf(skinCtx(BASE, engine, built), def, built);
+    const ss = skinSamples(S, sk, { ...a, frames: a.frames ?? (a.clip !== undefined ? 6 : 1) });
+    const posed = ss.samples.map((s) => skinPosed(S, sk, s.state).mesh);
+    if (a.clip !== undefined) {
+      const SZ = Math.max(32, Math.min(512, Math.round(a.size ?? 192)));
+      const fit = [];
+      for (const m of posed) { const b = m.bounds(); for (const x of [b.min[0], b.max[0]]) for (const y of [b.min[1], b.max[1]]) for (const z of [b.min[2], b.max[2]]) fit.push([x, y, z]); }
+      const cam = makeCamera(a.view ?? 'side', SZ, SZ, fit, { fov: a.fov });
+      const items = posed.map((m, i) => ({ img: renderCamera(groupsOf(m), cam, SZ, SZ), label: `t=${ss.samples[i].time.toFixed(2)}s` }));
+      const img = packImages(items, { labels: true, checker: false, columns: Math.min(items.length, a.columns ?? 3) });
+      return { image: encodePNG(img.width, img.height, img.data), clip: a.clip, view: cam.label, frames: ss.samples.map((s) => +s.time.toFixed(3)), triangles: posed[0].triangles, skinned: true, ms: Math.round(performance.now() - t0) };
+    }
+    const img = renderViews(groupsOf(posed[0]), { views: a.views || (a.view ? [a.view] : undefined), size: a.size ?? (a.views?.length === 1 || a.view ? 384 : 192) });
+    return { image: encodePNG(img.width, img.height, img.data), pose: a.pose ?? null, views: img.views, triangles: posed[0].triangles, skinned: true, ms: Math.round(performance.now() - t0) };
+  }
   const ex = previewExtras(def, built, a, { variantDef: variantOf(engine, def), buildDef: (d) => build(engine, d, { tex: built.tex }) });
   if (ex) return ex;
   if (a.clip !== undefined || a.pose !== undefined || a.parts) {
@@ -373,7 +392,7 @@ function placeFrames(engine, outName, FW, FH, tag, imgs, { durations, loop, proj
 }
 
 /** Model-level options kept on create/update (besides name and parts). */
-export const MODEL_KEYS = ['grid', 'scale', 'origin', 'notes', 'project', 'overlays', 'uv_origin', 'rig', 'sockets', 'poses', 'clips', 'weapon', 'arms', 'merge', 'morphs', 'cull', 'greeble_kind'];
+export const MODEL_KEYS = ['grid', 'scale', 'origin', 'notes', 'project', 'overlays', 'uv_origin', 'rig', 'sockets', 'poses', 'clips', 'weapon', 'arms', 'merge', 'morphs', 'cull', 'greeble_kind', 'skeleton', 'skin'];
 
 /** Part index from a number or a part name. */
 function partIndex(parts, k, what) {
@@ -498,6 +517,7 @@ export const MODEL_OPS = {
   /** Store a named pose: per-node offsets from the rest pose. parts:null deletes it. */
   model_pose(a, source) {
     const def = getModel(this, a.name);
+    if (def.skeleton) return skelPose(this, BASE, def, a, source);
     if (!/^[\w.-]{1,64}$/.test(a.pose || '')) throw new Error('pose needs a "pose" name (e.g. "grip_rifle")');
     const built = build(this, def);
     const info = rigOf(def, built, true);
@@ -519,6 +539,7 @@ export const MODEL_OPS = {
   model_animate(a, source) {
     const def = getModel(this, a.name);
     if (a.hold) return holdAnimate(this, def, a, source);
+    if (def.skeleton) return skelAnimate(this, BASE, def, a, source);
     if (!/^[\w.-]{1,64}$/.test(a.clip || '')) throw new Error('animate needs a "clip" name (e.g. "reload_empty")');
     const clips = { ...(def.clips || {}) };
     let r = null;
@@ -544,18 +565,22 @@ export const MODEL_OPS = {
   model_render(a, source) {
     const def = getModel(this, a.name);
     const built = build(this, def);
-    const info = rigOf(def, built, true);
+    // skinned models: frames come from the skeleton clip / pose, deformed by linear blend skinning
+    const skinned = isSkinned(def) && !a.hold ? skinnedOf(skinCtx(BASE, this, built), def, built) : null;
+    if (skinned && (a.only || a.hide)) throw new Error('only / hide are for rigid rigs; a skinned model renders as one mesh');
+    const info = skinned ? { sockets: Object.keys(def.skeleton.sockets || {}).map((k) => ({ name: `socket_${k}` })) } : rigOf(def, built, true);
     const size = a.size === undefined ? [64, 64] : typeof a.size === 'number' ? [a.size, a.size] : Array.isArray(a.size) ? a.size : [];
     const [FW, FH] = size.map((v) => Math.round(Number(v)));
     if (!(FW >= 4 && FH >= 4 && FW <= 1024 && FH <= 1024)) throw new Error('size must be [w, h] px, 4..1024');
     for (const k of ['only', 'hide']) if (a[k] !== undefined && !Array.isArray(a[k])) throw new Error(`${k} must be a list of part (node) names`);
-    if (a.only) subtree(info, a.only);
-    if (a.hide) subtree(info, a.hide);
+    if (a.only && !skinned) subtree(info, a.only);
+    if (a.hide && !skinned) subtree(info, a.hide);
     // poses: clip samples | one pose | rest
     let samples, ms = a.duration ?? 100, loop = a.loop;
     // hold: arms solved onto a gun (or a gun carried by arms) every frame: carry state, grips, dead zone
     const hold = a.hold ? holdSetup(this, def, built, info, a) : null;
     if (hold) { samples = hold.samples; ms = a.duration ?? hold.ms ?? ms; loop = loop ?? hold.loop; }
+    else if (skinned) { const ss = skinSamples(skinned.S, skinned.sk, a); samples = ss.samples.map((x) => ({ ...x, skin: true })); ms = a.duration ?? ss.ms; loop = loop ?? ss.loop; }
     else if (a.clip !== undefined) {
       const cs = clipSamples(def, info, a.clip, a.frames, a.fps);
       samples = cs.samples; ms = a.duration ?? cs.ms; loop = loop ?? cs.loop;
@@ -582,6 +607,7 @@ export const MODEL_OPS = {
     const filter = { only: a.only, hide: a.hide };
     const posed = frames.map(({ ang, s }) => {
       const pre = ang.yaw || ang.pitch || ang.roll ? angleMatrix(ang, pivot) : null;
+      if (s.skin) { const full = skinPosed(skinned.S, skinned.sk, s.state, pre); return { full, shown: full }; }
       if (s.self) {
         const full = holdPosed(s.self, pre);
         if (a.hold.both) full.mesh.add(holdPosed(s.other, pre).mesh);
@@ -744,7 +770,10 @@ export const MODEL_OPS = {
     return { file, meta: metaFile, ...(ctmFile ? { ctm: ctmFile } : {}), bytes: glb.length, triangles: stats.triangles, vertices: stats.vertices, materials: stats.materials, nodes: stats.nodes, bounds_units: stats.bounds, atlased: stats.atlased, ...(info ? { animations: Object.keys(rigClips), sockets: info.sockets.map((s) => s.name) } : {}), ...(ext ? ext.result : {}) };
   },
   ...MODEL_EXTRA_OPS,
+  ...skinOps({ getModel, saveModel, build, variantOf: (engine, def) => variantOf(engine, def), writeGLB }),
 };
+/** Helpers the skinning ops share with the rest of art_model. */
+const BASE = { getModel, saveModel, build, variantOf: (engine, def) => variantOf(engine, def), writeGLB };
 
 // ---------- weapon handling (first-person): arms holding a gun model ----------
 /**
@@ -873,6 +902,13 @@ export function modelThumbnail(engine, def, size = 128) {
  * Used by export and by the web UI's 3D viewer.
  */
 export function assembleGLB(engine, def, { normal = false, instances = false, scale = Number(def.scale ?? 32), up, atlas = false, ctmFile, bump, file = `${def.name}.glb`, args = {} } = {}) {
+  if (isSkinned(def)) {
+    // skinned: one skinned mesh + bone tree + baked clips (art_model skeleton / skin)
+    const bad = ['lods', 'bake_ao', 'impostor', 'collision', 'occluder', 'cull'].filter((k) => args[k]);
+    if (instances || atlas || bad.length) throw new Error(`${[...bad, instances && 'instances', atlas && 'atlas'].filter(Boolean).join(', ')}: not available on skinned models yet`);
+    const built = build(engine, def, { normal, ...(bump !== undefined ? { bump } : {}) });
+    return assembleSkinned(skinCtx(BASE, engine, built), def, built, { scale, up, file, args });
+  }
   const keepGpu = !(rigLayout(def) || def.sockets || def.clips);
   const built = build(engine, def, { normal, instances, keepGpu, ...(bump !== undefined ? { bump } : {}) });
   const info = rigOf(def, built);
