@@ -204,8 +204,9 @@ export function writeGLB(scene, opts = {}) {
   const alphaOf = new Map();
   const needsAlpha = (t) => { if (!alphaOf.has(t.key)) alphaOf.set(t.key, usersOf.has(t.key) ? referencedAlpha(t, usersOf.get(t.key)) : hasAlpha(t.data)); return alphaOf.get(t.key); };
   const matOf = new Map();
-  const material = (t, overlay = false) => {
-    const mk = overlay ? `ov:${t.key}` : t.key;
+  const material = (t, overlay = false, noAO = false) => {
+    // noAO: a primitive without the lightmap UVs (TEXCOORD_1) gets a variant without occlusionTexture
+    const mk = overlay ? `ov:${t.key}` : noAO ? `noao:${t.key}` : t.key;
     if (matOf.has(mk)) return matOf.get(mk);
     const name = (overlay ? 'overlay_' : '') + (t.name || t.key);
     const ik = t.imageKey ?? t.key; // material variants (glass, opacity) share the image
@@ -229,7 +230,7 @@ export function writeGLB(scene, opts = {}) {
     if (t.emissive) { m.emissiveTexture = texture(t.emissiveKey ?? ik + '#e', t.width, t.height, t.emissive, name + '_emissive'); m.emissiveFactor = [1, 1, 1]; }
     if (t.normal) m.normalTexture = texture(t.normalKey ?? ik + '#n', t.width, t.height, t.normal, name + '_normal');
     // baked AO lightmap: every opaque material samples it with TEXCOORD_1
-    if (!overlay && opts.ao && !(spec && spec.blend)) m.occlusionTexture = { ...texture('ao#map', opts.ao.width, opts.ao.height, opts.ao.data, 'ao'), texCoord: 1 };
+    if (!overlay && !noAO && opts.ao && !(spec && spec.blend)) m.occlusionTexture = { ...texture('ao#map', opts.ao.width, opts.ao.height, opts.ao.data, 'ao'), texCoord: 1 };
     json.materials.push(m);
     matOf.set(mk, json.materials.length - 1);
     return json.materials.length - 1;
@@ -270,7 +271,7 @@ export function writeGLB(scene, opts = {}) {
         for (let i = 0; i < vc; i++) col.set([1, 1, 1, p.alpha[i]], i * 4);
         attributes.COLOR_0 = acc(view(col, ARRAY), FLOAT, vc, 'VEC4');
       }
-      const prim = { attributes, indices: acc(view(I, ELEMENTS), big ? U32 : U16, I.length, 'SCALAR'), material: material(p.tex, !!p.overlay), mode: 4 };
+      const prim = { attributes, indices: acc(view(I, ELEMENTS), big ? U32 : U16, I.length, 'SCALAR'), material: material(p.tex, !!p.overlay, !p.overlay && !!opts.ao && !p.uv1), mode: 4 };
       if (p.morphs) {
         // morph targets: POSITION / NORMAL deltas (units), names in mesh.extras.targetNames
         prim.targets = p.morphs.map((t) => {
