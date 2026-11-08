@@ -385,3 +385,82 @@ test('fp melee: deterministic, non-melee fp clips carry no melee block, fp check
   const c = e.run('fp_composite', { out, class: 'baton', clip: 'shield_bash', frame: 5, zoom: 1 });
   assert.ok(c.draw_order.includes('item2') && c.draw_order.includes('item'), c.draw_order.join(','));
 });
+
+test('melee names: skin / victim_skin / clips / pair never leave the library', () => {
+  const e = new Engine({ home: tmp() });
+  setup(e, { name: 'kn', weapon: 'combat_knife' });
+  e.run('anim_skin', { name: 's1', skeleton: 'kn' });
+  // a readable skin outside the library: the old path join reached it
+  fs.mkdirSync(path.join(e.home, 'secret'), { recursive: true });
+  fs.writeFileSync(path.join(e.home, 'secret', 'x.json'), JSON.stringify(lib(e, 'skins', 's1.json')));
+  assert.throws(() => e.run('anim_melee_check', { skin: '../../secret/x' }), /skin "\.\.\/\.\.\/secret\/x" must be/);
+  assert.throws(() => e.run('anim_melee_check', { skeleton: 'kn', clips: ['../kn/knife_stab'] }), /clip .* must be/);
+  assert.throws(() => e.run('anim_melee_check', { skeleton: 'kn', clips: ['..'] }), /clip .* must be/);
+  assert.throws(() => e.run('anim_paired', { skin: '../../secret/x', pair: 'takedown_rear' }), /skin .* must be/);
+  assert.throws(() => e.run('anim_paired', { skin: 's1', victim_skin: '../../secret/x', pair: 'takedown_rear' }), /victim_skin .* must be/);
+  assert.throws(() => e.run('anim_paired', { skin: 's1', pair: '../../x' }), /pair .* must be/);
+  assert.throws(() => e.run('anim_paired', { skin: 's1', pair: 'takedown_rear', canvas: '../evil' }), /canvas .* must be/);
+  assert.throws(() => e.run('anim_melee_check', { skin: 'nope' }), /no skin "nope"/);
+  assert.equal(e.run('anim_melee_check', { skin: 's1', clips: ['knife_stab'] }).clips_checked, 1);
+});
+
+test('melee check: tolerance must be a finite number >= 0', () => {
+  const e = new Engine({ home: tmp() });
+  setup(e, { name: 'kn', weapon: 'combat_knife' });
+  for (const tolerance of ['abc', -1, Infinity, '2', [1]]) assert.throws(() => e.run('anim_melee_check', { skeleton: 'kn', clips: ['knife_stab'], tolerance }), /"tolerance" must be/, String(tolerance));
+  assert.equal(e.run('anim_melee_check', { skeleton: 'kn', clips: ['knife_stab'], tolerance: 0.5 }).tolerance_px, 0.5);
+});
+
+test('melee install: a non-melee clip conflict is refused before anything is written', () => {
+  const e = new Engine({ home: tmp() });
+  e.run('anim_skeleton', { name: 'kn', template: 'humanoid_hd', frame: [64, 96] });
+  e.run('anim_clip', { skeleton: 'kn', name: 'kick', keys: [{ pose: 'idle_exhale', t: 0 }], frames: 4 });
+  const skf = path.join(e.home, 'library', 'skeletons', 'kn.json'), before = fs.readFileSync(skf, 'utf8');
+  const clipsBefore = fs.readdirSync(path.join(e.home, 'library', 'clips', 'kn')).sort();
+  assert.throws(() => e.run('anim_melee', { skeleton: 'kn', weapon: 'combat_knife' }), /non-melee clip "kick"/);
+  assert.equal(fs.readFileSync(skf, 'utf8'), before, 'skeleton untouched');
+  assert.deepEqual(fs.readdirSync(path.join(e.home, 'library', 'clips', 'kn')).sort(), clipsBefore, 'no clip written');
+  assert.ok(e.run('anim_melee', { skeleton: 'kn', weapon: 'combat_knife', overwrite: true }).clips.includes('kick'));
+});
+
+test('melee weapons: prototype keys are not weapons', async () => {
+  const { meleeKind, meleeParts } = await import('../src/melee.js');
+  const { meleeWeapon, meleeTemplate } = await import('../src/meleekit.js');
+  const e = new Engine({ home: tmp() });
+  e.run('anim_skeleton', { name: 'kn', template: 'humanoid_hd', frame: [64, 96] });
+  const def = lib(e, 'skeletons', 'kn.json').def;
+  for (const w of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+    assert.equal(meleeWeapon(w), null);
+    assert.throws(() => e.run('anim_melee', { skeleton: 'kn', weapon: w }), /melee weapons are/, w);
+    assert.throws(() => e.run('anim_melee_sheet', { weapon: w, out: path.join(tmp(), 'o') }), /unknown melee weapon/, w);
+    assert.throws(() => meleeKind(def, w), /unknown/, w);
+    assert.throws(() => meleeParts(def, { weapon: w }), /unknown/, w);
+    assert.throws(() => meleeTemplate(w), /unknown/, w);
+  }
+  assert.equal(meleeWeapon('machete'), MELEE_WEAPONS.machete);
+});
+
+test('melee sheet: pitch / frame / model are validated before rendering', () => {
+  const e = new Engine({ home: tmp() });
+  const out = path.join(tmp(), 'out');
+  for (const pitch of [[], ['a'], [0, 100], [NaN], 'flat', [null]]) assert.throws(() => e.run('anim_melee_sheet', { weapon: 'machete', pitch, out }), /"pitch" must be/, JSON.stringify(pitch));
+  for (const frame of [[0, 96], [64.5, 96], [64], [-1, 96], ['64', '96'], 64]) assert.throws(() => e.run('anim_melee_sheet', { weapon: 'machete', frame, out }), /"frame" must be/, JSON.stringify(frame));
+  assert.throws(() => e.run('anim_melee_sheet', { weapon: 'machete', model: '../x', out }), /model .* must be/);
+  assert.ok(!fs.existsSync(out), 'nothing written');
+});
+
+test('melee sheet: recorded as an export, sheet + manifest linked to the melee_<id> model', async () => {
+  const { EXPORTS } = await import('../src/activity.js');
+  assert.ok(EXPORTS.has('anim_melee_sheet'));
+  const e = new Engine({ home: tmp() });
+  e.run('anim_melee_sheet', { weapon: 'machete', pitch: [0], frame: [32, 48] });
+  const has = (from, to) => e.graph.all().edges.some((x) => x.from === from && x.rel === 'exports_to' && x.to === to);
+  assert.ok(has('model:melee_machete', 'export:assets/weapons_melee/machete.png'), JSON.stringify(e.graph.all().edges.filter((x) => x.rel === 'exports_to')));
+  assert.ok(has('model:melee_machete', 'export:assets/manifest/melee_weapons.json'));
+  // several weapons: each sheet goes to its own model, the shared manifest to none
+  e.run('anim_melee_sheet', { weapons: ['baton', 'combat_knife'], pitch: [0], frame: [32, 48] });
+  assert.ok(has('model:melee_baton', 'export:assets/weapons_melee/baton.png'));
+  assert.ok(has('model:melee_combat_knife', 'export:assets/weapons_melee/combat_knife.png'));
+  assert.ok(!has('model:melee_baton', 'export:assets/weapons_melee/combat_knife.png'));
+  assert.ok(!has('model:melee_baton', 'export:assets/manifest/melee_weapons.json'));
+});

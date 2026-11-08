@@ -248,7 +248,26 @@ export class Graph {
     else if (op === 'planet_create') src = str(a.name) && `planet:${a.name}`;
     else if (op.startsWith('planet_')) src = str(a.planet) && `planet:${a.planet}`; // terrain / rocks / asteroids sampled from a stored planet
     else if (op === 'export' || op === 'export_animation') src = str(a.canvas) && `canvas:${a.canvas}`;
+    else if (op === 'fx_make') src = typeof a.canvas === 'string' ? str(a.canvas) && `canvas:${a.canvas}` : a.canvas === true && str(a.name) ? `canvas:${a.name}` : null; // the canvas the frames opened in
+    else if (op === 'fx_preview') src = str(a.over?.canvas) && `canvas:${a.over.canvas}`; // composited over that canvas frame
+    else if (op === 'anim_melee_sheet') {
+      // one sheet per weapon (weapons_melee/<id>.png) -> its model; the shared manifest only when one weapon was rendered
+      const one1 = one(a.weapons ?? a.weapon), modelOf = (id) => `model:${str(a.model) ?? `melee_${id}`}`, by = new Map();
+      for (const f of files) {
+        const m = /[\\/]weapons_melee[\\/]([^\\/]+)\.png$/.exec(f), id = m ? m[1] : one1;
+        if (!id) continue;
+        const s = modelOf(id);
+        if (!by.has(s)) by.set(s, []);
+        by.get(s).push(f);
+      }
+      for (const [s, l] of by) this.linkExports(s, l);
+      return;
+    }
     if (!src) return;
+    this.linkExports(src, files);
+  }
+  /** src exports_to export:<file> for each file (deduplicated). */
+  linkExports(src, files) {
     const have = new Set(this.data.edges.filter((x) => x.from === src && x.rel === 'exports_to').map((x) => x.to));
     let changed = 0;
     for (const f of files.slice(0, MAX_EXPORT_FILES)) {

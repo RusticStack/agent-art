@@ -15,14 +15,16 @@ export const READ_ONLY = new Set([
   'audio_list', 'audio_info', 'audio_analyze', 'audio_critique', 'audio_compare', 'audio_generate',
   'graph_query', 'graph_find', 'graph_path', 'graph_summary', 'pack_info',
   'cleanup_plan', 'cleanup_trash', 'cleanup_usage', 'cleanup_flags',
+  'fx_list',
 ]);
 /** Ops that write files (exports_to edges in the asset graph). */
 export const EXPORTS = new Set([
   'export', 'export_animation', 'model_export', 'audio_export', 'pack_zip', 'pack_build',
   'model_cluster_lod', 'model_visibility', 'rig_export', // mesh processing, skin2d runtime export
-  'anim_gltf', 'anim_batch', 'anim_weapon_sheet', // art_anim
+  'anim_gltf', 'anim_batch', 'anim_weapon_sheet', 'anim_melee_sheet', // art_anim
   'fp_sweep', 'fp_batch', // art_fp
   'planet_create', 'planet_system', 'planet_terrain', 'planet_rocks', 'planet_asteroids', 'planet_skybox', 'planet_fx', // art_planet
+  'fx_make', 'fx_batch', 'fx_preview', 'fx_export', // art_fx
 ]);
 /** Most files one export op links to its source asset (a planet writes ~170). */
 export const MAX_EXPORT_FILES = 5000;
