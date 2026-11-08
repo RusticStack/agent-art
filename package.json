@@ -1,0 +1,46 @@
+{
+  "name": "@rusticstack/agent-art",
+  "version": "0.3.0",
+  "description": "Pixel art for AI agents: MCP server + live web UI for sprites, rigs and animations, tilesets, textures, icons and 2.5D scenes.",
+  "type": "module",
+  "bin": {
+    "agent-art": "bin/agent-art.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "public/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node bin/agent-art.js serve --open",
+    "serve": "node bin/agent-art.js serve",
+    "mcp": "node bin/agent-art.js mcp",
+    "test": "node --test test/"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "pixel-art",
+    "ai-agents",
+    "sprites",
+    "spritesheet",
+    "animation",
+    "gamedev",
+    "claude"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RusticStack/agent-art.git"
+  },
+  "homepage": "https://github.com/RusticStack/agent-art#readme",
+  "bugs": "https://github.com/RusticStack/agent-art/issues",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

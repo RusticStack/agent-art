@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "agent-art": {
+      "command": "node",
+      "args": ["bin/agent-art.js", "mcp"]
+    }
+  }
+}
