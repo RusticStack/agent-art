@@ -5,6 +5,7 @@
 // Keep SIGS terse; put explanations in DETAILS.
 import { PART_DOCS } from './model3d.js';
 import { AUDIO_TOPICS } from './audio/docs.js';
+import { PLANET_TOPICS } from './space/docs.js';
 
 /** op -> [signature, short purpose]. Field names are exact; "?" = optional. */
 export const SIGS = {
@@ -259,7 +260,7 @@ PRE-RENDERED SPRITES (the PS1 / Doom technique: build low-poly, render to pixel 
 - Arms that follow the gun: a 2D arm rig (art_rig) uses those anchors as per-frame IK targets: art_rig animate {name:"arms2d", animation:"reload", canvas:"arms_reload", ik_from:{canvas:"ar_reload", animation:"reload_empty", map:{hand_f:{anchor:"socket_grip_r", bend:-1}, hand_b:"socket_grip_l"}, offset?:[dx,dy]}, keys?}: same frame count and timing as the gun clip (give the arm rig the same frame size as the render, or offset:[dx,dy]), the hands land on the grips in every frame (map value "<anchor>" or {anchor, bend?, rot?:true (anchor rotation, + rot_offset) | deg, at?:[dx,dy], weight?}). End parts are your rig's hands: hand_f / hand_b on humanoid templates, or your own names (a minimal arms rig: frame = render size, root [80,119], body > upper_r > fore_r > hand_r and body > upper_l > fore_l > hand_l, see skill fp-weapon).
 PRE-RENDERED FP WEAPON EXAMPLE: 1. create {name:"ar", template:"fp_rifle", textures:{..}} 2. render {name:"ar", canvas:"ar_reload", clip:"reload_empty", fps:12, size:[160,120], camera:"fp", hide:["magazine"], quantize:{colors:16, dither:true}, outline:"#14141a"} (gun layer) 3. render {name:"ar", canvas:"ar_reload_mag", clip:"reload_empty", fps:12, size:[160,120], camera:"fp", only:["magazine"]} (magazine layer, same anchors) 4. render {name:"ar", canvas:"ar_sway", sweep:{yaw:[-6,6,3], pitch:[-4,4,2]}, size:[160,120]} (sway / turn frames) 5. art_rig create a 2D arms rig with frame [160,120] and draw its parts, then animate {..., ik_from:{canvas:"ar_reload", animation:"reload_empty", map:{hand_r:"socket_grip_r", hand_l:"socket_grip_l"}}} 6. paint over any frame by hand, then art_animation export {canvas:"ar_reload", format:"spritesheet"} for each layer (json frames[].anchors line the layers up in-engine).`;
 
-Object.assign(TOPICS, AUDIO_TOPICS);
+Object.assign(TOPICS, AUDIO_TOPICS, PLANET_TOPICS);
 
 TOPICS.graph = `ASSET GRAPH (art_graph): the light index of what is part of what
 Orient yourself with it instead of calling art_info on every asset: replies are ids, relation types and one-line notes only (a few hundred chars).
