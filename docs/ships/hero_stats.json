@@ -1,0 +1,96 @@
+{
+  "hero": {
+    "model": "gunship (ORVANE TERN, original)",
+    "length_m": 25,
+    "class": "dropship",
+    "triangles": 37760,
+    "budget": 45000,
+    "verdict": "within budget",
+    "lod_estimate": [
+      37760,
+      18880,
+      9440,
+      3776
+    ],
+    "materials": 82,
+    "draw_calls": {
+      "merged": 82
+    },
+    "export_static_lods": {
+      "triangles": 37784,
+      "nodes": 66,
+      "bytes": 4781600,
+      "lods": [
+        {
+          "level": 0,
+          "triangles": 37784,
+          "distance": 0
+        },
+        {
+          "level": 1,
+          "triangles": 18892,
+          "distance": 24.099998
+        },
+        {
+          "level": 2,
+          "triangles": 9446,
+          "distance": 75.387613
+        },
+        {
+          "level": 3,
+          "triangles": 3777,
+          "distance": 644.373082
+        }
+      ],
+      "split": [
+        "tern_rig: 37784 -> 2 meshes"
+      ],
+      "walk": {
+        "navmesh_triangles": 8,
+        "colliders": 3,
+        "triggers": 2,
+        "areas": 4
+      }
+    },
+    "export_atlas": {
+      "triangles": 37784,
+      "materials": 31,
+      "bytes": 2135116
+    },
+    "export_rigged": {
+      "nodes": 83,
+      "animations": [
+        "airlock_open",
+        "chin_turret_scan",
+        "gear_retract",
+        "gear_deploy",
+        "vtol"
+      ],
+      "walk": {
+        "navmesh_triangles": 8,
+        "colliders": 3,
+        "triggers": 2,
+        "areas": 4
+      }
+    },
+    "walk_check": {
+      "ok": true,
+      "problems": 0,
+      "counts": {
+        "areas": 4,
+        "doors": 1,
+        "ladders": 1,
+        "lifts": 0,
+        "seats": 1,
+        "spawns": 2,
+        "reachable": 4
+      },
+      "areas": [
+        "corridor 3.06x11.88 m",
+        "airlock 1.34x2.25 m",
+        "cockpit 1.75x1.25 m",
+        "hold 1.69x5.5 m"
+      ]
+    }
+  }
+}

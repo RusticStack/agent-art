@@ -20,6 +20,12 @@ import { skinOps, skinCtx, skinnedOf, skinSamples, skinPosed, assembleSkinned, i
 import { exportV2, finishV2, materialOp, describeMaterial, textureChannels, channelPreview } from './matops.js';
 import { V2_PRESETS } from './materials.js';
 import { meshOpsFor, loadBaked } from './meshops.js';
+import { expandDef } from './kitparts.js';
+import { kitOps } from './kitops.js';
+import { isKitRef, kitTexture } from './kittex.js';
+import { bakeAO } from './bake.js';
+import { WALK_KINDS, navMesh } from './walk.js';
+import { addMarkerNodes, markerMeta, splitScene, materialize, sceneTriangles, sceneDrawCalls, normBudget, ROBLOX_TRIS, moodOpts, budgetReport } from './modelkit.js';
 
 const NAME_RE = /^[A-Za-z0-9_\-.]{1,64}$/;
 
@@ -85,6 +91,8 @@ export function texResolver(engine, { normal = false, bump = null } = {}) {
     const region = Array.isArray(ref.region) ? ref.region : ref.w !== undefined ? [ref.x ?? 0, ref.y ?? 0, ref.w, ref.h ?? ref.w] : null;
     const key = JSON.stringify([ref.canvas, ref.frame ?? null, ref.layer ?? null, region, ref.overlay ?? null]);
     if (cache.has(key)) return cache.get(key);
+    // built-in kit textures ("kit_deck", "kit_fabric_a03028"): used when no canvas has that name
+    if (!engine.docs.has(ref.canvas) && isKitRef(ref.canvas) && ref.frame === undefined && ref.layer === undefined && !region && !ref.overlay) { const kt = kitTexture(ref.canvas); cache.set(key, kt); return kt; }
     const d = engine.get(ref.canvas);
     used.add(d.name);
     const f = Number(ref.frame ?? 0);
@@ -192,6 +200,7 @@ const variantOf = (engine, def) => (spec) => (spec.model ? getModel(engine, spec
 
 const r4 = (v) => +v.toFixed(3);
 function summary(def, built) {
+  def = expandDef(def);
   const { mesh, parts, origin } = built;
   const b = mesh.bounds(), scale = Number(def.scale ?? 32), grid = Number(def.grid ?? 32);
   const size = b.max.map((v, i) => v - b.min[i]);
@@ -246,6 +255,7 @@ function clipSamples(def, info, clipName, n, fps) {
 }
 
 function previewImage(engine, def, a) {
+  def = expandDef(def);
   const t0 = performance.now();
   const built = build(engine, def, a.bump !== undefined ? { bump: a.bump } : {});
   if (a.channel !== undefined) return channelPreview(def, built, a);
@@ -266,7 +276,10 @@ function previewImage(engine, def, a) {
     const img = renderViews(groupsOf(posed[0]), { views: a.views || (a.view ? [a.view] : undefined), size: a.size ?? (a.views?.length === 1 || a.view ? 384 : 192) });
     return { image: encodePNG(img.width, img.height, img.data), pose: a.pose ?? null, views: img.views, triangles: posed[0].triangles, skinned: true, ms: Math.round(performance.now() - t0) };
   }
-  const ex = previewExtras(def, built, a, { variantDef: variantOf(engine, def), buildDef: (d) => build(engine, d, { tex: built.tex }) });
+  const render = a.mood ? moodOpts(built.markers, a.mood) : undefined;
+  // a posed preview bakes its own AO (ao + pose), so previewExtras only takes ao without a pose
+  const posedAO = a.ao && a.clip === undefined && (a.pose !== undefined || a.parts) && a.lod === undefined && !a.morph;
+  const ex = posedAO ? null : previewExtras(def, built, a, { variantDef: variantOf(engine, def), buildDef: (d) => build(engine, d, { tex: built.tex }), render });
   if (ex) return ex;
   if (a.clip !== undefined || a.pose !== undefined || a.parts) {
     const info = rigOf(def, built, true);
@@ -286,16 +299,17 @@ function previewImage(engine, def, a) {
       return { image: encodePNG(img.width, img.height, img.data), clip: a.clip, view: cam.label, frames: samples.map((s) => +s.time.toFixed(3)), triangles: built.mesh.triangles, ms: Math.round(performance.now() - t0) };
     }
     const { mesh } = posedWorld(info, resolveOffsets(def, info, { pose: a.pose, parts: a.parts }), filter);
+    const aoInfo = posedAO ? bakeAO([{ meshes: [mesh] }], a.ao === true ? {} : a.ao).stats : null;
     if (a.view !== undefined && (a.view === 'fp' || (typeof a.view === 'object' && a.view.pos))) {
       const S = Math.max(32, Math.min(1024, Math.round(a.size ?? 384)));
       const img = renderCamera(groupsOf(mesh), makeCamera(a.view, S, S, [], { fov: a.fov }), S, S);
       return { image: encodePNG(img.width, img.height, img.data), pose: a.pose ?? null, views: [{ view: 'fp', pixels: img.drawn }], triangles: mesh.triangles, ms: Math.round(performance.now() - t0) };
     }
-    const img = renderViews(groupsOf(mesh), { views: a.views || (a.view ? [a.view] : undefined), size: a.size ?? (a.views?.length === 1 || a.view ? 384 : 192) });
-    return { image: encodePNG(img.width, img.height, img.data), pose: a.pose ?? null, views: img.views, triangles: mesh.triangles, ms: Math.round(performance.now() - t0) };
+    const img = renderViews(groupsOf(mesh), { views: a.views || (a.view ? [a.view] : undefined), size: a.size ?? (a.views?.length === 1 || a.view ? 384 : 192), ...(render ? { render } : {}) });
+    return { image: encodePNG(img.width, img.height, img.data), pose: a.pose ?? null, views: img.views, triangles: mesh.triangles, ...(aoInfo ? { ao: aoInfo } : {}), ms: Math.round(performance.now() - t0) };
   }
   const groups = [...built.mesh.groups.values()].filter((g) => g.idx.length);
-  const img = renderViews(groups, { views: a.views, size: a.size ?? (a.views?.length === 1 ? 384 : 192) });
+  const img = renderViews(groups, { views: a.views, size: a.size ?? (a.views?.length === 1 ? 384 : 192), ...(render ? { render } : {}) });
   return { image: encodePNG(img.width, img.height, img.data), views: img.views, triangles: built.mesh.triangles, ms: Math.round(performance.now() - t0) };
 }
 
@@ -528,21 +542,22 @@ export const MODEL_OPS = {
   },
   /** Store a named pose: per-node offsets from the rest pose. parts:null deletes it. */
   model_pose(a, source) {
-    const def = getModel(this, a.name);
-    if (def.skeleton) return skelPose(this, BASE, def, a, source);
+    const raw = getModel(this, a.name);
+    if (raw.skeleton) return skelPose(this, BASE, raw, a, source);
+    const def = expandDef(raw);
     if (!/^[\w.-]{1,64}$/.test(a.pose || '')) throw new Error('pose needs a "pose" name (e.g. "grip_rifle")');
     const built = build(this, def);
     const info = rigOf(def, built, true);
-    const poses = { ...(def.poses || {}) };
+    const poses = { ...(raw.poses || {}) };
     if (a.parts === null || a.delete) delete poses[a.pose];
     else {
       if (!a.parts || typeof a.parts !== 'object') throw new Error('pose needs parts: {<part name>: {rot?:[x,y,z] deg, at?:[dx,dy,dz] px, scale?}} (offsets from the rest pose; base?:<pose> starts from another pose)');
       let parts = a.parts;
-      if (a.base !== undefined) { const b = a.base === 'rest' && !poses.rest ? { parts: {} } : poses[a.base]; if (!b) throw new Error(`base: unknown pose "${a.base}"`); parts = { ...b.parts, ...a.parts }; }
+      if (a.base !== undefined) { const b = a.base === 'rest' && !poses.rest ? { parts: {} } : poses[a.base] ?? def.poses?.[a.base]; if (!b) throw new Error(`base: unknown pose "${a.base}"`); parts = { ...b.parts, ...a.parts }; }
       resolveOffsets(def, info, { parts });
       poses[a.pose] = { parts };
     }
-    const next = { ...def, poses };
+    const next = { ...raw, poses };
     if (!Object.keys(poses).length) delete next.poses;
     saveModel(this, next, source, `pose ${a.pose}`);
     return { model: def.name, pose: a.pose, poses: Object.keys(poses), nodes: info.nodes.map((n) => n.name), next: `art_model preview {name:"${def.name}", pose:"${a.pose}"} (view:"fp" = first-person camera)` };
@@ -559,8 +574,8 @@ export const MODEL_OPS = {
     else {
       const clip = { keys: a.keys };
       for (const k of ['loop', 'events', 'duration', 'ease']) if (a[k] !== undefined && a[k] !== null) clip[k] = a[k];
-      const info = rigOf(def, build(this, def), true);
-      const ck = clipKeys(def, info, clip);
+      const xdef = expandDef(def), info = rigOf(xdef, build(this, xdef), true);
+      const ck = clipKeys(xdef, info, clip);
       r = { duration: ck.duration, keys: ck.keys.length, loop: ck.loop, nodes: [...new Set(ck.keys.flatMap((k) => [...k.off.keys()]))], events: clip.events || [] };
       clips[a.clip] = clip;
     }
@@ -575,7 +590,7 @@ export const MODEL_OPS = {
    * per-frame socket anchors in meta.anchors[animation] (spritesheet json frames[].anchors).
    */
   model_render(a, source) {
-    const def = getModel(this, a.name);
+    const def = expandDef(getModel(this, a.name));
     const built = build(this, def);
     // skinned models: frames come from the skeleton clip / pose, deformed by linear blend skinning
     const skinned = isSkinned(def) && !a.hold ? skinnedOf(skinCtx(BASE, this, built), def, built) : null;
@@ -774,7 +789,7 @@ export const MODEL_OPS = {
     return { model: def.name, material: r.name, ...(r.deleted ? { deleted: true } : { spec: r.spec, resolved: r.resolved }), used_by: { parts: users, canvas_faces: s.materials.filter((m) => m === r.name || m.startsWith(`${r.name}_`)).length }, next: `art_model preview {name:"${def.name}", channel:["lit","normal","orm","emissive"]} shows each channel; export {name:"${def.name}", profile:"three"} writes the extensions` };
   },
   model_export(a) {
-    const def = getModel(this, a.name);
+    const def = expandDef(getModel(this, a.name));
     const scale = Number(a.scale ?? def.scale ?? 32);
     let file = this.resolvePath(a.path || `${def.name}.glb`, this.exportDir);
     if (/[\\/]$/.test(a.path || '') || (fs.existsSync(file) && fs.statSync(file).isDirectory())) file = path.join(file, `${def.name}.glb`);
@@ -786,7 +801,7 @@ export const MODEL_OPS = {
       const probe = build(this, def);
       for (const c of probe.tex.used) if (!this.docs.has(`${c}_n`) && !/_n$/.test(c)) this.run('normal_map', { canvas: c }, 'agent');
     }
-    const { glb, stats, built, info, rigClips, ctm, ctmNames, ext, v2 } = assembleGLB(this, def, { normal, instances: !!a.instances, scale, up: a.up, atlas: !!a.atlas, ctmFile: path.basename(file).replace(/\.glb$/i, '.ctm.json'), file, args: a, ...(a.bump !== undefined ? { bump: a.bump } : {}) });
+    const { glb, stats, built, info, rigClips, ctm, ctmNames, ext, v2, kit } = assembleGLB(this, def, { normal, instances: !!a.instances, scale, up: a.up, atlas: !!a.atlas, ctmFile: path.basename(file).replace(/\.glb$/i, '.ctm.json'), file, args: a, ...(a.bump !== undefined ? { bump: a.bump } : {}) });
     fs.writeFileSync(file, glb);
     if (ext) ext.after();
     if (v2) for (const [f, buf] of v2.side) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, buf); }
@@ -807,14 +822,16 @@ export const MODEL_OPS = {
       materials_note: 'NEAREST filters + REPEAT wrap; alphaMode MASK (cutoff 0.5) where the texture has transparency; BLEND (baseColorFactor alpha = opacity, extras.depthWrite false) for parts with opacity < 1 or glass, doubleSided for glass / double_sided; emissive from layer "emissive" / <canvas>_emissive; overlay materials (name overlay_*) sample TEXCOORD_1, strength = COLOR_0 alpha',
       ...(ext ? ext.meta : {}),
       ...(v2 ? v2.meta : {}),
+      ...(kit ? kit.meta : {}),
     };
     const metaFile = file.replace(/\.glb$/i, '.meta.json');
     fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2));
-    return { file, meta: metaFile, ...(ctmFile ? { ctm: ctmFile } : {}), bytes: glb.length, triangles: stats.triangles, vertices: stats.vertices, materials: stats.materials, nodes: stats.nodes, bounds_units: stats.bounds, atlased: stats.atlased, ...(info ? { animations: Object.keys(rigClips), sockets: info.sockets.map((s) => s.name) } : {}), ...(ext ? ext.result : {}), ...(v2 ? v2.result : {}) };
+    return { file, meta: metaFile, ...(ctmFile ? { ctm: ctmFile } : {}), bytes: glb.length, triangles: stats.triangles, vertices: stats.vertices, materials: stats.materials, nodes: stats.nodes, bounds_units: stats.bounds, atlased: stats.atlased, ...(info ? { animations: Object.keys(rigClips), sockets: info.sockets.map((s) => s.name) } : {}), ...(ext ? ext.result : {}), ...(v2 ? v2.result : {}), ...(kit ? kit.result : {}) };
   },
   ...MODEL_EXTRA_OPS,
   ...skinOps({ getModel, saveModel, build, variantOf: (engine, def) => variantOf(engine, def), writeGLB }),
   ...meshOpsFor({ getModel, build, saveModel, modelDir }),
+  ...kitOps({ getModel, saveModel, build, models }),
 };
 /** Helpers the skinning ops share with the rest of art_model. */
 const BASE = { getModel, saveModel, build, variantOf: (engine, def) => variantOf(engine, def), writeGLB };
@@ -945,22 +962,44 @@ export function modelThumbnail(engine, def, size = 128) {
  * Build a model as an in-memory .glb (same scene as art_model export, no files written).
  * Used by export and by the web UI's 3D viewer.
  */
-export function assembleGLB(engine, def, { normal = false, instances = false, scale = Number(def.scale ?? 32), up, atlas = false, ctmFile, bump, file = `${def.name}.glb`, args = {} } = {}) {
+export function assembleGLB(engine, def0, { normal = false, instances = false, scale = Number(def0.scale ?? 32), up, atlas = false, ctmFile, bump, file = `${def0.name}.glb`, args = {} } = {}) {
+  let def = expandDef(def0);
   if (isSkinned(def)) {
     // skinned: one skinned mesh + bone tree + baked clips (art_model skeleton / skin)
-    const bad = ['lods', 'bake_ao', 'impostor', 'collision', 'occluder', 'cull'].filter((k) => args[k]);
+    const bad = ['lods', 'bake_ao', 'impostor', 'collision', 'occluder', 'cull', 'static', 'split', 'walk'].filter((k) => args[k]);
     if (instances || atlas || bad.length) throw new Error(`${[...bad, instances && 'instances', atlas && 'atlas'].filter(Boolean).join(', ')}: not available on skinned models yet`);
     const built = build(engine, def, { normal, ...(bump !== undefined ? { bump } : {}) });
     return assembleSkinned(skinCtx(BASE, engine, built), def, built, { scale, up, file, args });
   }
-  const keepGpu = !(rigLayout(def) || def.sockets || def.clips) && args.profile !== 'roblox' && args.profile !== 'minimal';
-  const built = build(engine, def, { normal, instances, keepGpu, ...(bump !== undefined ? { bump } : {}) });
-  const info = rigOf(def, built);
-  let meshes = [], nodes = [], animations, rigClips;
+  const keepGpu = (!(rigLayout(def) || def.sockets || def.clips) || !!args.static) && args.profile !== 'roblox' && args.profile !== 'minimal';
+  let built = build(engine, def, { normal, instances, keepGpu, ...(bump !== undefined ? { bump } : {}) });
+  let info = rigOf(def, built);
+  const kitMeta = {}, kitResult = {};
+  if (args.static) {
+    // bake a pose (rest by default) into one plain mesh: LODs, impostors and cull apply; sockets become marker nodes
+    if (!info) throw new Error('static: the model has no rig (named parts / sockets / clips): export it without static');
+    const pose = args.static === true ? undefined : String(args.static);
+    const pw = posedWorld(info, resolveOffsets(def, info, { pose }));
+    const moved = (k) => {
+      if (!k.node || !info.byName.has(k.node)) return k;
+      const n = info.byName.get(k.node), W = pw.world.get(k.node), R = n.R, d = [k.pos[0] - n.joint[0], k.pos[1] - n.joint[1], k.pos[2] - n.joint[2]];
+      const l = [R[0] * d[0] + R[4] * d[1] + R[8] * d[2], R[1] * d[0] + R[5] * d[1] + R[9] * d[2], R[2] * d[0] + R[6] * d[1] + R[10] * d[2]];
+      const { node, ...rest } = k;
+      return { ...rest, pos: [W[0] * l[0] + W[1] * l[1] + W[2] * l[2] + W[3], W[4] * l[0] + W[5] * l[1] + W[6] * l[2] + W[7], W[8] * l[0] + W[9] * l[1] + W[10] * l[2] + W[11]] };
+    };
+    const sockets = [...pw.sockets].map(([name, s]) => ({ kind: 'socket', pos: s.pos, dir: s.forward, data: { socket: name.replace(/^socket_/, '') } }));
+    built = { ...built, mesh: pw.mesh, layout: null, markers: [...(built.markers || []).map(moved), ...sockets] };
+    def = { ...def, sockets: undefined, clips: undefined, poses: undefined };
+    info = null;
+    kitMeta.static = { pose: pose ?? 'rest', note: 'rig baked into one mesh; sockets exported as marker nodes socket_<name> (extras.marker "socket", dir = look)' };
+    kitResult.static = pose ?? 'rest';
+  }
+  let meshes = [], nodes = [], animations, rigClips, rigIndex = null;
   if (info) {
     // rig: one node (own mesh, local TRS) per named part, sockets as empty nodes, clips as animations
     const rs = rigScene(def, info);
     ({ meshes, nodes, animations } = rs);
+    rigIndex = rs.index;
     rigClips = rs.clips;
     const meshOf = new Map();
     for (const [k, it] of built.instances.entries()) {
@@ -986,11 +1025,52 @@ export function assembleGLB(engine, def, { normal = false, instances = false, sc
   // surface / render-cost extras (only when asked for: plain exports are unchanged); side files are written by ext.after()
   const ext = wantsExtras(def, built, args) ? exportExtras(engine, def, built, args, { scale, file, info, meshes, nodes, writeGLB, variantDef: variantOf(engine, def), buildDef: (d) => build(engine, d, { tex: built.tex, normal, keepGpu }) }) : null;
   if (ext) ({ meshes, nodes } = ext);
+  // walkability (export walk:true): navmesh node + collider / trigger marker nodes; otherwise those markers stay out
+  if (built.markers && built.markers.some((k) => WALK_KINDS.has(k.kind))) {
+    if (args.walk) {
+      const nav = navMesh(built.markers);
+      if (nav.triangles) {
+        meshes = [...meshes, { name: `${def.name}_walk`, groups: nav.groups.values() }];
+        nodes = [...nodes, { name: `${def.name}_walk`, mesh: meshes.length - 1, proxy: true, extras: { navmesh: true, visible: false, note: 'walkable surface (one quad per walk area): hide it, feed it to the navmesh / character controller' } }];
+      }
+      const ks = built.markers.filter((k) => WALK_KINDS.has(k.kind));
+      kitMeta.walk = { areas: ks.filter((k) => k.kind === 'walk').length, colliders: ks.filter((k) => k.kind === 'collider').length, triggers: ks.filter((k) => k.kind === 'trigger').length, navmesh: `${def.name}_walk`, note: 'collider_<n> = box colliders (extras w/h/d units, room); trigger_<n> = door / ladder / lift trigger volumes; walk_<n> = walk areas; seat_<n> / spawn_<n> = seat sockets and spawn points' };
+      kitResult.walk = { navmesh_triangles: nav.triangles, colliders: kitMeta.walk.colliders, triggers: kitMeta.walk.triggers, areas: kitMeta.walk.areas };
+    } else built = { ...built, markers: built.markers.filter((k) => !WALK_KINDS.has(k.kind)) };
+  }
+  // lights + markers (plumes, hardpoints, doors, screens, spawns) as empty nodes with extras
+  if (built.markers && built.markers.length) {
+    const r = addMarkerNodes(nodes, built.markers, scale, info ? { info, index: rigIndex } : null);
+    nodes = r.nodes;
+    kitMeta.markers = { lights: r.lights, nodes: r.count, list: markerMeta(built.markers, scale), note: 'Empty nodes light_<n> (extras.light {type, color, intensity, range units, dir?, angle?}) and <kind>_<n> / socket_<name> (extras.marker). Place real lights sparingly: the biggest intensity x range first; emissive textures already glow.' };
+    kitResult.markers = r.count; kitResult.lights = r.lights;
+  }
+  const budget = normBudget(args.budget);
+  if (args.split || budget) {
+    meshes = materialize(meshes);
+    const lim = args.split === true || args.split === undefined ? ROBLOX_TRIS : Number(args.split);
+    if (!(lim >= 100)) throw new Error('split must be true (20000 triangles per mesh, the Roblox MeshPart limit) or a triangle count >= 100');
+    if (args.split) {
+      const r = splitScene(meshes, nodes, lim);
+      ({ meshes, nodes } = r);
+      kitMeta.split = { max_triangles: lim, meshes: r.split };
+      kitResult.split = r.split.length ? r.split.map((x) => `${x.mesh}: ${x.triangles} -> ${x.chunks} meshes`) : 'no mesh over the limit';
+    }
+    if (budget) {
+      const tris = sceneTriangles(meshes, nodes), dc = sceneDrawCalls(meshes, nodes);
+      const big = meshes.map((m) => ({ name: m.name, t: m.groups.reduce((s, g) => s + g.idx.length / 3, 0) })).filter((m) => m.t > budget.mesh);
+      if (tris > budget.triangles) throw new Error(`budget ${budget.name}: ${tris} triangles > ${budget.triangles} (art_model budget {name:"${def.name}"} lists the costliest parts; lower hull rings / segments, greeble density, or use lods)`);
+      if (big.length) throw new Error(`budget ${budget.name}: mesh ${big.map((m) => `${m.name} (${m.t})`).join(', ')} over ${budget.mesh} triangles per mesh: export with split:true`);
+      kitMeta.budget = { class: budget.name, triangles: tris, limit: budget.triangles, mesh_limit: budget.mesh, draw_calls: dc };
+      kitResult.budget = { class: budget.name, triangles: tris, limit: budget.triangles, draw_calls: dc };
+    }
+  }
   // materials v2 (profiles, packing, extensions, tangents, vertex data): only when something asks for it
   meshes = meshes.map((m) => ({ ...m, groups: [...m.groups] })); // group iterators -> arrays (read twice below)
   const v2 = exportV2(def, built, args, { meshes, nodes, ext, scale, file, info });
   if (v2) meshes = v2.meshes;
   const { glb, stats } = writeGLB({ meshes, nodes, animations }, { scale, up, atlas, name: def.name, extras, ...(v2 ? { ...v2.glbOpts, v2: v2.v2 } : ext ? ext.glbOpts : {}) });
   if (v2) finishV2(v2, glb, stats);
-  return { glb, stats, built, info, rigClips, ctm, ctmNames, ext, v2 };
+  const kit = Object.keys(kitMeta).length || Object.keys(kitResult).length ? { meta: kitMeta, result: kitResult } : null;
+  return { glb, stats, built, info, rigClips, ctm, ctmNames, ext, v2, kit };
 }

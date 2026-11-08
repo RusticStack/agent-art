@@ -16,6 +16,12 @@ import { greeble } from './greeble.js';
 import { normPBR, pbrKey, normBump, bumpKey, bumpNormal, mrTexture, normTrim, trimStrips, heightToNormal, autoHeight } from './surface.js';
 import { normDisplace, displaceMesh } from './displace.js';
 import { booleanMesh, mergeMesh } from './csg.js';
+import { parseColor } from './color.js';
+import { hull } from './hull.js';
+import { truss, beam, revolve, dome, rock, wingPanel, catwalk, landingPad, neon, signBox, holo, fogCard, light, marker, container, decal, withGen, transformMarkers } from './structures.js';
+import { expandDef } from './kitparts.js';
+import './kitrooms.js';
+import './kitship.js';
 
 // ---------- vector / matrix ----------
 const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
@@ -225,7 +231,7 @@ const ROLE = (n) => (n[1] > 0.7 ? 'top' : n[1] < -0.7 ? 'bottom' : Math.abs(n[0]
  * Texture per face direction: faces:{top,bottom,front,back,left,right} or the same keys on the
  * part, then cap (top+bottom) / side (every vertical face), then texture, then color.
  */
-function faceTexer(a, ctx, defColor = '#8a8a94', extra = {}) {
+export function faceTexer(a, ctx, defColor = '#8a8a94', extra = {}) {
   const f = { ...(a.faces || {}), ...extra };
   const get = (k) => f[k] ?? a[k];
   const cache = new Map();
@@ -242,7 +248,7 @@ function faceTexer(a, ctx, defColor = '#8a8a94', extra = {}) {
 }
 
 /** Axis-aligned box faces [min,max] with per-direction textures. */
-function boxFaces(m, min, max, ft, tile = true) {
+export function boxFaces(m, min, max, ft, tile = true) {
   const [x0, y0, z0] = min, [x1, y1, z1] = max;
   const F = [
     [[0, 0, 1], [[x0, y1, z1], [x1, y1, z1], [x1, y0, z1], [x0, y0, z1]]],
@@ -1120,7 +1126,9 @@ export const BUILDERS = {
   pillar: pillar(false),
   column: pillar(true),
   sweep, tube: sweep, greeble,
+  hull, truss, beam, revolve, dome, rock, wing_panel: wingPanel, catwalk, landing_pad: landingPad, neon, sign: signBox, holo, fog_card: fogCard, light, marker, container, decal,
 };
+BUILDERS.god_ray = (a, ctx) => fogCard({ falloff: 'beam', w: 32, h: 128, opacity: 0.3, ...a }, ctx);
 BUILDERS.prism = (a, ctx) => cylinder({ segments: 6, flat: true, ...a }, ctx);
 BUILDERS.cone = (a, ctx) => cylinder({ r_top: 0, ...a }, ctx);
 BUILDERS.loft = (a, ctx) => shape({ scale_end: 0.5, ...a }, ctx);
@@ -1159,11 +1167,30 @@ export const PART_DOCS = {
   tube: 'path:[[x,y,z],..] | from+to (+sag px = hanging cable), curve?:linear|catmull|bezier, segments?:6, r?:2, r_end? (taper), sides?:8, profile?:[[x,y],..] (custom section, x side, y up), twist? deg, caps?:true|start|end|false, closed?, up?, texture (u around x wrap?, v world px along) | trim:"sheet:strip"',
   sweep: 'same as tube (profile sweeps: conduits, railings, rails, hoses)',
   greeble: 'w?:64,d?:64 region on y=0 facing +y, seed?, density?:0.45 (0..1 covered), size?:[3,12] px, height?:[1,4], kinds?:[panel vent pipe conduit antenna bolts hatch heatsink nozzle dome cables tank block | "model:<name>"] or {kind:weight}, grid? px (snap), align?:grid|free, gap?:1, margin?:1, avoid?:<mask canvas>|[[u,v,w,h]], texture|color, dark?, accent?, textures?:{<kind>|main|dark|accent}, drop_lod?:auto (<= 2 px tall at LOD 1, else 2), instanced? (GPU instancing). On box/wall/floor/slab/ledge: greeble:{face, ...} | greebles:[..]',
+  hull: 'length?:320,width?:96,height?:48, plan?:[[t,half_w],..] (t 0 tail .. 1 nose), profile?:[[t,top,bottom],..], sections?:[[t,section],..]|section? (exponent 2 ellipse..8 boxy | round|pill|soft_box|diamond|box|hex|wedge|keel|flat_bottom | {points:[[x,y],..] unit, chamfer?, n?, n_bottom?}), rings?, segments?:16, crease?:40 deg, interp?:smooth|linear, panel_lines?:{rings:[t..], every?:px, seams:[u..], width:1.5, depth:1, from?, to?}, plates?:[{t:[a,b], u:[a,b], lift:1.5, texture?, mirror?:true}], carve?:{mask, depth, texture?}, texture|color, groove?, plate_texture?, cap?, uv?:tile|fit (livery canvas once over the hull), caps?:true|false|nose|tail',
+  truss: 'from+to | length,axis?:x|y|z, w?:12,h?, section?:box|tri|flat, style?:warren|pratt|x|k|none, bay?, chord?, brace?, frames?, texture|brace_texture',
+  beam: 'from,to,s?:3 (thickness),sides?:4,caps?:true',
+  revolve: 'profile:[[r,y],..] px, segments?:16, arc?:360, smooth?:true, wrap?, inside?:true|"only"',
+  dome: 'r,h?:r,sphere?,rings?:4,segments?:12',
+  rock: 'w?:64,h?:40,d?,seed?,detail?:1..3,rough?:0.25,flat_top?:0.15 (faceted boulder / outcrop for anchors)',
+  wing_panel: 'span?:48,root?:40,tip?,sweep?,thick?:4,tip_thick?,dihedral?:0 (90 = fin),section?:hex|diamond|flat',
+  catwalk: 'len?:96 (along z),w?:40,deck?:2,texture? (default see-through grate),rails?:both|left|right|none,rail_h?:34,post_every?:32,kick?:true',
+  landing_pad: 'w?:192,h?:4,round?,mark?:"H"|"07",lights?:8,color?,line?,hazard?,light_color?',
+  decal: 'kind?:text|logo|arrow|chevrons|stripes, text?, font?:3x5|5x7|7x9, px?:0.5 (model px per decal pixel), color?, color2? (stripes / second colour), bg?, dir?:left|right|up|down (arrow), count?:3 (chevrons), len? (stripes), stencil? (stencil bridges), glow? (emissive): one alpha-cut quad facing +z, place it 0.2 px off a surface',
+  neon: 'text+font?:5x7|3x5|7x9 | canvas (1 px strokes) | strokes:[[[x,y],..]], px?:4 (model px per glyph pixel), r?:0.9, sides?:6, color, backing?:true (emissive tubes + a light marker)',
+  sign: 'text,h?:24,w?,d?:4,color?,bg?,font?,frame?,double? (lit sign box: emissive text face)',
+  holo: 'w?:32,h?:24,text?,color?,opacity?:0.7 (additive hologram card, double-sided)',
+  fog_card: 'w?:48,h?:96 (hangs down from y=0),cross?:2,falloff?:radial|vertical|beam,color?,opacity?:0.35,steps?:5,dir? (additive fake volumetric)',
+  god_ray: 'fog_card with falloff:"beam" (light shaft)',
+  marker: 'kind:"spawn"|"door"|"nav"|...,data?:{},dir? (empty node + extras.marker)',
+  container: 'w?:40,h?:40,d?:96,color? (corrugated cargo container)',
   model: 'model:"<other model>" = place another model (layouts / dioramas)',
   baked: 'mesh:"<name>" = a processed mesh saved by art_model boolean / remesh / decimate (stored beside the model as <name>.mesh.bin)',
-  light: 'light marker for baked lighting (no geometry): kind?:point|area|spot, color?:"#ffffff", intensity?:1, range?:128 px, size?:[w,h] (area), dir?:[0,-1,0] (area / spot facing), cone?:45 deg (spot); placed like any part (at, array, mirror)',
+  light: 'light for baked lighting and the game (no geometry unless bulb): kind?:point|area|spot, color?:"#ffffff", intensity?:1, range?:128 px, size?:[w,h] (area), dir?:[0,-1,0] (area / spot facing), cone?|angle?:45 deg (spot), bulb?:false|true|px (tiny emissive box), shadow?; placed like any part (at, array, mirror); also exported as node light_<n> with extras.light',
 };
-export const PART_TYPES = [...Object.keys(BUILDERS), 'model', 'light', 'baked'];
+export const PART_TYPES = [...Object.keys(BUILDERS), 'model', 'baked']; // light is a builder (structures.js)
+/** Builders that make their own (generated) textures. */
+const GEN_TYPES = new Set(['catwalk', 'landing_pad', 'neon', 'sign', 'holo', 'fog_card', 'god_ray', 'light', 'container', 'wing_panel', 'decal']);
 export const PART_COMMON = 'at?:[x,y,z]|cell?:[gx,gy,gz]|turn?|rotate?:[x,y,z] (deg, X then Y then Z about the part origin)|pivot?:[x,y,z] (rotate/scale about this local point)|scale?|mirror?:x|y|z|[..] (adds mirrored copies)|array?:{count,step|cell_step,rotate?,turn?,about?:[x,y,z]}|opacity?:0..1|glass?|double_sided?|overlays?:[{texture,where,map,scale,falloff,amount}]|ctm_tag?|material?:preset|{metal,rough}|bump?|trim?:"sheet:strip"|boolean?:subtract|union|intersect + target? + boolean_method?:auto|bsp|robust|id?|cast_shadow?|receive_shadow?|paint?:"#rrggbb[aa]" + wetness?:0..1 (vertex colour sets)|displace?:true|{scale,bias,max_triangles,tolerance,seams}';
 
 // ---------- world UVs (after placement) ----------
@@ -1672,8 +1699,11 @@ function applyBooleans(def, placed, parts, mesh) {
  * ctx: { tex(ref), getModel(name), stack?, nested?, instances? }. Nested builds stay raw (no
  * world UV / CTM / overlays) so the top level bakes them with all neighbours in place.
  */
-export function buildModel(def, ctx) {
-  if (!Array.isArray(def.parts) || !def.parts.length) throw new Error('model needs parts: [{type:"wall", ...}, ...]');
+export function buildModel(def0, ctx) {
+  if (!def0 || !Array.isArray(def0.parts) || !def0.parts.length) throw new Error('model needs parts: [{type:"wall", ...}, ...]');
+  // assemblies (ship parts, rooms, kit pieces) and on_hull placements expand to plain parts first
+  const def = expandDef(def0);
+  if (!ctx.genAware && (def !== def0 || def.parts.some((p) => p && GEN_TYPES.has(p.type)))) ctx = withGen(ctx);
   const grid = Number(def.grid ?? 32);
   const stack = ctx.stack || [];
   const ids = ctx.ids || (ctx.ids = { n: 0 });
@@ -1685,7 +1715,7 @@ export function buildModel(def, ctx) {
   // booleans: parts are kept apart until the cutters are applied (only when a part asks for one)
   const useBool = def.parts.some((p) => p && p.boolean !== undefined && p.boolean !== null && !p.hidden);
   const placed = useBool ? [] : null;
-  const gpu = new Map(), partBounds = [], lights = [];
+  const gpu = new Map(), partBounds = [], lights = [], markers = [];
   def.parts.forEach((p0, i) => {
     const p = p0 && p0.material !== undefined ? partForSpec(p0) : p0;
     const type = p.type;
@@ -1694,7 +1724,16 @@ export function buildModel(def, ctx) {
       if (p.hidden) { parts.push({ i, type, triangles: 0, hidden: true }); return; }
       const M = partMatrix(p, grid);
       const mats = mirrorMatrices(p, arrayMatrices(p, M, grid));
-      if (type === 'light') { for (const mm of mats) lights.push(placeLight(p, mm, i)); parts.push({ i, type, triangles: 0, lights: mats.length }); return; }
+      // light: a baked-lighting light (materials v2, out.lights) that also exports as a light_<n> node
+      // (ships & structures, out.markers). No geometry unless bulb is set; then the builder adds the bulb box.
+      if (type === 'light') {
+        for (const mm of mats) lights.push(placeLight(p, mm, i));
+        if (!p.bulb) {
+          const mk = BUILDERS.light({ ...p, bulb: false }, ctx).markers;
+          for (const mm of mats) markers.push(...transformMarkers(mk, mm).map((k) => ({ ...k, part: i, ...(layout && layout.nodeOf[i] !== null ? { node: layout.nodeOf[i] } : {}) })));
+          parts.push({ i, type, triangles: 0, lights: mats.length }); return;
+        }
+      }
       const partOv = p.overlays === false ? [] : (p.overlays || []).map(normOverlay);
       let local, tris = 0;
       if (type === 'model') {
@@ -1704,18 +1743,21 @@ export function buildModel(def, ctx) {
         const subCtx = { ...ctx, stack: [...stack, def.name, p.model], instances: false, nested: true };
         if (ctx.instances && !ctx.nested && !(layout && layout.nodeOf[i] !== null)) {
           if (!instMeshes.has(p.model)) {
-            const built = buildModel(sub, subCtx).mesh;
+            const sb = buildModel(sub, subCtx), built = sb.mesh;
+            if (sb.markers) built.markers = sb.markers.map(({ part, node, ...k }) => k);
             built.tagFaces({ ov: partOv.length || modelOv.length ? [...partOv, ...modelOv] : undefined });
             instMeshes.set(p.model, built);
           }
           const built = instMeshes.get(p.model);
           for (const mm of mats) instances.push({ model: p.model, matrix: mm, mesh: built });
+          if (built.markers) for (const mm of mats) markers.push(...transformMarkers(built.markers, mm).map((k) => ({ ...k, part: i, instance: p.model })));
           parts.push({ i, type, model: p.model, triangles: built.triangles * mats.length, copies: mats.length });
           return;
         }
         const subBuilt = buildModel(sub, subCtx);
         local = subBuilt.mesh;
         for (const L of subBuilt.lights || []) for (const mm of mats) lights.push(moveLight(L, mm, i));
+        if (subBuilt.markers) local.markers = subBuilt.markers.map(({ part, node, ...k }) => k);
         applyMaterial(local, p, ctx);
         applySurface(local, p, ctx);
         if (partOv.length) for (const { f } of local.faces) f.ov = [...(f.ov || []), ...partOv];
@@ -1738,6 +1780,7 @@ export function buildModel(def, ctx) {
       // materials v2 face data (only when the part asks): vertex paint / wetness, displacement
       if (p.paint !== undefined || p.wetness !== undefined) local.tagFaces({ paint: p.paint === undefined ? undefined : paintColor(p.paint), wet: p.wetness === undefined ? undefined : unit01(p.wetness, 'wetness') });
       if (p.displace !== undefined && p.displace !== false && p.displace !== null) { const spec = normDisplace(p.displace); for (const { f } of local.faces) if (f.greeble === undefined) f.disp = { spec, part: i }; }
+      if (local.markers && local.markers.length) for (const mm of mats) markers.push(...transformMarkers(local.markers, mm).map((k) => ({ ...k, part: i, ...(layout && layout.nodeOf[i] !== null ? { node: layout.nodeOf[i] } : {}) })));
       const into = useBool ? (placed[i] = new Mesh()) : mesh;
       let pb = null;
       for (const [k, mm] of mats.entries()) {
@@ -1790,6 +1833,8 @@ export function buildModel(def, ctx) {
   if (shift.some((v) => v)) for (const L of lights) L.pos = L.pos.map((v, k) => v + shift[k]);
   const out = { mesh, parts, origin: mode, instances, grid, baked, shift, layout, partBounds };
   if (lights.length) out.lights = lights;
+  if (def !== def0) out.def = def;
+  if (markers.length) out.markers = shift.some((v) => v) ? markers.map((k) => ({ ...k, pos: [k.pos[0] + shift[0], k.pos[1] + shift[1], k.pos[2] + shift[2]] })) : markers;
   if (gpuList.length) out.gpu = gpuList;
   if (merged) out.merged = merged;
   return out;
@@ -1806,7 +1851,12 @@ function paintColor(v) {
 }
 const rgb01 = (v, what) => {
   const m = typeof v === 'string' && v.match(/^#?([0-9a-f]{6})$/i);
-  if (!m) throw new Error(`${what} must be "#rrggbb"`);
+  if (!m) { // other colour forms the light builder accepts (#rgb, #rrggbbaa, names)
+    let c = null;
+    try { c = parseColor(v); } catch { /* reported below */ }
+    if (!c) throw new Error(`${what} must be "#rrggbb"`);
+    return [c[0] / 255, c[1] / 255, c[2] / 255];
+  }
   const n = parseInt(m[1], 16);
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 };
@@ -1825,7 +1875,7 @@ function placeLight(p, M, i) {
     L.size = s.map(Number);
     L.u = Math.abs(L.dir[1]) > 0.9 ? [1, 0, 0] : norm(cross([0, 1, 0], L.dir));
   }
-  if (kind === 'spot') { L.cone = Number(p.cone ?? 45); if (!(L.cone > 0 && L.cone < 180)) throw new Error('spot cone must be 0..180 deg'); }
+  if (kind === 'spot') { L.cone = Number(p.cone ?? p.angle ?? 45); if (!(L.cone > 0 && L.cone < 180)) throw new Error('spot cone must be 0..180 deg'); }
   return moveLight(L, M, i);
 }
 const dirBy = (M, d) => [M[0] * d[0] + M[1] * d[1] + M[2] * d[2], M[4] * d[0] + M[5] * d[1] + M[6] * d[2], M[8] * d[0] + M[9] * d[1] + M[10] * d[2]];

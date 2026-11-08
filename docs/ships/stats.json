@@ -1,0 +1,289 @@
+{
+  "fighter": {
+    "model": "fighter",
+    "class": "fighter",
+    "triangles": 11380,
+    "budget": 14000,
+    "verdict": "within budget",
+    "lods": [
+      11380,
+      5690,
+      2276
+    ],
+    "draw_calls": {
+      "merged": 24,
+      "rig_nodes": 20
+    },
+    "materials": 24,
+    "export": {
+      "triangles": 11380,
+      "nodes": 30,
+      "materials": 24,
+      "bytes": 1396368,
+      "split": "no mesh over the limit",
+      "lods": [
+        {
+          "level": 0,
+          "triangles": 11380,
+          "distance": 0
+        },
+        {
+          "level": 1,
+          "triangles": 5690,
+          "distance": 28.116664
+        },
+        {
+          "level": 2,
+          "triangles": 2276,
+          "distance": 76.379733
+        }
+      ],
+      "lights": 5,
+      "markers": 25
+    }
+  },
+  "dropship": {
+    "model": "dropship",
+    "class": "dropship",
+    "triangles": 19458,
+    "budget": 45000,
+    "verdict": "within budget",
+    "lods": [
+      19458,
+      9728,
+      4864,
+      1944
+    ],
+    "draw_calls": {
+      "merged": 22,
+      "rig_nodes": 35
+    },
+    "materials": 22,
+    "export": {
+      "triangles": 19458,
+      "nodes": 31,
+      "materials": 22,
+      "bytes": 2622340,
+      "split": "no mesh over the limit",
+      "lods": [
+        {
+          "level": 0,
+          "triangles": 19458,
+          "distance": 0
+        },
+        {
+          "level": 1,
+          "triangles": 9728,
+          "distance": 32.13333
+        },
+        {
+          "level": 2,
+          "triangles": 4864,
+          "distance": 152.633318
+        },
+        {
+          "level": 3,
+          "triangles": 1945,
+          "distance": 237.925493
+        }
+      ],
+      "lights": 6,
+      "markers": 25
+    }
+  },
+  "hauler": {
+    "model": "hauler",
+    "class": "freighter",
+    "triangles": 21960,
+    "budget": 80000,
+    "verdict": "within budget",
+    "lods": [
+      21960,
+      10979,
+      5489,
+      2196
+    ],
+    "draw_calls": {
+      "merged": 28
+    },
+    "materials": 28,
+    "export": {
+      "triangles": 21960,
+      "nodes": 24,
+      "materials": 28,
+      "bytes": 2896452,
+      "split": [
+        "hauler: 21960 -> 2 meshes"
+      ],
+      "lods": [
+        {
+          "level": 0,
+          "triangles": 21960,
+          "distance": 0
+        },
+        {
+          "level": 1,
+          "triangles": 10979,
+          "distance": 38.941839
+        },
+        {
+          "level": 2,
+          "triangles": 5489,
+          "distance": 273.133306
+        },
+        {
+          "level": 3,
+          "triangles": 2196,
+          "distance": 2865.728419
+        }
+      ],
+      "lights": 8,
+      "markers": 17
+    }
+  },
+  "capital_ring": {
+    "model": "ring",
+    "class": "capital",
+    "triangles": 29776,
+    "budget": 200000,
+    "verdict": "within budget",
+    "lods": [
+      29776,
+      11909,
+      4465,
+      1648
+    ],
+    "draw_calls": {
+      "merged": 13
+    },
+    "materials": 13,
+    "export": {
+      "triangles": 29776,
+      "nodes": 20,
+      "materials": 13,
+      "bytes": 2787560,
+      "split": [
+        "ring: 29776 -> 2 meshes"
+      ],
+      "lods": [
+        {
+          "level": 0,
+          "triangles": 29776,
+          "distance": 0
+        },
+        {
+          "level": 1,
+          "triangles": 11909,
+          "distance": 85.0168
+        },
+        {
+          "level": 2,
+          "triangles": 4465,
+          "distance": 5950.332847
+        }
+      ],
+      "lights": 6,
+      "markers": 14
+    }
+  },
+  "interior": {
+    "model": "engine_corridor",
+    "class": "room",
+    "triangles": 5674,
+    "budget": 8000,
+    "verdict": "within budget",
+    "lods": [
+      5674,
+      2282,
+      1133
+    ],
+    "draw_calls": {
+      "merged": 18
+    },
+    "materials": 18,
+    "export": {
+      "triangles": 5674,
+      "nodes": 13,
+      "materials": 18,
+      "bytes": 457608,
+      "lights": 6,
+      "markers": 10
+    }
+  },
+  "dropship_interior": {
+    "model": "dropship_interior",
+    "class": "building",
+    "triangles": 15300,
+    "budget": 25000,
+    "verdict": "within budget",
+    "lods": [
+      15300,
+      7650,
+      3059
+    ],
+    "draw_calls": {
+      "merged": 41
+    },
+    "materials": 41,
+    "export": {
+      "triangles": 15300,
+      "nodes": 59,
+      "materials": 41,
+      "bytes": 1205124,
+      "lights": 21,
+      "markers": 48
+    }
+  },
+  "mining_colony": {
+    "model": "colony",
+    "class": "district",
+    "triangles": 14470,
+    "budget": 150000,
+    "verdict": "within budget",
+    "lods": [
+      14470,
+      7234,
+      2894
+    ],
+    "draw_calls": {
+      "merged": 6,
+      "instances": 14,
+      "instanced_unique": 13
+    },
+    "materials": 6,
+    "export": {
+      "triangles": 14470,
+      "nodes": 42,
+      "materials": 28,
+      "bytes": 1136352,
+      "lights": 18,
+      "markers": 26
+    }
+  },
+  "market": {
+    "model": "market",
+    "class": "district",
+    "triangles": 40000,
+    "budget": 150000,
+    "verdict": "within budget",
+    "lods": [
+      40000,
+      20000,
+      8000
+    ],
+    "draw_calls": {
+      "merged": 17,
+      "instances": 41,
+      "instanced_unique": 36
+    },
+    "materials": 17,
+    "export": {
+      "triangles": 40000,
+      "nodes": 183,
+      "materials": 36,
+      "bytes": 2345912,
+      "lights": 113,
+      "markers": 140
+    }
+  }
+}

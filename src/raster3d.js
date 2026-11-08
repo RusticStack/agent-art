@@ -68,8 +68,56 @@ export function rasterCore(groups, screen, IW, IH, opts = {}) {
   const L = opts.light || LIGHT, amb = opts.ambient ?? 0.45, lc = opts.color || null;
   const img = new Uint8ClampedArray(IW * IH * 4);
   if (bg) for (let i = 0; i < IW * IH; i++) img.set(bg, i * 4), (img[i * 4 + 3] = 255);
+  // mood sky: vertical gradient top -> horizon (at horizon_y of the height) -> ground (preview only)
+  const sky = bg && opts.sky;
+  if (sky) {
+    const hy = Math.max(0.05, Math.min(0.95, Number(sky.horizon_y ?? 0.55))) * IH;
+    for (let y = 0; y < IH; y++) {
+      const [a, b, f] = y < hy ? [sky.top, sky.horizon, (y / hy) ** 1.4] : [sky.horizon, sky.ground, Math.min(1, ((y - hy) / (IH - hy)) * 3) ** 0.7];
+      const c = [0, 1, 2].map((k) => Math.round(a[k] + (b[k] - a[k]) * f));
+      for (let x = 0; x < IW; x++) img.set(c, (y * IW + x) * 4);
+    }
+  }
   const zbuf = new Float32Array(IW * IH).fill(-Infinity);
   let drawn = 0;
+  // coloured point lights (mood previews): per-vertex RGB light, replaces the scalar Lambert term
+  const PL = opts.lights && opts.lights.length ? opts.lights : null;
+  const ambC = opts.ambient_color || [amb, amb, amb];
+  const vertexLight = (g) => {
+    const n = g.pos.length / 3, out = new Float32Array(n * 3);
+    const dirC = lc || [1, 1, 1], dk = opts.light_strength ?? (1 - amb);
+    for (let i = 0; i < n; i++) {
+      const nx = g.nrm[i * 3], ny = g.nrm[i * 3 + 1], nz = g.nrm[i * 3 + 2];
+      const d0 = Math.max(0, nx * L[0] + ny * L[1] + nz * L[2]) * dk;
+      let r = ambC[0] + d0 * dirC[0], gg = ambC[1] + d0 * dirC[1], b = ambC[2] + d0 * dirC[2];
+      const px = g.pos[i * 3], py = g.pos[i * 3 + 1], pz = g.pos[i * 3 + 2];
+      for (const l of PL) {
+        const dx = l.pos[0] - px, dy = l.pos[1] - py, dz = l.pos[2] - pz, d = Math.hypot(dx, dy, dz) || 1;
+        if (d >= l.range) continue;
+        const f = (1 - d / l.range) ** 2 * l.intensity * Math.max(0, (nx * dx + ny * dy + nz * dz) / d * 0.8 + 0.2);
+        r += l.color[0] * f; gg += l.color[1] * f; b += l.color[2] * f;
+      }
+      out[i * 3] = r; out[i * 3 + 1] = gg; out[i * 3 + 2] = b;
+    }
+    return out;
+  };
+  // mood: point lights that reach a group's bounds (strongest first, capped), rim light, key colour
+  const MOOD = !!opts.mood;
+  const RIM = opts.rim || null, KC = lc || [1, 1, 1], KS = opts.light_strength ?? (1 - amb), MAXL = opts.max_lights ?? 12;
+  const FILL = opts.fill || null, FD = FILL ? norm(FILL.dir) : null;
+  const V0 = opts.view || [0, 0, 1], RD = RIM ? (RIM.dir ? norm(RIM.dir) : norm([-V0[0], 0.9 - V0[1], -V0[2]])) : null; // rim: from behind the model, above
+  const groupLights = (g) => {
+    if (!PL) return [];
+    const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < g.pos.length; i += 3) for (let k = 0; k < 3; k++) { const v = g.pos[i + k]; if (v < mn[k]) mn[k] = v; if (v > mx[k]) mx[k] = v; }
+    const near = [];
+    for (const l of PL) {
+      let d2 = 0;
+      for (let k = 0; k < 3; k++) { const v = l.pos[k] < mn[k] ? mn[k] - l.pos[k] : l.pos[k] > mx[k] ? l.pos[k] - mx[k] : 0; d2 += v * v; }
+      if (d2 < l.range * l.range) near.push(l);
+    }
+    return near.length > MAXL ? near.sort((x, y) => y.intensity * y.range - x.intensity * x.range).slice(0, MAXL) : near;
+  };
   // opaque / alpha-tested groups first, then translucent ones (opacity, glass) blended over them
   const late = (g) => (g.tex.material?.blend || g.tex.v2?.transmission ? 1 : 0);
   const order = groups.map((g, gi) => gi).sort((a, b) => late(groups[a]) - late(groups[b]));
@@ -79,10 +127,13 @@ export function rasterCore(groups, screen, IW, IH, opts = {}) {
     const { sx, sy, Z, W, clip } = screen[gi];
     // materials v2 shading (lightmap, extensions, detail, parallax, channel views): only when asked for
     const sh2 = wantsShade2(g, opts) ? makeShade2(g, opts) : null;
-    const mat = g.tex.material, blend = !!mat?.blend || !!sh2?.transmissive, twoSided = !!mat?.double_sided, opacity = sh2?.transmissive ? Math.min(mat?.blend ? mat.opacity : 1, sh2.opacity) : blend ? mat.opacity : 1;
+    const mat = g.tex.material, blend = !!mat?.blend || !!sh2?.transmissive, twoSided = !!mat?.double_sided, opacity = sh2?.transmissive ? Math.min(mat?.blend ? mat.opacity : 1, sh2.opacity) : blend ? mat.opacity : 1, additive = !!mat?.additive;
+    const VC = PL && !g.overlay && !MOOD ? vertexLight(g) : null;
     const t = g.tex, tw = t.width, th = t.height, td = t.data, te = t.emissive;
     const { idx, uv, nrm } = g, al = g.alpha; // overlay shells: per-vertex strength
-    const lit = !g.overlay && !!(t.pbr || t.mr || t.normal || g.ao || g.aoTex);
+    // mood previews light every opaque surface per pixel (normal maps, specular, AO, point lights, rim)
+    const lit = MOOD ? !g.overlay : !VC && !g.overlay && !!(t.pbr || t.mr || t.normal || g.ao || g.aoTex);
+    const GL = MOOD && lit ? groupLights(g) : null, gp = g.pos;
     const aux = opts.aux || null;
     const V = opts.view || [0, 0, 1];
     const tn = lit ? t.normal : null, tmr = lit ? t.mr : null, aoT = lit ? g.aoTex : null, uv1 = g.uv1, gao = lit ? g.ao : null;
@@ -142,6 +193,10 @@ export function rasterCore(groups, screen, IW, IH, opts = {}) {
           const k = al ? (l0 * al[a] * wa + l1 * al[b] * wb + l2 * al[c] * wc) / iw : 1;
           const shade = l0 * sa + l1 * sb + l2 * sc;
           let r = td[p] * shade, gg = td[p + 1] * shade, bb = td[p + 2] * shade;
+          if (VC) {
+            const cr = (l0 * VC[a * 3] * wa + l1 * VC[b * 3] * wb + l2 * VC[c * 3] * wc) / iw, cg = (l0 * VC[a * 3 + 1] * wa + l1 * VC[b * 3 + 1] * wb + l2 * VC[c * 3 + 1] * wc) / iw, cb = (l0 * VC[a * 3 + 2] * wa + l1 * VC[b * 3 + 2] * wb + l2 * VC[c * 3 + 2] * wc) / iw;
+            r = td[p] * cr; gg = td[p + 1] * cg; bb = td[p + 2] * cb;
+          }
           if (lit) {
             let n = norm([l0 * nrm[a * 3] + l1 * nrm[b * 3] + l2 * nrm[c * 3], l0 * nrm[a * 3 + 1] + l1 * nrm[b * 3 + 1] + l2 * nrm[c * 3 + 1], l0 * nrm[a * 3 + 2] + l1 * nrm[b * 3 + 2] + l2 * nrm[c * 3 + 2]]);
             if (tn && TT) {
@@ -150,6 +205,46 @@ export function rasterCore(groups, screen, IW, IH, opts = {}) {
             }
             const metal = tmr ? tmr[p + 2] / 255 : pm, rough = tmr ? tmr[p + 1] / 255 : pr;
             const ndl = Math.max(0, n[0] * L[0] + n[1] * L[1] + n[2] * L[2]);
+            if (MOOD) {
+              const al2 = Math.max(0.03, rough * rough), shin = Math.max(0, 2 / (al2 * al2) - 2), sk = shin > 0 ? (shin + 2) / 8 : 0;
+              const ndh = Math.max(0, n[0] * Hh[0] + n[1] * Hh[1] + n[2] * Hh[2]);
+              const ks = sk ? Math.min(1.5, sk * Math.pow(ndh, shin)) * ndl * KS : 0;
+              let dr = ambC[0] + ndl * KS * KC[0], dg = ambC[1] + ndl * KS * KC[1], db = ambC[2] + ndl * KS * KC[2];
+              let sr = ks * KC[0], sg = ks * KC[1], sb = ks * KC[2];
+              if (FILL) { const fl = Math.max(0, n[0] * FD[0] + n[1] * FD[1] + n[2] * FD[2]) * FILL.strength; dr += FILL.color[0] * fl; dg += FILL.color[1] * fl; db += FILL.color[2] * fl; }
+              if (GL.length) {
+                const wx = (l0 * gp[a * 3] * wa + l1 * gp[b * 3] * wb + l2 * gp[c * 3] * wc) / iw, wy = (l0 * gp[a * 3 + 1] * wa + l1 * gp[b * 3 + 1] * wb + l2 * gp[c * 3 + 1] * wc) / iw, wz = (l0 * gp[a * 3 + 2] * wa + l1 * gp[b * 3 + 2] * wb + l2 * gp[c * 3 + 2] * wc) / iw;
+                for (const pl of GL) {
+                  let lx = pl.pos[0] - wx, ly = pl.pos[1] - wy, lz = pl.pos[2] - wz;
+                  const d = Math.hypot(lx, ly, lz) || 1;
+                  if (d >= pl.range) continue;
+                  lx /= d; ly /= d; lz /= d;
+                  const att = (1 - d / pl.range) ** 2 * pl.intensity, nl = n[0] * lx + n[1] * ly + n[2] * lz;
+                  const f = att * Math.max(0, nl * 0.85 + 0.15);
+                  dr += pl.color[0] * f; dg += pl.color[1] * f; db += pl.color[2] * f;
+                  if (sk && nl > 0) {
+                    const hx = lx + V[0], hy = ly + V[1], hz = lz + V[2], hl = Math.hypot(hx, hy, hz) || 1;
+                    const sp = Math.min(1.5, sk * Math.pow(Math.max(0, (n[0] * hx + n[1] * hy + n[2] * hz) / hl), shin)) * nl * att;
+                    sr += pl.color[0] * sp; sg += pl.color[1] * sp; sb += pl.color[2] * sp;
+                  }
+                }
+              }
+              if (RIM) {
+                const nv = Math.max(0, n[0] * V[0] + n[1] * V[1] + n[2] * V[2]), nr = n[0] * RD[0] + n[1] * RD[1] + n[2] * RD[2];
+                if (nr > 0) { const rk = nr * (1 - nv) ** 2 * RIM.strength; dr += RIM.color[0] * rk; dg += RIM.color[1] * rk; db += RIM.color[2] * rk; }
+              }
+              let ao = 1;
+              if (gao) ao *= l0 * gao[a] + l1 * gao[b] + l2 * gao[c];
+              if (aoT && uv1) {
+                const qu = (l0 * u1a + l1 * u1b + l2 * u1c) / iw, qv = (l0 * v1a + l1 * v1b + l2 * v1c) / iw;
+                const ax = Math.min(aoT.width - 1, Math.max(0, Math.floor(qu * aoT.width))), ay = Math.min(aoT.height - 1, Math.max(0, Math.floor(qv * aoT.height)));
+                ao *= aoT.data[(ay * aoT.width + ax) * 4] / 255;
+              }
+              const kd = 1 - metal * 0.6, f0 = 0.04 * (1 - metal) * 255;
+              r = (td[p] * dr * kd + (f0 + td[p] * metal) * sr) * ao;
+              gg = (td[p + 1] * dg * kd + (f0 + td[p + 1] * metal) * sg) * ao;
+              bb = (td[p + 2] * db * kd + (f0 + td[p + 2] * metal) * sb) * ao;
+            } else {
             const diff = amb + (1 - amb) * ndl;
             const al2 = Math.max(0.03, rough * rough), shin = Math.max(0, 2 / (al2 * al2) - 2);
             const ndh = Math.max(0, n[0] * Hh[0] + n[1] * Hh[1] + n[2] * Hh[2]);
@@ -166,6 +261,7 @@ export function rasterCore(groups, screen, IW, IH, opts = {}) {
             r = (td[p] * kd + (f0 * 255 + td[p] * metal) * spec) * ao;
             gg = (td[p + 1] * kd + (f0 * 255 + td[p + 1] * metal) * spec) * ao;
             bb = (td[p + 2] * kd + (f0 * 255 + td[p + 2] * metal) * spec) * ao;
+            }
           }
           if (sh2) {
             const n = n2 || norm([l0 * nrm[a * 3] + l1 * nrm[b * 3] + l2 * nrm[c * 3], l0 * nrm[a * 3 + 1] + l1 * nrm[b * 3 + 1] + l2 * nrm[c * 3 + 1], l0 * nrm[a * 3 + 2] + l1 * nrm[b * 3 + 2] + l2 * nrm[c * 3 + 2]]);
@@ -175,13 +271,21 @@ export function rasterCore(groups, screen, IW, IH, opts = {}) {
             r = col[0]; gg = col[1]; bb = col[2];
             if (glow && !blend && td[p + 3] * k >= 128 && z > zbuf[o]) { glow[o * 3] = Math.max(0, r - 255); glow[o * 3 + 1] = Math.max(0, gg - 255); glow[o * 3 + 2] = Math.max(0, bb - 255); }
           }
-          if (lc) { r *= lc[0]; gg *= lc[1]; bb *= lc[2]; }
+          if (lc && !VC && !MOOD) { r *= lc[0]; gg *= lc[1]; bb *= lc[2]; }
           if (te && te[p + 3] && !sh2) { const ea = te[p + 3] / 255; r += te[p] * ea; gg += te[p + 1] * ea; bb += te[p + 2] * ea; }
           if (blend) {
             // BLEND: alpha = texel alpha x opacity, no depth write (like glTF BLEND in engines)
             const a = (td[p + 3] / 255) * opacity;
             if (a <= 0) continue;
             const da = img[o * 4 + 3] / 255;
+            if (additive) {
+              // additive (fog cards, god rays, holograms): adds light, never darkens
+              const ec = te ? 1 : shade;
+              img[o * 4] = Math.min(255, img[o * 4] + (te ? te[p] : td[p] * ec) * a); img[o * 4 + 1] = Math.min(255, img[o * 4 + 1] + (te ? te[p + 1] : td[p + 1] * ec) * a); img[o * 4 + 2] = Math.min(255, img[o * 4 + 2] + (te ? te[p + 2] : td[p + 2] * ec) * a);
+              if (da < 1) img[o * 4 + 3] = Math.min(255, img[o * 4 + 3] + a * 255);
+              drawn++;
+              continue;
+            }
             if (da >= 1) { img[o * 4] = img[o * 4] * (1 - a) + r * a; img[o * 4 + 1] = img[o * 4 + 1] * (1 - a) + gg * a; img[o * 4 + 2] = img[o * 4 + 2] * (1 - a) + bb * a; }
             else {
               // over a transparent background (sprite renders): "over" compositing
@@ -287,7 +391,9 @@ export function renderCamera(groups, cam, IW, IH, opts0 = {}) {
  * Contact sheet of views. groups: [{tex:{width,height,data,emissive?}, pos, nrm, uv, idx}] in px.
  * -> { width, height, data, views:[{label, pixels}] }
  */
-export function renderViews(groups, { views = ['game', 'front', 'side', 'top', 'iso'], size = 192, labels = true, raster: extra = null } = {}) {
+export function renderViews(groups, { views = ['game', 'front', 'side', 'top', 'iso'], size = 192, labels = true, raster: extra0 = null, render = null } = {}) {
+  // raster options: materials v2 (raster: channel / lightmap shading) and ships & structures (render: mood lights, sky)
+  const extra = extra0 || render ? { ...(render || {}), ...(extra0 || {}) } : null;
   const S = Math.max(32, Math.min(1024, Math.round(size)));
   // "fp" / {pos, look, fov}: a placed camera (first-person viewmodels), not fitted to the model
   const isCam = (v) => v === 'fp' || (v && typeof v === 'object' && Array.isArray(v.pos));

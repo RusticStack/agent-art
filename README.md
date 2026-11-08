@@ -433,6 +433,26 @@ function ctmTileFor(neighbors, method = 'full', opts = {}) {
 }
 ```
 
+#### Ships, interiors, industrial kits and megastructures
+
+Big-budget sci-fi set pieces at a pixel-texture budget (renders: `docs/ships/`, rebuilt by `node docs/ships/build-demos.mjs`). Designs from the templates and generators are original and seeded.
+
+- **Walkable hero ship.** `create {template:"gunship"}` builds an original 25 m VTOL gunship (maker ORVANE, class TERN) at true scale (32 px = 1 m) with a walkable interior in the same model. The exterior is a faceted, chined fuselage wedge with a dorsal spine, side sponsons, a heavy chin, separate bevelled armour slabs, armoured wing pylons and faceted VTOL nacelles. Inside: a corridor with chamfered portal arches, grating and blue edge strips, a weapon rack, personal storage and a component bay, a round airlock with a boarding ladder, a hold and a cockpit behind multi-pane glazing. Renders: `docs/ships/hero_*.png`, rebuilt by `node docs/ships/build-hero.mjs`.
+- **Player metrics and `walk_check`.** One shared set of metrics (1.8 m capsule, doors at least 1.2 x 2.1 m, corridors at least 1.4 x 2.3 m, stairs at most 0.2 m per step and 38 deg, slopes 35 deg, ramps 20 deg, hull at least 0.15 m thick) drives the kit and `art_model walk_check {name}`, which reports blocked doors, headroom (including seated head clearance), unreachable areas, floor gaps, interior parts poking through the hull and metric violations. `export {walk:true}` adds a navmesh node, box colliders per room, door / ladder / lift trigger volumes, seats and spawn points.
+- **Walkable hull capabilities.** `hull {shell, openings}` gives the hull a real wall with cut openings and visible rims; `glazing` sets mullioned glass into an opening; `ring_door` is a round airlock door; `portal_arch`, `locker_wall`, `screen_arm`, `pilot_seat`, `terminal`, `stair_run` and clutter pieces furnish interiors; `decal` adds stencils, serials, labels, arrows and chevrons; `figure` is a 1.8 m scale silhouette.
+- **Kit textures by default.** `kit_<name>` and tinted `kit_<name>_<rrggbb>` references resolve to built-in painted pixel textures (with normal maps and metal/rough) when there is no canvas of that name, so kit pieces, templates and generators are textured out of the box. `preview {mood:true, ao:true}` lights them per pixel with the model's own lights plus key, fill and rim light.
+
+- **Hull from design curves.** `{type:"hull", length, plan:[[t, half_width]], profile:[[t, top, bottom]], sections:[[t, "hex"|"wedge"|"box"|2.6|{points, chamfer}]]}` lofts a closed hull (t 0 = tail, 1 = nose). Polygon corners stay hard creases (`crease` sets the smoothing angle). `panel_lines` cuts grooves, `plates` raises armour, `carve:{mask}` recesses quads from a canvas, and `uv:"fit"` maps one livery canvas over the hull. The surface stays closed.
+- **Components.** `on_hull:{hull, t, u, lift?, mirror?}` puts any part or assembly on the hull surface. Assemblies are one part that expands into several: `canopy`, `engine`, `thruster`, `wing`, `fin`, `landing_gear`, `ramp`, `cargo_door`, `turret`, `rotary_cannon`, `hardpoint`, `antenna`, `sensor_dome`, `rcs_quad`, `intake`, `vent`, `armor_plate` and `container_rack`. A named assembly becomes rig nodes with clips (`gear_retract` / `gear_deploy` merged over every leg, `canopy_open`, `ramp_open`, `wings_fold`, `vtol_down`, `<turret>_scan`) and sockets (`<gear>_contact`, `<turret>_muzzle`, plumes, hardpoints). An unnamed assembly is static in the given state (`open`, `deployed`).
+- **Templates.** `create {template:"fighter"|"dropship"|"hauler"|"capital_ring", seed, textures:"kit"}` builds a complete ship that you refine by part name. `art_model kit` paints the kit textures (hull, deck, wall, screen, glow, hazard, rock and more, with height, metal, rough and emissive layers). `art_model livery` paints paint masks, stripes, hazard zones, decals, a seeded original emblem and wear onto a canvas mapped over the hull.
+- **Interiors.** The interior kit snaps to a 64 px deck grid: `corridor` (straight, L, T, X, end), `room`, `door` (bulkhead, blast, hatch), `airlock`, `ladder`, `lift`, `seat`, `console` (MFD screen markers for UI textures), `bridge`, `engine_room`, `quarters`, `cargo_bay`, `hangar`, `med_bay` and `armoury`. `generate {kind:"interior", hull:<ship>}` fits a deck plan inside the hull: it places doors where the exterior ramp and hatches are, writes window parts back onto the ship, and adds cull rooms for portal culling.
+- **Exteriors and city.** The kit includes `tower`, `dish`, `tank`, `silo`, `crane`, `gantry`, `pipeline`, `scaffold`, `truss` (warren, pratt, x or k bracing), `catwalk`, `landing_pad`, `hangar_shell`, `hab_module`, `rock_platform`, `shaft`, `atrium`, `bridge_walk`, `lift_shaft`, `cable_web`, `pipe_wall`, `market_stall` and `sign_frame`. `generate {kind:"mining_colony"|"market", seed}` lays out instanced kit models, with walkable floors in the report.
+- **Neon and light.** `neon {text}` builds emissive tube text from the pixel font, or from a canvas of 1 px strokes. `sign` is a lit sign box and `holo` an additive card. `light` exports node extras so the game can place real lights. `fog_card` and `god_ray` are additive banded falloff planes. `preview {mood:true}` lights a dark scene with the model's own light markers.
+- **Budgets.** `budget {name}` reports the scale class, triangles, a LOD estimate, draw calls and the costliest parts. Export options:
+  - `budget:"fighter"` refuses an over-budget export.
+  - `split:true` keeps every mesh under 20 000 triangles (the Roblox MeshPart limit).
+  - `static:true|"<pose>"` bakes a rigged ship so lods, impostor and cull apply.
+
 #### World-space UVs at runtime (three.js)
 
 The same mapping the exporter bakes, for runtime-placed tiles. Shown for a Z-up scene; for Y-up swap `up` to `(0,1,0)` and the cap branch accordingly.
@@ -579,7 +599,7 @@ Every command takes `layer`, `frame`, `mask` (opaque / transparent / a colour / 
 The recipes behind `art_help {skill}` are also served as MCP prompts and can be installed as agent skills:
 
 ```sh
-npx @rusticstack/agent-art skills --out ~/.claude/skills   # tileable-texture, sprite, rig, rig-hd, weapon-handling, walk-cycle, iso-scene, hd2d-scene, 3d-kit, ship-model, hard-surface, fp-weapon, prop-rig, ui-icons, minecraft-pack, sfx-pack, music-track, planets-space
+npx @rusticstack/agent-art skills --out ~/.claude/skills   # tileable-texture, sprite, rig, rig-hd, weapon-handling, walk-cycle, iso-scene, hd2d-scene, 3d-kit, ship-model, hard-surface, ships-structures, fp-weapon, prop-rig, ui-icons, minecraft-pack, sfx-pack, music-track, planets-space
 ```
 
 ## CLI (no MCP needed)

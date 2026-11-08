@@ -6,6 +6,8 @@
 // ---------- shared layout (the arms' grip poses are solved onto these weapon sockets) ----------
 // The part numbers below are authored around y = -6; OFFSET_* lifts each weapon into view
 // (about 15° below the centre of a 60° first-person camera).
+import { SHIP_TEMPLATES } from './shipgen.js';
+
 export const OFFSET_RIFLE = [0, 3, 0], OFFSET_PISTOL = [0, 2.5, 0];
 const RZ = 3; // rifle sits 3 px (~10 cm) closer than its part numbers below say
 export const RIFLE = { x: 4, grip_r: [4, -8.9, -9.3 + RZ], grip_l: [4, -8.3, -18.5 + RZ], muzzle: [4, -6.2, -28.2 + RZ], sight: [4, -4.6, -10.6 + RZ], mag_well: [4, -7.5, -13 + RZ] };
@@ -258,6 +260,7 @@ function withWeapon(t, o, kind, kits = {}) {
 }
 
 export const MODEL_TEMPLATES = {
+  ...SHIP_TEMPLATES,
   fp_arms: fpArms,
   fp_rifle: (o) => placed(withWeapon(fpRifle(o), o, 'long', o.weapon ? rifleAttachments(o.textures || {}) : {}), OFFSET_RIFLE),
   fp_pistol: (o) => placed(withWeapon(fpPistol(o), o, 'pistol'), OFFSET_PISTOL),

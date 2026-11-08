@@ -69,6 +69,33 @@
 - New part type `baked`: holds the stored result of a mesh operation.
 - Model viewer: a "Clusters" colour toggle next to Wireframe.
 
+### Ships, interiors, industrial kits and megastructures (`art_model`)
+
+- Walkable ships at true scale: `gunship` hero template (original ORVANE TERN, exterior + walkable interior in one model), shared player metrics, `art_model walk_check`, `export {walk:true}` (navmesh, colliders, triggers, seats, spawns).
+- `hull` gains `shell` (inner skin) and `openings` (cut through both skins, rims show the thickness) and `patch` + `inset` (used by `glazing`).
+- New assemblies: `glazing`, `ring_door`, `portal_arch`, `locker_wall`, `screen_arm`, `pilot_seat`, `terminal`, `stair_run`, `gun_pod`, `fairing`, `hinge`, `crate`, `barrel`, `stool`, `chair`, `figure`; new `decal` part. Engines get exhaust petals and straps; intakes get depth; armour plates step; landing gear shows torque links and braces.
+- Built-in kit textures (`kit_<name>[_<rrggbb>]`) with normal and metal/rough data; kit pieces and templates use them by default.
+- Mood previews light every surface per pixel (normal maps, specular, AO, point lights, key / fill / rim) and take `mood.sky` (sky / ground gradient); `preview {ao}` works with poses.
+- Hero exterior pass: the gunship hull is a faceted, chined loft (flat upper deck stepping down to a wrap canopy and a blunt armoured nose), with a dorsal spine, side sponsons, a heavy chin block, separate bevelled armour slabs (`kit_slab`: worn edges), thick armoured wing pylons over truss keels, and faceted nacelles with intake lips and exhaust bells; two-tone paint and a dark underbelly.
+- Class budgets now cover exterior + walkable interior (fighter 14k, dropship 45k, freighter 80k, corvette 120k, capital 200k).
+- `hull` part: lofted from a plan curve, a side profile and cross-section stations. It has hard creases, chamfered polygon sections, panel-line grooves, raised plates, mask carving and `uv:"fit"` livery mapping, and the surface stays closed.
+- `on_hull` places a part on a hull surface. Assemblies expand one part into several, each with sockets, poses and clips.
+  - Ship parts: canopy, engine, thruster, wing, fin, landing gear, ramp, cargo door, turret, rotary cannon, hardpoint, antenna, sensor dome, RCS quad, intake, vent, armour plate and container rack.
+  - Interior kit on a 64 px deck grid: corridor, room, door, airlock, ladder, lift, seat, console, bridge, engine room, quarters, cargo bay, hangar, med bay and armoury.
+  - Industrial and city kit: tower, dish, tank, silo, crane, gantry, pipeline, scaffold, hangar shell, hab module, rock platform, shaft, atrium, walkway bridge, lift shaft, cable web, pipe wall, market stall and sign frame.
+- New builders: `truss`, `beam`, `revolve`, `dome`, `rock`, `wing_panel`, `catwalk`, `landing_pad`, `container`, `neon`, `sign`, `holo`, `fog_card`, `god_ray`, `light` and `marker`. Lights and markers export as empty nodes with extras.
+- Templates `fighter`, `dropship`, `hauler` and `capital_ring` build complete original ships from a seed.
+- New actions:
+  - `kit` paints the kit texture canvases.
+  - `livery` paints paint masks, stripes, hazard zones, decals, an emblem and wear.
+  - `generate` builds a ship interior fitted to its hull, a mining colony or an underground market.
+  - `budget` reports scale classes, triangles, a LOD estimate and draw calls.
+- Export options: `static` (bake a rig pose), `split` (keep meshes under 20k triangles for Roblox) and `budget` (refuse over-budget exports). Preview option: `mood` (lit by the model's own lights).
+- Raster previews support coloured point lights and additive blending. Additive materials export `extras.blending: "additive"`.
+- The pixel fonts moved to `src/fonts.js`; `doc.js` re-exports them.
+- Plain models (no assemblies, `on_hull`, markers or new export options) export byte-identical .glb files.
+- `light` parts are shared with materials v2: one part is both a baked-lighting light (lightmaps, probes) and an exported `light_<n>` node that also lights mood previews. It has no geometry unless `bulb` is set; range defaults to 128 px and colour to `#ffffff`; `angle` and `cone` are aliases; `kind:"area"` is accepted.
+
 ### Animation library (`art_anim`) and 2D rotated-sprite tooling
 
 - New tool `art_anim`:
