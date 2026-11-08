@@ -141,7 +141,7 @@ test('fx: engine ops write sheets, manifest, previews and export', () => {
   assert.equal(e.get('muzzle_rifle_side').frames, 4);
   e.run('fx_make', { type: 'impact', variant: 'metal', path: dir, group: 'combat' });
   e.run('fx_make', { type: 'decal', variant: ['bullet_metal', 'energy_burn'], variants: 2, path: dir, group: 'combat' });
-  for (const f of ['impact_metal.png', 'impact_metal_straight.png', 'decal_bullet_metal_energy_burn.png', 'decal_bullet_metal_energy_burn_n.png', 'decal_bullet_metal_energy_burn_h.png', 'decal_bullet_metal_energy_burn_e.png']) assert.ok(fs.existsSync(path.join(dir, f)), f);
+  for (const f of ['impact_metal.png', 'impact_metal_straight.png', 'decal_bullet_metal_energy_burn.png', 'decal_bullet_metal_energy_burn_n.png', 'decal_bullet_metal_energy_burn_h.png', 'decal_bullet_metal_energy_burn_e.png']) assert.ok(fs.existsSync(path.join(dir, 'combat', f)), f);
   const b = e.run('fx_batch', { items: [{ type: 'fire' }, { type: 'strobe', variant: 'amber', mode: 'beacon' }], path: dir, group: 'loops' });
   assert.equal(b.count, 2);
   assert.ok(fs.existsSync(path.join(dir, 'loops_contact.png')));
@@ -179,3 +179,92 @@ test('fx: existing space fx output unchanged (art_planet fx bytes)', () => {
 });
 // hashes from origin/main (the space fx code is untouched; art_fx only reuses its helpers)
 const EXPECTED_SPACE = { 'space_fx_sun.png': 'b03fcef75eb12976', 'space_fx_flare.png': '8257fa88a1c48e15', 'space_fx_debris.png': 'ba2d371888bf3f8e', 'space_fx_dust.png': 'dc8abf524e231035', 'space_fx_lightning.png': 'f36151e18bda4bfb' };
+
+test('fx canvas: names are validated, an existing canvas needs overwrite:true', () => {
+  const home = tmp(), e = new Engine({ home }), dir = path.join(home, 'out');
+  assert.throws(() => e.run('fx_make', { type: 'fire', path: dir, canvas: '../../evil' }), /canvas .* must be/);
+  assert.throws(() => e.run('fx_make', { type: 'fire', path: dir, name: '..', canvas: true }), /canvas .* must be/);
+  assert.ok(!fs.existsSync(path.join(home, '..', '..', 'evil.json')) && !fs.existsSync(path.join(dir, 'fx.json')), 'nothing written');
+  e.run('create', { name: 'mine', width: 8, height: 8 });
+  assert.throws(() => e.run('fx_make', { type: 'fire', path: dir, canvas: 'mine' }), /canvas "mine" exists/);
+  assert.equal(e.get('mine').width, 8);
+  e.run('fx_make', { type: 'fire', path: dir, canvas: 'mine', overwrite: true });
+  assert.notEqual(e.get('mine').width, 8);
+  e.run('fx_make', { type: 'sparks', path: dir, canvas: true });
+  assert.throws(() => e.run('fx_make', { type: 'sparks', path: dir, canvas: true }), /canvas "sparks_shower" exists/);
+  assert.throws(() => e.run('fx_batch', { items: [{ type: 'fire', canvas: 'two' }, { type: 'steam', canvas: 'two' }], path: dir }), /items\[1\].*used by two/);
+});
+
+test('fx groups: sheets live per group, same id in two groups never shares a PNG; export checks PNG sizes', () => {
+  const home = tmp(), e = new Engine({ home }), dir = path.join(home, 'out');
+  const a = e.run('fx_make', { type: 'fire', name: 'boom', size: 32, path: dir, group: 'a' });
+  const b = e.run('fx_make', { type: 'fire', name: 'boom', size: 64, path: dir, group: 'b' });
+  assert.equal(a.file, 'a/boom.png');
+  assert.equal(b.file, 'b/boom.png');
+  const size = (f) => { const p = decodePNG(fs.readFileSync(path.join(dir, f))); return [p.width, p.height]; };
+  assert.deepEqual(size(a.file), a.sheet);
+  assert.deepEqual(size(b.file), b.sheet);
+  assert.notDeepEqual(a.sheet, b.sheet);
+  assert.equal(e.run('fx_export', { path: dir }).valid, true);
+  // a sheet replaced behind the manifest's back is caught
+  fs.copyFileSync(path.join(dir, b.file), path.join(dir, a.file));
+  const x = e.run('fx_export', { path: dir, group: 'a' });
+  assert.equal(x.valid, false);
+  assert.match(x.issues.join(' '), /a\/boom\.png is \d+x\d+, the entry says sheet/);
+  // group names become folders: no dots, no reserved names
+  for (const group of ['..', 'a.b', 'previews', 'a/b', '']) assert.throws(() => e.run('fx_make', { type: 'fire', path: dir, group }), /"group" must be/, group);
+  // one effect's side file is another effect's sheet: refused
+  e.run('fx_make', { type: 'impact', variant: 'metal', name: 'hit', path: dir, group: 'c' });
+  assert.ok(fs.existsSync(path.join(dir, 'c', 'hit_straight.png')));
+  assert.throws(() => e.run('fx_make', { type: 'fire', name: 'hit_straight', path: dir, group: 'c' }), /would overwrite c\/hit_straight\.png/);
+});
+
+test('fx preview: sized before rendering (scale steps down, oversize fails fast, no orphan files); anchor checked', () => {
+  const home = tmp(), e = new Engine({ home }), dir = path.join(home, 'out');
+  const t0 = Date.now();
+  const p = e.run('fx_preview', { type: 'smoke', size: 128, frames: 64, scale: 8, path: dir });
+  assert.ok(p.scale < 8 && /scale 8 ->/.test(p.scale_capped), JSON.stringify({ scale: p.scale, c: p.scale_capped }));
+  const strip = decodePNG(fs.readFileSync(path.join(dir, 'previews', p.files[1])));
+  assert.ok(strip.width * strip.height <= 4096 * 4096);
+  assert.ok(Date.now() - t0 < 30000);
+  // a preview that cannot fit even at scale 1 throws before anything renders or is written
+  const d2 = path.join(home, 'out2');
+  e.run('create', { name: 'big', width: 2048, height: 2048 });
+  const t1 = Date.now();
+  assert.throws(() => e.run('fx_preview', { type: 'muzzle', variant: 'rifle', frames: 64, over: { canvas: 'big', anchor: [100, 100] }, path: d2 }), /does not fit one strip/);
+  assert.ok(Date.now() - t1 < 5000);
+  assert.ok(!fs.existsSync(path.join(d2, 'previews')), 'no orphan preview files');
+  e.run('create', { name: 'frame', width: 384, height: 216 });
+  for (const anchor of [['a', 1], [1], [1, 2, 3], { x: 1 }, [null, 2], 5]) assert.throws(() => e.run('fx_preview', { type: 'muzzle', variant: 'rifle', over: { canvas: 'frame', anchor }, path: dir }), /over\.anchor must be/, JSON.stringify(anchor));
+  assert.equal(e.run('fx_preview', { type: 'muzzle', variant: 'rifle', over: { canvas: 'frame', anchor: [262, 150] }, path: dir }).scale, 3);
+});
+
+test('fx: fps 1..120 and same-seed manifests are byte-identical (no render time saved)', () => {
+  for (const fps of [0, 0.5, 121, 'x']) assert.throws(() => normFx({ type: 'fire', fps }), /"fps" must be 1\.\.120/, String(fps));
+  assert.equal(normFx({ type: 'fire', fps: 1 }).fps, 1);
+  assert.ok(!('ms' in renderFx(normFx({ type: 'fire' })).meta) && !('ms' in renderFx(normFx({ type: 'decal', variant: 'scorch' })).meta));
+  const run = () => {
+    const home = tmp(), e = new Engine({ home }), dir = path.join(home, 'out');
+    const r = e.run('fx_batch', { items: [{ type: 'fire' }, { type: 'decal', variant: 'scorch', variants: 1 }], seed: 5, path: dir, group: 'g' });
+    assert.equal(typeof r.ms, 'number');
+    e.run('fx_export', { path: dir });
+    return [fs.readFileSync(path.join(dir, 'fx.json')), fs.readFileSync(path.join(dir, 'g.fx.json'))];
+  };
+  const [m1, g1] = run(), [m2, g2] = run();
+  assert.equal(sha(m1), sha(m2));
+  assert.equal(sha(g1), sha(g2));
+  assert.doesNotMatch(g1.toString(), /"ms":/);
+});
+
+test('fx activity: make / batch / preview / export are exports, list is read-only; canvases link to their files', async () => {
+  const { EXPORTS, READ_ONLY } = await import('../src/activity.js');
+  for (const op of ['fx_make', 'fx_batch', 'fx_preview', 'fx_export']) assert.ok(EXPORTS.has(op), op);
+  assert.ok(READ_ONLY.has('fx_list') && !EXPORTS.has('fx_list'));
+  const e = new Engine({ home: tmp() });
+  e.run('create', { name: 'frame', width: 384, height: 216 });
+  const p = e.run('fx_preview', { type: 'muzzle', variant: 'rifle', over: { canvas: 'frame', anchor: [262, 150] } });
+  const m = e.run('fx_make', { type: 'fire', canvas: 'flames' });
+  const edges = e.graph.all().edges.filter((x) => x.rel === 'exports_to');
+  assert.ok(edges.some((x) => x.from === 'canvas:frame' && x.to === `export:fx/previews/${p.files[0]}`), JSON.stringify(edges));
+  assert.ok(edges.some((x) => x.from === 'canvas:flames' && x.to === `export:fx/${m.file}`), JSON.stringify(edges));
+});

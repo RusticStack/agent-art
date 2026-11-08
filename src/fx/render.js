@@ -53,7 +53,7 @@ export function normFx(a = {}) {
   o.frames = type === 'particles' ? FX.particles.cells.length : Math.round(Number(a.frames ?? d.frames));
   if (!(o.frames >= 1 && o.frames <= 64)) throw new Error('"frames" must be 1..64');
   o.fps = Number(a.fps ?? d.fps);
-  if (!(o.fps > 0 && o.fps <= 120)) throw new Error('"fps" must be 1..120');
+  if (!(Number.isFinite(o.fps) && o.fps >= 1 && o.fps <= 120)) throw new Error('"fps" must be 1..120');
   o.loop = d.loop; o.blend = d.blend;
   o.id = a.name ?? [type, o.variant, o.view, o.suppressed ? 'sup' : null, o.mode && o.mode !== 'pulse' ? o.mode : null].filter(Boolean).join('_');
   if (!ID_RE.test(o.id)) throw new Error('"name" must be 1-64 chars of letters, digits, _ - .');
@@ -78,8 +78,7 @@ export function renderAt(o, t, k = 0, cache = {}) {
 
 /** Render every frame + the sheet + metadata. -> {o, frames, sheet, straight?, meta} (meta.file filled by the caller). */
 export function renderFx(o) {
-  const t0 = Date.now();
-  if (o.type === 'decal') return renderDecals(o, t0);
+  if (o.type === 'decal') return renderDecals(o);
   const cache = {}, frames = [];
   for (let k = 0; k < o.frames; k++) frames.push(renderAt(o, frameTime(o, k), k, cache));
   const sheet = packSheet(frames, o.cell[0], o.cell[1]);
@@ -101,12 +100,12 @@ export function renderFx(o) {
       note: sheet.grid.roblox ? `ParticleEmitter: FlipbookLayout ${sheet.grid.roblox}, FlipbookMode ${o.loop ? 'Loop' : 'OneShot'}, Lifetime ${(dur / 1000).toFixed(2)} s` : o.cell[0] !== o.cell[1] ? 'non-square cells: use a Beam (tracers) or a SurfaceGui / ImageLabel with ImageRectOffset per frame' : `pad: ${sheet.grid.padded} empty cells; use 4, 16 or 64 frames for an exact flipbook`,
     },
     palette_locked: !!o.palette && m.palette_locked !== false, colors: colorsOf([sheet.data]).length,
-    ...(m.notes ? { notes: m.notes } : {}), ms: Date.now() - t0,
+    ...(m.notes ? { notes: m.notes } : {}),
   };
   return { o, frames, sheet, straight, meta };
 }
 
-function renderDecals(o, t0) {
+function renderDecals(o) {
   const A = decalAtlas({ kinds: o.kinds, variants: o.variants, cell: o.cell[0], seed: o.seed, palette: o.palette, hue: o.hue });
   const meta = {
     id: o.id, type: 'decal', variant: o.variant, seed: o.seed, file: null, maps: { albedo: null, normal: null, height: null, emissive: null }, sheet: [A.width, A.height], cell: o.cell, grid: [o.variants, o.kinds.length],
@@ -114,7 +113,7 @@ function renderDecals(o, t0) {
     emitters: [], light: null, fp: null, sound: [], cells: A.cells, kinds: Object.fromEntries(o.kinds.map((k) => [k, DECAL_KINDS[k].about])),
     material: { alpha_test: 0.5, normal_scale: 1, height_scale_m: 0.01, emissive_strength: A.emissive ? 4 : 0, polygon_offset: [-1, -4], notes: 'height: 0.5 = the surface (128 grey); normal: tangent space, +Y up (OpenGL / three.js); scorch / energy_burn sized ~4x a bullet hole in the world (scale the quad, not the texels)' },
     roblox: { flipbook: null, light_emission: 0, file: null, note: 'Decal / SurfaceAppearance on a small part (ColorMap = albedo cell, NormalMap = normal cell): crop cells into separate images, Roblox has no UV rect for decals' },
-    palette_locked: !!o.palette, colors: colorsOf([A.albedo]).length, ms: Date.now() - t0,
+    palette_locked: !!o.palette, colors: colorsOf([A.albedo]).length,
   };
   return { o, decal: A, meta };
 }

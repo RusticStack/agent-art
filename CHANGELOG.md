@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Fixes (melee, art_fx)
+
+- Melee: `melee_check`, `paired` and the clip loader validate skin, victim skin, clip, pair and skeleton names (no `..` paths out of the library). `tolerance` must be a number >= 0. `art_anim melee` checks every clip conflict and builds every clip before it writes the skeleton or any clip. Weapon ids are own keys only (`constructor` is not a weapon). `melee_sheet` validates `pitch` (non-empty, -90..90), `frame` (two positive integers) and `model`, and its sheets and manifest link to the `melee_<id>` model in the asset graph.
+- `art_fx`: sheets now go to `<path>/<group>/<id>.png` (was `<path>/<id>.png`, so two groups with one id overwrote each other); metadata `file` paths include the group folder. Group names are letters, digits, `_` and `-` (no dots; `previews` is reserved). An effect whose files would overwrite another effect of its group is refused. `export` checks every PNG's size against the entry's `sheet`.
+- `art_fx` `canvas` names are validated and an existing canvas is replaced only with `overwrite:true`. `preview` sizes the strip before rendering (the scale steps down so frames stay <= 1024 px and the strip fits one sheet; the reply says `scale_capped`) and validates `over.anchor`. `fps` must be 1..120. Saved metadata no longer has `ms`, so same-seed output is byte-identical (`ms` stays in the reply).
+- Activity / graph: `fx_make`, `fx_batch`, `fx_preview`, `fx_export` and `anim_melee_sheet` are recorded as exports (`fx_list` is read-only); `fx_preview over.canvas` and `fx_make canvas` link to that canvas.
+
 ### Melee
 
 - Weapon kit: `art_model` templates `melee_combat_knife`, `melee_machete`, `melee_baton`, `melee_stun_baton`, `melee_vibro_blade`, `melee_breach_axe`, `melee_breach_hammer` and `melee_riot_shield` (original designs, cm units).

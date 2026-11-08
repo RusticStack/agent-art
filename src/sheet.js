@@ -28,17 +28,25 @@ function drawText(put, text, x, y, color) {
  * Each cell is `cell` px square, or (no cell) as wide/tall as the largest image, so wide frames
  * do not get a tall empty box with the label far below. Larger images are scaled down to fit.
  */
+/**
+ * Layout of a packImages sheet without rendering it: n items of boxW x boxH, `lines` label lines
+ * (0, 1 = label, 2 = label + sub). -> {W, H, cols, rows, cellW, cellH, labelH, fits (<= MAX_PIXELS)}
+ */
+export function packSize(n, boxW, boxH, { columns, labels = true, lines = labels ? 1 : 0, padding = 6 } = {}) {
+  const cols = columns ?? Math.max(1, Math.min(n, Math.ceil(Math.sqrt(n * 1.6))));
+  const rows = Math.ceil(n / cols);
+  const labelH = labels && lines ? lines * (FONT_H + 2) + 3 : 0;
+  const cellW = Math.max(boxW, labels ? 40 : 1), cellH = boxH + labelH;
+  const W = cols * (cellW + padding) + padding, H = rows * (cellH + padding) + padding;
+  return { W, H, cols, rows, cellW, cellH, labelH, fits: W * H <= MAX_PIXELS };
+}
 export function packImages(items, { cell, columns, labels = true, padding = 6, checker = true } = {}) {
   if (!items.length) throw new Error('Nothing to put on the sheet');
   const boxW = cell ?? Math.max(...items.map((i) => i.img.width));
   const boxH = cell ?? Math.max(...items.map((i) => i.img.height));
-  const cols = columns ?? Math.max(1, Math.min(items.length, Math.ceil(Math.sqrt(items.length * 1.6))));
-  const rows = Math.ceil(items.length / cols);
   const lines = labels ? Math.max(...items.map((i) => (i.sub ? 2 : i.label ? 1 : 0))) : 0;
-  const labelH = lines ? lines * (FONT_H + 2) + 3 : 0;
-  const cellW = Math.max(boxW, labels ? 40 : 1), cellH = boxH + labelH;
-  const W = cols * (cellW + padding) + padding, H = rows * (cellH + padding) + padding;
-  if (W * H > MAX_PIXELS) throw new Error(`Sheet would be ${W}x${H}; lower scale/cell or use limit/offset paging`);
+  const { W, H, cols, cellW, cellH, labelH, fits } = packSize(items.length, boxW, boxH, { columns, labels, lines, padding });
+  if (!fits) throw new Error(`Sheet would be ${W}x${H}; lower scale/cell or use limit/offset paging`);
   const out = new Uint8ClampedArray(W * H * 4);
   for (let i = 0; i < out.length; i += 4) out.set([32, 35, 42, 255], i);
   const put = (x, y, c) => {
