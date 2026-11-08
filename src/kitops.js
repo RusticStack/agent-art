@@ -89,13 +89,17 @@ export function kitOps({ getModel, saveModel, build, models }) {
         const r = interiorFromHull(a.name, H, doors, { ...a, ship: shipName });
         save(r.def, 'interior generated');
         let windows = 0;
-        if (a.windows !== false && r.windows.length) {
-          const parts = [...ship.parts.filter((p) => !(p && p.auto === 'interior')), ...r.windows];
-          save({ ...ship, parts }, 'interior windows');
-          windows = r.windows.length;
+        // merge:true (default) also writes the interior into the ship itself (one model, parts tagged
+        // inside:<hull>, so walk_check checks the fit); the standalone interior model stays for cull exports
+        const merge = a.merge !== false, key = H.id ?? H.name ?? 0;
+        if ((a.windows !== false && r.windows.length) || merge) {
+          const keep = ship.parts.filter((p) => !(p && (p.auto === 'interior' || p.auto === 'interior_merge')));
+          const inner = merge ? r.def.parts.map((p) => ({ ...p, auto: 'interior_merge', inside: key, ...(ship.parts.some((q) => q && q.name === 'hull') ? { parent: 'hull' } : {}) })) : [];
+          save({ ...ship, parts: [...keep, ...(a.windows !== false ? r.windows : []), ...inner] }, merge ? 'interior merged' : 'interior windows');
+          windows = a.windows !== false ? r.windows.length : 0;
         }
         const ib = build(this, r.def);
-        return { model: a.name, ship: shipName, triangles: ib.mesh.triangles, ...r.report, windows_on_ship: windows, next: `art_model preview {name:"${a.name}", views:["top","iso"], mood:true}; export {name:"${a.name}"} (cull rooms + auto portals)` };
+        return { model: a.name, ship: shipName, merged_into_ship: a.merge !== false, triangles: ib.mesh.triangles, ...r.report, windows_on_ship: windows, next: `art_model preview {name:"${a.name}", views:["top","iso"], mood:true}; export {name:"${a.name}"} (cull rooms + auto portals)` };
       }
       if (kind === 'mining_colony' || kind === 'colony' || kind === 'market') {
         const r = kind === 'market' ? marketDistrict(a.name, a) : miningColony(a.name, a);

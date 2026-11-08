@@ -16,16 +16,16 @@ const lerp = (a, b, t) => a + (b - a) * t;
 const SLOT_DEFAULTS = { hull: '#7a8089', hull2: '#5b616b', dark: '#24272c', metal: '#4b5059', glass: '#7fc8e8', glow: '#7fd8ff', hazard: '#d09a28', deck: '#4a4f57', frame: '#33373e', accent: '#b8462e' };
 /** textures:"kit" (the art_model kit canvases) | {slot: texture} | undefined (flat colours). */
 export function shipSlots(t) {
-  if (t === 'kit') return { hull: 'kit_hull', hull2: 'kit_hull_dark', dark: 'kit_metal_dark', metal: 'kit_metal', glass: 'kit_glass', glow: 'kit_glow', hazard: 'kit_hazard', deck: 'kit_deck', frame: 'kit_metal_dark', accent: 'kit_accent' };
-  return { ...SLOT_DEFAULTS, ...(t && typeof t === 'object' ? t : {}) };
+  if (t === 'kit' || t === undefined) return { hull: 'kit_hull', hull2: 'kit_hull_dark', dark: 'kit_metal_dark', metal: 'kit_metal', glass: 'kit_glass', glow: 'kit_glow', hazard: 'kit_hazard', deck: 'kit_deck', frame: 'kit_metal_dark', accent: 'kit_accent' };
+  return { ...SLOT_DEFAULTS, ...(t && typeof t === 'object' ? t : {}) }; // textures:"flat" = flat colours
 }
 const hullAt = (S, at, t, u) => { const p = S.point(t, u); return [r2(p[0] + at[0]), r2(p[1] + at[1]), r2(p[2] + at[2])]; };
 
 // ---------- fighter ----------
 export function fighterTemplate(o = {}) {
   const rnd = mulberry32((Number(o.seed ?? 1) * 2654435761) >>> 0 || 1), T = shipSlots(o.textures);
-  const L = Number(o.length ?? 480), W = Number(o.width ?? L * lerp(0.2, 0.26, rnd())), H = Number(o.height ?? L * 0.1);
-  const clear = Number(o.clearance ?? 26), rig = o.rigged !== false;
+  const L = Number(o.length ?? 640), W = Number(o.width ?? L * lerp(0.2, 0.26, rnd())), H = Number(o.height ?? L * 0.1);
+  const clear = Number(o.clearance ?? 40), rig = o.rigged !== false;
   const hullTex = o.livery ?? T.hull;
   const hull = {
     type: 'hull', id: 'hull', name: rig ? 'hull' : undefined, length: L, width: W, height: H, at: [0, clear, 0],
@@ -74,8 +74,8 @@ const notes = (kind, L, extra) => {
 // ---------- dropship ----------
 export function dropshipTemplate(o = {}) {
   const rnd = mulberry32((Number(o.seed ?? 1) * 2246822519) >>> 0 || 1), T = shipSlots(o.textures);
-  const L = Number(o.length ?? 960), W = Number(o.width ?? L * lerp(0.26, 0.3, rnd())), H = Number(o.height ?? L * 0.2);
-  const clear = Number(o.clearance ?? 34), rig = o.rigged !== false;
+  const L = Number(o.length ?? 1120), W = Number(o.width ?? L * lerp(0.26, 0.3, rnd())), H = Number(o.height ?? L * 0.2);
+  const clear = Number(o.clearance ?? 40), rig = o.rigged !== false;
   const hull = {
     type: 'hull', id: 'hull', name: rig ? 'hull' : undefined, length: L, width: W, height: H, at: [0, clear, 0],
     plan: [[0, W * 0.46], [0.2, W * 0.5], [0.7, W * 0.5], [0.88, W * 0.38], [1, W * 0.16]],

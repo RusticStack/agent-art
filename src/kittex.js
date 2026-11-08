@@ -284,7 +284,7 @@ const PAINTERS = {
   glow: { w: 8, h: 8, base: 'glow', fn: (b) => () => ({ c: hex(b), emissive: hex(b) }) },
   glass: {
     w: 16, h: 16, base: 'glass',
-    fn: (b) => (x, y) => ({ c: shade(hex(b), x + y < 4 ? 1.35 : (x + y) % 9 === 0 ? 1.15 : 0.95), metal: 0, rough: 0.05 }),
+    fn: (b) => (x, y) => ({ c: shade(hex(b), x + y < 3 ? 1.3 : (x * 3 + y) % 23 === 0 ? 1.08 : 0.9), metal: 0, rough: 0.05 }),
   },
   screen: {
     w: 32, h: 16, base: 'screen',

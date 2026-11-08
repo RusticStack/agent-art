@@ -119,7 +119,7 @@ registerAssembly('glazing', (p, k) => {
   const cols = Math.max(1, Math.round(n(p.cols, 4))), rows = Math.max(1, Math.round(n(p.rows, 2))), inset = n(p.inset, 3), mull = n(p.mullion, 5), frameW = n(p.frame, mull * 1.6);
   const glassT = tx(p, 'glass', 'kit_glass'), frameT = tx(p, 'frame', 'kit_metal_dark');
   const geo = Object.fromEntries(HULL_KEYS.filter((key) => H[key] !== undefined).map((key) => [key, H[key]]));
-  const parts = [{ type: 'hull', ...geo, patch: { t: [t0, t1], u: [u0, u1] }, inset, texture: glassT, glass: { opacity: n(p.opacity, 0.32) }, double_sided: true, caps: false }];
+  const parts = [{ type: 'hull', ...geo, patch: { t: [t0, t1], u: [u0, u1] }, inset, texture: glassT, glass: { opacity: n(p.opacity, 0.24) }, double_sided: true, caps: false }];
   const at = (t, u, lift) => { const q = S.point(t, u), nn = S.normal(t, u); return [r3(q[0] + nn[0] * lift + off[0]), r3(q[1] + nn[1] * lift + off[1]), r3(q[2] + nn[2] * lift + off[2])]; };
   const lift = (1 - inset) / 2, rr = (w) => r3(Math.max(w / 2, (inset + 1) / 2));
   const us = uSteps(u0, u1, cols), N = 10;

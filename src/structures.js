@@ -647,7 +647,7 @@ export function decal(a, ctx) {
       else if (v === 2) D.set(second, (y * W + x) * 4);
       else if (bg) D.set(bg, (y * W + x) * 4);
     }
-    return a.glow ? { emissive: D } : {};
+    return a.glow ? { emissive: D, decal: true } : { decal: true };
   });
   const m = new Mesh(), W2 = (w * px) / 2, H2 = (h * px) / 2;
   m.face(t, [[-W2, -H2, 0], [W2, -H2, 0], [W2, H2, 0], [-W2, H2, 0]], [[0, 0, 1], [0, 0, 1], [0, 0, 1], [0, 0, 1]], [[0, 1], [1, 1], [1, 0], [0, 0]], [0, 0, 1], 0);

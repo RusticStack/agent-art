@@ -153,8 +153,9 @@ export function gunshipTemplate(o = {}) {
   const zc0 = zt(0.31), zc1 = zt(0.785), zh0 = zt(0.075), zk1 = zt(0.925);
   const W2 = 52, wallT = 4;
   // floors: subfloor + grating panels + blue edge strips (corridor), rubber mat (cockpit), deck (hold)
-  parts.push({ type: 'box', w: W2 * 2, h: 4, d: r2(zc1 - zc0), at: [0, FY - 4, r2((zc0 + zc1) / 2)], texture: DARK, ...IN });
-  for (let z = zc0 + 2; z < zc1 - 30; z += 32) parts.push({ type: 'box', w: 60, h: 0.6, d: 30, at: [0, FY, r2(z + 15)], texture: 'kit_grate', ...IN });
+  parts.push({ type: 'box', w: W2 * 2, h: 4, d: r2(zc1 - zc0), at: [0, FY - 6, r2((zc0 + zc1) / 2)], texture: DARK, ...IN });
+  for (const s of [1, -1]) parts.push({ type: 'box', w: W2 - 30, h: 2, d: r2(zc1 - zc0), at: [s * (30 + (W2 - 30) / 2), FY - 2, r2((zc0 + zc1) / 2)], texture: 'kit_deck', ...IN });
+  for (let z = zc0 + 2; z < zc1 - 30; z += 32) parts.push({ type: 'box', w: 60, h: 0.6, d: 30, at: [0, FY - 0.6, r2(z + 15)], texture: 'kit_grate', ...IN });
   for (const s of [1, -1]) parts.push({ type: 'box', w: 1.4, h: 0.8, d: r2(zc1 - zc0 - 8), at: [s * (W2 - 3), FY, r2((zc0 + zc1) / 2)], color: glowC, material: { preset: 'emissive_panel' }, ...IN });
   const ck = deckHalfWidth(body, 0.785, 0.925, FY - 4, 0, 3);
   parts.push({ type: 'box', w: r2(ck * 2), h: 4, d: r2(zk1 - zc1), at: [0, FY - 4, r2((zc1 + zk1) / 2)], texture: DARK, ...IN });

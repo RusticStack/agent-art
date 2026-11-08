@@ -103,7 +103,7 @@ export class BVH {
 export function bvhOf(meshes) {
   const out = [];
   for (const m of meshes) for (const g of m.groups.values()) {
-    if (g.overlay || g.tex.material?.blend) continue;
+    if (g.overlay || g.tex.material?.blend || g.tex.decal) continue; // decals (alpha-cut stickers) never occlude
     for (let i = 0; i < g.idx.length; i += 3) for (let k = 0; k < 3; k++) { const v = g.idx[i + k]; out.push(g.pos[v * 3], g.pos[v * 3 + 1], g.pos[v * 3 + 2]); }
   }
   return new BVH(Float32Array.from(out));

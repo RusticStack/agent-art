@@ -90,7 +90,7 @@ export function interiorFromHull(name, hullPart, doors = [], o = {}) {
         const cx = sgn * (C / 2 + (K * C) / 2);
         // window on the outer wall when the hull skin is close
         const xOut = C / 2 + K * C + wall, t = S.tOf(zc - off[2]), skin = S.halfWidthAt(t, yf + Hd * 0.5 - off[1]);
-        const win = skin - xOut < Number(o.window_gap ?? 40);
+        const win = skin - xOut < Number(o.window_gap ?? 96);
         const open = { [sgn > 0 ? 'w' : 'e']: [{ at: 0, kind: 'door' }], ...(win ? { [sgn > 0 ? 'e' : 'w']: [{ at: 0, kind: 'window' }] } : {}) };
         addRoom(kind, cx, bd.a, bd.b, K, open, `${kind}_${bi}_${sgn > 0 ? 'l' : 'r'}`);
         doorAt(sgn * (C / 2 + wall / 2), r2(zc - D / 2 + C / 2), 1, `door_${bi}_${sgn > 0 ? 'l' : 'r'}`);

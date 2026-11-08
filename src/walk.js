@@ -112,7 +112,7 @@ const distToQuad = (p, q) => {
   const v = sub(p, q.c), a = Math.max(-q.w / 2, Math.min(q.w / 2, dot(v, q.s))), b = Math.max(-q.d / 2, Math.min(q.d / 2, dot(v, q.f)));
   return Math.hypot(...sub(p, add(q.c, add(mul(q.s, a), mul(q.f, b)))));
 };
-const edgePts = (q) => { const out = []; for (let i = 0; i < 4; i++) { const A = q.corners[i], B = q.corners[(i + 1) % 4]; for (let k = 0; k < 4; k++) out.push(add(A, mul(sub(B, A), k / 4))); } return out; };
+const edgePts = (q) => { const out = []; for (let i = 0; i < 4; i++) { const A = q.corners[i], B = q.corners[(i + 1) % 4], n = Math.max(4, Math.ceil(Math.hypot(...sub(B, A)) / 12)); for (let k = 0; k < n; k++) out.push(add(A, mul(sub(B, A), (k + 0.5) / n))); } return out; };
 
 /**
  * Walkability report. closed / open: built meshes of the model as authored and with every door,
@@ -182,10 +182,16 @@ export function walkAnalyze({ markers = [], closed, open, hulls = [], scale = 32
   const link = (a, b) => { if (a !== b) { adj[a].add(b); adj[b].add(a); } };
   const GROUND = areas.length;
   adj.push(new Set());
+  // a step across an area edge is open when a chest-high ray over it is not blocked (walls without a doorway are)
+  const open1 = (p, dir) => { const d = norm([dir[0], 0, dir[2]]); return !(bOpen.hit(add(p, [0, P.height * 0.55, 0]), d, 20) < 20); };
   for (let a = 0; a < areas.length; a++) {
-    const ep = edgePts(areas[a].q);
-    for (let b = a + 1; b < areas.length; b++) if (ep.some((p) => distToQuad(p, areas[b].q) <= 14) || edgePts(areas[b].q).some((p) => distToQuad(p, areas[a].q) <= 14)) link(a, b);
-    if (ep.some((p) => p[1] <= P.step_rise + 0.5)) link(a, GROUND);
+    const A = areas[a], ep = edgePts(A.q);
+    for (let b = a + 1; b < areas.length; b++) {
+      const B = areas[b];
+      const cross1 = (X, Y) => edgePts(X.q).some((p) => { if (distToQuad(p, Y.q) > 14) return false; const out = sub(p, X.q.c); return open1(sub(p, mul(norm([out[0], 0, out[2]]), 6)), out); });
+      if (cross1(A, B) || cross1(B, A)) link(a, b);
+    }
+    if (ep.some((p) => { if (p[1] > P.step_rise + 0.5) return false; const out = sub(p, A.q.c); return open1(sub(p, mul(norm([out[0], 0, out[2]]), 6)), out); })) link(a, GROUND);
   }
   const near = (p, tol = 24) => areas.filter((A) => distToQuad(p, A.q) <= tol).map((A) => A.i);
   for (const k of markers.filter((m) => m.kind === 'ladder' || m.kind === 'lift')) {

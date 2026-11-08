@@ -4,6 +4,12 @@
 
 ### Ships, interiors, industrial kits and megastructures (`art_model`)
 
+- Walkable ships at true scale: `gunship` hero template (original ORVANE TERN, exterior + walkable interior in one model), shared player metrics, `art_model walk_check`, `export {walk:true}` (navmesh, colliders, triggers, seats, spawns).
+- `hull` gains `shell` (inner skin) and `openings` (cut through both skins, rims show the thickness) and `patch` + `inset` (used by `glazing`).
+- New assemblies: `glazing`, `ring_door`, `portal_arch`, `locker_wall`, `screen_arm`, `pilot_seat`, `terminal`, `stair_run`, `gun_pod`, `fairing`, `hinge`, `crate`, `barrel`, `stool`, `chair`, `figure`; new `decal` part. Engines get exhaust petals and straps; intakes get depth; armour plates step; landing gear shows torque links and braces.
+- Built-in kit textures (`kit_<name>[_<rrggbb>]`) with normal and metal/rough data; kit pieces and templates use them by default.
+- Mood previews light every surface per pixel (normal maps, specular, AO, point lights, key / fill / rim); `preview {ao}` works with poses.
+- Class budgets now cover exterior + walkable interior (fighter 14k, dropship 45k, freighter 80k, corvette 120k, capital 200k).
 - `hull` part: lofted from a plan curve, a side profile and cross-section stations. It has hard creases, chamfered polygon sections, panel-line grooves, raised plates, mask carving and `uv:"fit"` livery mapping, and the surface stays closed.
 - `on_hull` places a part on a hull surface. Assemblies expand one part into several, each with sockets, poses and clips.
   - Ship parts: canopy, engine, thruster, wing, fin, landing gear, ramp, cargo door, turret, rotary cannon, hardpoint, antenna, sensor dome, RCS quad, intake, vent, armour plate and container rack.

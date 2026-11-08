@@ -382,35 +382,45 @@ export function hull(a, ctx) {
     }
   }
   // inner skin (reversed, facing the interior) and rims round the openings (show the thickness)
-  const inn = (i, j) => { const jj = j % nu, p = P[i][jj], n = N[i][jj]; return [p[0] - n[0] * shell, p[1] - n[1] * shell, p[2] - n[2] * shell]; };
+  // inner skin: offset along the normal, clamped where the section gets thin (no folding at noses / tails)
+  const cen = ts.map((t) => { const e = S.extentAt(t); return Math.max(0.01, Math.min(e.w, (e.top - e.bottom) / 2)); });
+  const inn = (i, j) => { const jj = j % nu, p = P[i][jj], n = N[i][jj], sh = Math.min(shell, cen[i] * 0.4); return [p[0] - n[0] * sh, p[1] - n[1] * sh, p[2] - n[2] * sh]; };
+  // the outer quad (i, j) is emitted in [i,j],[i,j+1],[i+1,j+1],[i+1,j] order unless face() flips it to its normal
+  const flipped = (i, j) => { const L = level[i][j], A = at(i, j, L), B = at(i, j + 1, L), C2 = at(i + 1, j + 1, L), D = at(i + 1, j, L); const g = add(cross(sub(B, A), sub(C2, A)), cross(sub(C2, A), sub(D, A))); return dot(g, fn[i][j]) < 0; };
   if (shell > 0) {
     const innerT = ctx.tex(a.inner ?? '#3c4047'), rimT = ctx.tex(a.rim ?? a.groove ?? '#23262c');
     for (let i = 0; i < nr - 1; i++) for (let j = 0; j < nu; j++) {
       if (hole[i][j]) continue;
-      const C = [[i + 1, j], [i + 1, j + 1], [i, j + 1], [i, j]];
+      const C0 = [[i, j], [i, j + 1], [i + 1, j + 1], [i + 1, j]];
+      const C = flipped(i, j) ? C0 : C0.slice().reverse(); // opposite of the outer quad's actual winding
       const Pq = C.map(([a2, b2]) => inn(a2, b2));
       const nIn = mul(fn[i][j], -1);
-      if (len(cross(sub(Pq[2], Pq[0]), sub(Pq[3], Pq[1]))) < 1e-9) continue;
-      m.face(innerT, Pq, C.map(() => nIn), C.map(([a2, b2]) => uvOf(innerT, a2, b2)), nIn, 0);
+      if (len(cross(sub(Pq[2], Pq[0]), sub(Pq[3], Pq[1]))) < 1e-9 && len(cross(sub(Pq[1], Pq[0]), sub(Pq[2], Pq[0]))) < 1e-9) continue;
+      // winding = the outer quad's reversed (keeps the skin closed even where a thin section folds); shading normal = inward
+      const gN = add(cross(sub(Pq[1], Pq[0]), sub(Pq[2], Pq[0])), cross(sub(Pq[2], Pq[0]), sub(Pq[3], Pq[0])));
+      m.face(innerT, Pq, C.map(() => nIn), C.map(([a2, b2]) => uvOf(innerT, a2, b2)), len(gN) > 1e-12 ? gN : nIn, 0);
     }
-    const rim = (E0, E1, L, holeC) => {
+    // rim quad on the outer quad edge A -> B (in that quad's winding): B -> A on the outer skin, A -> B on
+    // the inner skin, so it pairs with both skins; shading normal faces into the opening
+    const rim = (A, B, L, holeC, fl) => {
       if (PT) return;
-      const W = [at(E0[0], E0[1], L), at(E1[0], E1[1], L), inn(E1[0], E1[1]), inn(E0[0], E0[1])];
-      let n = norm(cross(sub(W[1], W[0]), sub(W[3], W[0])));
-      if (len(n) < 1e-9) return;
+      const W = fl ? [at(A[0], A[1], L), at(B[0], B[1], L), inn(B[0], B[1]), inn(A[0], A[1])] : [at(B[0], B[1], L), at(A[0], A[1], L), inn(A[0], A[1]), inn(B[0], B[1])];
+      const gN = add(cross(sub(W[1], W[0]), sub(W[2], W[0])), cross(sub(W[2], W[0]), sub(W[3], W[0])));
+      if (len(gN) < 1e-12) return;
+      let n = norm(gN);
       const mid = mul(add(add(W[0], W[1]), add(W[2], W[3])), 0.25);
       if (dot(n, sub(holeC, mid)) < 0) n = mul(n, -1);
-      const f = m.face(rimT, W, n, W.map((p) => [(p[0] + p[2]) / rimT.width, -p[1] / rimT.height]), n, 0);
+      const f = m.face(rimT, W, n, W.map((p) => [(p[0] + p[2]) / rimT.width, -p[1] / rimT.height]), gN, 0);
       f.edge = true;
     };
     const hc = (i, j) => mul(add(add(P[i][j % nu], P[i][(j + 1) % nu]), add(P[i + 1][j % nu], P[i + 1][(j + 1) % nu])), 0.25);
     for (let i = 0; i < nr - 1; i++) for (let j = 0; j < nu; j++) {
       if (hole[i][j]) continue;
-      const L = level[i][j], jn = (j + 1) % nu, jp = (j - 1 + nu) % nu;
-      if (hole[i][jn]) rim([i, j + 1], [i + 1, j + 1], L, hc(i, jn));
-      if (hole[i][jp]) rim([i, j], [i + 1, j], L, hc(i, jp));
-      if (i + 1 < nr - 1 && hole[i + 1][j]) rim([i + 1, j], [i + 1, j + 1], L, hc(i + 1, j));
-      if (i > 0 && hole[i - 1][j]) rim([i, j], [i, j + 1], L, hc(i - 1, j));
+      const L = level[i][j], jn = (j + 1) % nu, jp = (j - 1 + nu) % nu, fl = flipped(i, j);
+      if (hole[i][jn]) rim([i, j + 1], [i + 1, j + 1], L, hc(i, jn), fl);
+      if (hole[i][jp]) rim([i + 1, j], [i, j], L, hc(i, jp), fl);
+      if (i + 1 < nr - 1 && hole[i + 1][j]) rim([i + 1, j + 1], [i + 1, j], L, hc(i + 1, j), fl);
+      if (i > 0 && hole[i - 1][j]) rim([i, j], [i, j + 1], L, hc(i - 1, j), fl);
     }
   }
   // end caps (tail t = 0, nose t = 1) where the section is open; a shelled hull also closes its
@@ -429,8 +439,16 @@ export function hull(a, ctx) {
           m.face(rimT, q, q.map(() => n), q.map((p) => [p[0] / rimT.width, -p[1] / rimT.height]), n, 0);
         } else {
           const ring = us.map((_, j) => inn(i, j)), ctr = [0, (tp0 + bt0) / 2, ring[0][2]];
-          const pts = [ctr, ...ring], n = [0, 0, -nz];
-          m.polygon(innerT, pts, n, pts.map((p) => [p[0] / innerT.width, -p[1] / innerT.height]), ring.map((_, j) => [0, ((j + 1) % nu) + 1, j + 1]), 0);
+          const n = [0, 0, -nz];
+          // one winding for the whole cap (from its total area), so it pairs with the inner skin's end ring
+          let tot = 0;
+          for (let j = 0; j < nu; j++) tot += cross(sub(ring[(j + 1) % nu], ctr), sub(ring[j], ctr))[2];
+          const rev = tot * -nz < 0;
+          for (let j = 0; j < nu; j++) {
+            const tri = rev ? [ctr, ring[j], ring[(j + 1) % nu]] : [ctr, ring[(j + 1) % nu], ring[j]], gN = cross(sub(tri[1], tri[0]), sub(tri[2], tri[0]));
+            if (len(gN) < 1e-12) continue;
+            m.face(innerT, tri, [n, n, n], tri.map((p) => [p[0] / innerT.width, -p[1] / innerT.height]), gN, 0);
+          }
         }
       }
     }
