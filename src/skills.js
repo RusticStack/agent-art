@@ -40,11 +40,7 @@ Multiple views or animations of this sprite -> use the "rig" skill so it stays i
    art_rig ${J({ action: 'create', name: 'knight', frame: [32, 32], template: 'humanoid', parts: { head: { w: 12, h: 10 }, cape: { w: 8, h: 12, pivot: [4, 0], parent: 'body', at: [-2, -6], z: -4 } } })}
    draw every listed cell (step 2), art_rig preview, then one call per animation:
    art_rig ${J({ action: 'animate', name: 'knight', preset: 'walk', view: 'side' })}  (override any field: frames, fps, keys, loop)
-High-detail character (64x96 .. 160x240, 8 directions, bending elbows/knees, IK, cape follow-through):
-   art_rig ${J({ action: 'create', name: 'soldier', frame: [128, 192], template: 'humanoid_hd' })}
-   draw every cell in all 5 drawn views, then one call per preset and view (one canvas each: a frame strip is at most 8192 px tall):
-   art_rig ${J({ action: 'animate', name: 'soldier', preset: 'walk', view: 'front_side', canvas: 'soldier_walk_front_side' })}  (presets: idle walk run crouch_walk aim shoot reload hurt death throw blink)
-   Fix one view only: art_rig ${J({ action: 'pose', name: 'soldier', pose: 'aim', merge: true, views: { front: { head: { rot: 0 } } } })}; hands on props with ik:{hand_b:{target:{part:'weapon', at:[14,-2]}, bend:-1}}.
+High-detail character (64x96 .. 160x240, 8 directions, IK, foot planting, follow-through): use the "rig-hd" skill (template:"humanoid_hd").
 Custom rig (anything else: quadrupeds, vehicles, props with moving parts):
 1. Create the rig (parts are drawn once per view; frames are generated from them):
    art_rig ${J({ action: 'create', name: 'knight', frame: [32, 32], views: ['side', 'front', 'back'], parts: { body: { w: 12, h: 12, pivot: [6, 10] }, head: { w: 12, h: 12, pivot: [6, 11], parent: 'body', at: [0, -9] }, arm_f: { w: 5, h: 9, pivot: [2, 1], parent: 'body', at: [2, -8], z: 2 }, arm_b: { w: 5, h: 9, pivot: [2, 1], parent: 'body', at: [-2, -8], z: -1 }, leg_f: { w: 5, h: 8, pivot: [2, 1], parent: 'body', at: [1, 0], z: 1 }, leg_b: { w: 5, h: 8, pivot: [2, 1], parent: 'body', at: [-2, 0], z: -2 } }, root: [16, 22] })}
@@ -55,6 +51,26 @@ Custom rig (anything else: quadrupeds, vehicles, props with moving parts):
 4. Animate (tweened in-betweens, any fps):
    art_rig ${J({ action: 'animate', name: 'knight', animation: 'walk', view: 'side', keys: [{ pose: 'walk_contact' }, { pose: 'walk_pass' }, { pose: 'walk_contact', mirror_pairs: true }, { pose: 'walk_pass' }], frames: 8, fps: 10, loop: true, plant_feet: true })}
 5. art_rig preview {name} (all views + a pose) and art_critique on the output canvas (volume_drift, ground_line). Export with art_animation export.`,
+  },
+  'rig-hd': {
+    title: 'High-detail character rig (humanoid_hd: 8 directions, per-view poses, IK, foot planting, follow-through)',
+    when: 'Detailed characters at 64x96 .. 160x240 (late-90s pre-rendered look, shooters, action games) that need many smooth animations in several directions.',
+    body: `1. Create from the template (sizes scale with the frame; cape/gear_hip follow-through, RotSprite sampling and scale_children are already on):
+   art_rig ${J({ action: 'create', name: 'soldier', frame: [128, 192], template: 'humanoid_hd', secondary: { cape: { stiffness: 0.15, damping: 0.2, gravity: 0.5 } } })} (merged over the template's cape/gear_hip springs)
+   Parts: pelvis (root), torso, chest, neck, head (+head:blink), upper_arm/forearm/hand and thigh/shin/foot _f (near) / _b (far), slots weapon (child of hand_f), gear_back, gear_hip, cape. Remove a slot with parts:{cape:null}.
+2. Draw every cell in the 5 drawn views (side faces RIGHT, front_side, front, back_side, back) on "soldier_parts"; the _left views are mirrors. Pivot = joint at the top of each limb part; let limb cells overlap the joint a few px so bent knees and elbows stay closed. Draw *_b darker. Check: art_rig ${J({ action: 'preview', name: 'soldier', pose: 'walk_contact' })}
+3. Presets, one canvas per preset and view (a frame strip is at most 8192 px tall):
+   art_rig ${J({ action: 'animate', name: 'soldier', preset: 'walk', view: 'front_side', canvas: 'soldier_walk_front_side' })}
+   presets: idle walk run crouch_walk aim shoot reload hurt death throw blink (planting, IK and secondary are set in them).
+4. Fix a pose in one view only (merged over the base pose there; mirror views follow their source):
+   art_rig ${J({ action: 'pose', name: 'soldier', pose: 'aim', merge: true, views: { front: { head: { rot: 0 } } } })}
+   Forward swings in front/back views: override rot with sy foreshortening, e.g. views:{front:{thigh_f:{rot:0, sy:0.8}}}.
+5. Two-bone IK in a pose or key: ik:{end:{target:[x,y] (frame px) | {part, at:[dx,dy]}, bend:1 (knees) | -1 (elbows), rot? (world rot of the end: keep a gun level), weight?}}:
+   art_rig ${J({ action: 'pose', name: 'soldier', pose: 'brace', parts: { chest: { rot: -4 } }, ik: { hand_b: { target: { part: 'weapon', at: [20, -3] }, bend: -1 } } })}
+6. Custom cycle with planted feet and follow-through:
+   art_rig ${J({ action: 'animate', name: 'soldier', animation: 'patrol', view: 'side', keys: [{ pose: 'walk_contact' }, { pose: 'walk_pass' }, { pose: 'walk_contact', mirror_pairs: true }, { pose: 'walk_pass', mirror_pairs: true }], frames: 16, fps: 12, plant: true, secondary: true, canvas: 'soldier_patrol_side' })}
+   plant:["foot_f"] picks feet; secondary:{gear_hip:{stiffness:0.4, damping:0.5}} inline uses only these springs for this call.
+7. Limbs look jagged or change thickness: rig sampling "rotsprite" (default here) or "smooth"; art_rig update {name, sampling}. art_critique {canvas, animation} for drift, then art_animation export {format:"spritesheet"} (json:false skips the sidecar). Guide: docs/rig-hd-guide.md, art_help {topic:"rig"}.`,
   },
   'walk-cycle': {
     title: 'Walk cycle without a rig (frame-by-frame)',
@@ -116,6 +132,24 @@ For 8+ frames or several directions use the rig skill.`,
    Moss / grime / wear: ${J({ type: 'wall', texture: 'stone', overlays: [{ texture: 'grime', where: ['bottom', 'corners'], falloff: 20 }, { texture: 'moss', where: 'top', falloff: 10 }] })} (own UV set, cut out by strength).
 Props: extrude ${J({ type: 'extrude', canvas: 'barrel', depth: 6 })}; relief: depth_map:"<height canvas>"; lathe ${J({ type: 'lathe', canvas: 'candle', segments: 12 })} (draw the RIGHT half from x=0; flame on an "emissive" layer).
 Keep pieces light (< 500 tris), reuse a few textures, characters stay 2D billboards.`,
+  },
+  'ship-model': {
+    title: 'Spaceship / vehicle 3D model (low-poly + pixel textures -> .glb)',
+    when: 'Ships, fighters, dropships, cars, tanks, turrets, drones: standalone 3D models with hulls, wings, canopies, engines and panels.',
+    body: `1. Textures: a tileable hull plate (32x32, cells/noise + panel lines) and small decals (an "emissive" layer for lights and engine glow):
+   art_create_canvas ${J({ name: 'hull', width: 32 })}  -> tileable-texture skill.
+2. Build with origin:"bottom" (centred, sits on y=0). Y-up, +z = nose, units px (32 px = 1 unit). mirror:"x" makes the other side:
+   art_model ${J({ action: 'create', name: 'scout', origin: 'bottom', preview: true, parts: [
+    { type: 'loft', points: [[-12, 0], [12, 0], [10, 10], [-10, 10]], d: 64, scale_end: [0.3, 0.4], texture: 'hull' },
+    { type: 'wedge', w: 40, h: 3, d: 24, top_w: 8, shift: [16, 0], at: [14, 2, 0], mirror: 'x' },
+    { type: 'cone', r: 3, h: 8, rotate: [90, 0, 0], at: [0, 5, 32] },
+    { type: 'cylinder', r_bottom: 5, r_top: 4, h: 10, rotate: [-90, 0, 0], at: [10, 5, -32], mirror: 'x' },
+    { type: 'box', w: 10, h: 6, d: 14, bevel: 2, glass: true, color: '#9fd8ff', at: [0, 10, 8] },
+    { type: 'box', w: 6, h: 6, d: 6, at: [0, 0, -20], insets: [{ face: 'back', rect: [1, 1, 4, 4], depth: 3, texture: '#f80' }] }] })}
+3. Pieces: loft (a shape whose far section is scaled by scale_end: hulls, fuselages), shape plane:"zy" (side profile [z,y], extruded along x), wedge (top_w, top_d:0 = ridge, shift:[x,z]: wings, fins, ramps), box taper:[sx,sy] (nose) | bevel:px | insets:[{face, rect:[u,v,w,h], depth}] (>0 recess: intakes, hatches; <0 raised panel; touching an edge = hangar mouth), only one of taper|bevel|insets per box. cylinder r_top/r_bottom (nozzles), cone, wrap:"once" + u_offset (turns) for a decal round a tank.
+4. Transforms: scale, rotate:[x,y,z] (deg, X then Y then Z), turn, all about the part origin or pivot:[x,y,z] (hinges, wing roots), then at. Radial arrays: array:{count:6, rotate:[0,60,0], about:[0,0,0]} (engine rings, rotor blades). Canopies, visors, shields: glass:true or opacity:0..1 (glTF BLEND).
+5. Look and iterate: art_model ${J({ action: 'preview', name: 'scout' })}, update {set:{0:{d:72}}} / add / remove. Keep it light (< 1000 tris).
+6. Export: art_model ${J({ action: 'export', name: 'scout' })} -> exports/scout.glb (up:"z" for Z-up engines). Options and recipes: art_help {topic:"3d"}.`,
   },
   'ui-icons': {
     title: 'UI icons / item icons set',

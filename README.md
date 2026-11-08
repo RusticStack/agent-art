@@ -3,9 +3,10 @@
 **Pixel art for AI agents.** An MCP server with a live web UI that lets any agent (Claude, GPT, DeepSeek, local models) make real pixel art: sprites, characters, tilesets, seamless textures, icons, UI, isometric and HD-2D scenes, and animations. Every asset is built from tools the agent can reason about: shapes, form shading, Voronoi cells, outlines, lighting and rigs. It looks at its own work as an image, gets a critique, fixes what's wrong and exports PNGs, GIFs and spritesheets for any engine.
 
 - **Works with weak models too.** Tool descriptions are compact, and details load on demand through `art_help`. Images are sized to their token cost. Errors print the correct usage. Rig templates turn "draw a walking character" into "draw six parts, call one preset".
-- **The same asset in every view and frame.** Rigs draw each part once per view (side/front/back plus mirrored views) and generate frames by tweening poses, at any frame rate.
+- **The same asset in every view and frame.** Rigs draw each part once per view (side/front/back plus mirrored views) and generate frames by tweening poses, at any frame rate. `humanoid_hd` adds detailed 8-direction characters with per-view poses, two-bone IK, foot planting, follow-through and RotSprite sampling.
 - **Low-res to high-res.** 8×8 icons up to 2048² scenes. Shading and cells are geometry-based, so they scale. Scale2x/EPX upscaling and RotSprite rotation keep edges clean.
 - **You can watch and paint along.** The web UI updates live as the agent draws. Your edits go through the same API, so the agent sees them.
+- **3D and audio too.** `art_model` turns pixel textures into low-poly `.glb` map kits, props, ships and vehicles. `art_audio` makes SFX (including firearms and sci-fi), music and mixes, and reports what they sound like.
 - **Zero dependencies.** Plain Node.js 20+, no native modules.
 
 > Example: [Sanctum Burn](https://sanctum-burn.vercel.app), a co-op 2.5D survivor game. All of its art was made by an agent with Agent Art.
@@ -37,7 +38,7 @@ From a source checkout: `npm start` (UI), `npm test`. The included `.mcp.json` r
 ### Characters, views and animations: `art_rig`
 
 ```jsonc
-// 1. start from a template (humanoid | blob | flyer): only a starting point
+// 1. start from a template (humanoid | humanoid_hd | blob | flyer): only a starting point
 { "action": "create", "name": "knight", "frame": [32, 32], "template": "humanoid",
   "parts": { "head": { "w": 14, "h": 11 }, "cape": { "w": 8, "h": 12, "pivot": [4, 0], "parent": "body", "at": [-2, -6], "z": -4 } } }
 // 2. draw each part in the cells the reply lists (one row per view) on canvas "knight_parts"
@@ -52,9 +53,15 @@ Templates set up parts, joints, views, poses and presets: humanoid has idle, bli
 For detailed sprites in the style of late-90s pre-rendered games or *Replaced* (64x96 up to 160x240 frames, rich shading, 12-24 frame cycles), `template: "humanoid_hd"` gives 21 parts: `pelvis` (root), `torso`, `chest`, `neck`, `head`, `upper_arm`/`forearm`/`hand` and `thigh`/`shin`/`foot` on both sides, plus optional `weapon` (child of `hand_f`), `gear_back`, `gear_hip` and `cape` slots. Limbs are parent chains, so elbows and knees bend. It draws five views (`side`, `front_side`, `front`, `back_side`, `back`) and mirrors three more, for 8 directions. Presets: idle (12 frames), walk (16), run (12), crouch_walk (16), aim (1), shoot (6), reload (24), hurt (8), death (20), throw (12) and blink.
 
 ```jsonc
-{ "action": "create", "name": "soldier", "frame": [128, 192], "template": "humanoid_hd" }
+// the template already gives the cape and gear_hip secondary motion; this loosens the cape
+{ "action": "create", "name": "soldier", "frame": [128, 192], "template": "humanoid_hd",
+  "secondary": { "cape": { "stiffness": 0.15, "damping": 0.2, "gravity": 0.5 } } }
 // draw the cells, then one canvas per preset and view (frame strips are at most 8192 px tall)
 { "action": "animate", "name": "soldier", "preset": "reload", "view": "front_side", "canvas": "soldier_reload_front_side" }
+// a custom cycle from the template's poses, with planted feet and cape follow-through
+{ "action": "animate", "name": "soldier", "animation": "patrol", "view": "front_side", "frames": 16, "fps": 12,
+  "keys": [{ "pose": "walk_contact" }, { "pose": "walk_pass" }, { "pose": "walk_contact", "mirror_pairs": true }, { "pose": "walk_pass", "mirror_pairs": true }],
+  "plant": true, "secondary": true, "canvas": "soldier_patrol_front_side" }
 // a pose with a view-specific override and two-bone IK (hand on the weapon's foregrip)
 { "action": "pose", "name": "soldier", "pose": "brace", "parts": { "chest": { "rot": -4 } },
   "views": { "front": { "head": { "rot": 0 } } },
@@ -62,13 +69,14 @@ For detailed sprites in the style of late-90s pre-rendered games or *Replaced* (
 ```
 
 - **Per-view poses:** `views: {front: {part: {...}}}` is merged over the base pose in that view; mirror views use their source view, and tweening blends the overrides. The template's poses come with front, back and 3/4 overrides already, so forward swings foreshorten (thigh and shin `sy` with `scale_children`) instead of splaying sideways.
-- **Two-bone IK:** `ik: {end: {target: [x, y] | {part, at: [dx, dy]}, bend: 1 | -1, rot?}}` in a pose or key rotates the end's parent and grandparent so the end pivot reaches the target. It is solved per frame after FK, in each view. `rot` sets the end part's world rotation afterwards, for example to keep a gun level.
-- **Foot planting:** `animate {plant: true}` (alias `ik_feet`) keeps stance feet on the ground through every contact frame with leg IK. A standing foot stays put and a walking stance foot moves at constant speed.
+- **Two-bone IK:** `ik: {end: {target: [x, y] | {part, at: [dx, dy]}, bend: 1 | -1, rot?, weight?}}` in a pose or key rotates the end's parent and grandparent so the end pivot reaches the target. It is solved per frame after FK, in each view. `rot` sets the end part's world rotation afterwards, for example to keep a gun level. Targets tween between keys, and a key without the entry fades back to FK.
+- **Foot planting:** `animate {plant: true}` (alias `ik_feet`) keeps stance feet on the ground through every contact frame with leg IK. A standing foot stays put and a walking stance foot moves at constant speed. `plant: ["foot_f"]` picks the feet; rig `feet` sets the default.
 - **Secondary motion:** rig `secondary: {cape: {stiffness, damping, gravity?}}` plus `animate {secondary: true}` adds lag and follow-through to capes, straps and pouches. Loops are simulated until they repeat, so they stay seamless.
+- **`scale_children`:** a part's `sx`/`sy` also moves its children's joints (foreshortening, breathing); humanoid_hd has it on.
 - **Rotation sampling:** rig `sampling: "rotsprite"` (the humanoid_hd default) supersamples the Scale2x image, keeps only the part's own colours and cleans up holes and stray pixels, so thin limbs keep their thickness from frame to frame. `"smooth"` does the same on the 1x cell, and `"nearest8"` is the old behaviour, still the default for existing rigs.
 - `art_animation export {format: "spritesheet", json: false}` skips the sidecar JSON.
 
-See [docs/rig-hd-guide.md](docs/rig-hd-guide.md) for a step-by-step guide.
+See [docs/rig-hd-guide.md](docs/rig-hd-guide.md) for a step-by-step guide. Skill: `rig-hd`.
 
 ### 3D environments and props (HD-2D): `art_model`
 
@@ -97,13 +105,13 @@ Turn pixel art into low-poly game assets in the HD-2D style (pixel textures on l
 - **Preview:** `art_model preview` renders a contact sheet with a software rasterizer. It includes the 38° game camera plus front, side, top and iso views.
 - **Export:** NEAREST samplers, REPEAT wrap, embedded PNGs, alpha MASK (cutoff 0.5) only when a triangle actually samples a transparent texel (unused tileset slots no longer force it), and emissive/normal textures. The file is Y-up with 32 px = 1 unit (`scale`). For a Z-up engine set `object.rotation.x = Math.PI / 2` or export with `up:"z"`. Options: one baked mesh, `instances:true` (shared meshes and nodes), or `atlas:true`.
 
-`art_help {topic:"3d"}` has every option plus recipes for a gothic arch kit, a gargoyle relief, chains, lathed candles, CTM marble floors, wall trims, moss and a spaceship. Skill: `3d-kit`.
+`art_help {topic:"3d"}` has every option plus recipes for a gothic arch kit, a gargoyle relief, chains, lathed candles, CTM marble floors, wall trims, moss and a spaceship. Skills: `3d-kit`, `ship-model`.
 
 #### Ships and vehicles
 
 ```jsonc
-{ "action": "create", "name": "scout", "origin": "bottom", "parts": [
-  { "type": "loft", "points": [[-12,0],[12,0],[10,10],[-10,10]], "d": 64, "scale_end": [0.3,0.4], "texture": "hull" },
+{ "action": "create", "name": "scout", "origin": "bottom", "preview": true, "parts": [
+  { "type": "loft", "points": [[-12,0],[12,0],[10,10],[-10,10]], "d": 64, "scale_end": [0.3,0.4], "color": "#8a94a6" },
   { "type": "wedge", "w": 40, "h": 3, "d": 24, "top_w": 8, "shift": [16,0], "at": [14,2,0], "mirror": "x" },
   { "type": "cone", "r": 3, "h": 8, "rotate": [90,0,0], "at": [0,5,32] },
   { "type": "cylinder", "r_bottom": 5, "r_top": 4, "h": 10, "rotate": [-90,0,0], "at": [10,5,-32], "mirror": "x" },
@@ -232,7 +240,8 @@ Agents cannot hear, so `art_audio` turns audio into things they can read: an ana
 
 - **SFX:** 58 seeded recipes (gore, combat, holy, UI, monsters, sfxr classics, plus FPS/sci-fi below) with `vars` (pitch, length, intensity, variation, wet, target) and `variants` for batches; or sfxr params, or your own layers. Normalised to the peak `target` (default -1 dBFS), head silence trimmed.
 - **FPS and sci-fi SFX:** firearms (`gunshot_rifle`, `_pistol`, `_marksman`, `_shotgun`, `_smg`, `_lmg`, `_suppressed`) layer crack, body, thump, sub, mechanics and an environment tail (`vars.environment: "outdoor"|"indoor"|"canyon"`). Weapon handling: `mag_out`, `mag_in`, `bolt_rack`, `dry_fire`, `shotgun_pump`, `casing_drop`. Sci-fi: `laser_bolt`, `plasma_shot`, `shield_hit`, `glitch_tear`, `teleport_swell`, `servo`, `drone_rotor` (loop), `hologram_ui`, `alarm_klaxon` (loop), `radio_squelch_on`/`_off`, `bullet_whiz`, `ricochet`, and `footstep` (`vars.surface: metal|dirt|concrete|snow|grate`).
-- **SFX options:** `fx:[{type:"dc"|"eq"|"comp"|...}]`, `reverb:{preset, wet}`, `target` and `loop:true` (a seamless crossfaded loop with loop points on export) work on recipes and custom layers alike. `info` on a recipe asset shows the resolved layers to copy and edit; `delete` takes wildcards.
+- **SFX options:** `fx:[{type:"dc"|"eq"|"comp"|...}]`, `reverb:{preset, wet}`, `target` and `loop:true` (a seamless crossfaded loop with loop points on export) work on recipes and custom layers alike. Two extra layer kinds: `glide` (a tone or noise band along a frequency path, with AM, vibrato and a swell) and `glitch` (stutter, bitcrush shards, dropouts). `info` on a recipe asset shows the resolved layers to copy and edit; `delete` takes wildcards and `names:[...]`.
+- **Song updates:** re-sending a saved song with only `tracks` or only `sections` merges them in (`null` removes one).
 - **Music:** a compact text notation (`tempo`, `key e phrygian`, `track gtr metal_guitar gain=-3 hp=80`, `section verse 8`, `gtr: E5' E5' _ F5!`), generators (`@doom_riff`, `@organ_progression`, `@blast_beat`, `@dread_ambient`), instrument presets as JSON patches (pipe organ with wind and chiff, formant choir, modal bells, Karplus-Strong guitars double-tracked through amp and cab, bowed strings, metal and industrial kits), humanised timing, round robin, sends, buses, automation, sidechain, a cathedral reverb, and a mastering chain to a LUFS target with a true-peak ceiling. Loops wrap their reverb tail so the seam is clean.
 - **Song text + JSON:** send `text` together with JSON `tracks`, `buses` or `master`; the JSON deep-merges over the parsed text, so notes stay in the text and mix tweaks go in JSON.
 - **Analysis:** kick and snare detection is gated (a low-band transient with a sharp, noisy attack near the loudest hits), so choirs, wind, organ, drones and sub bass do not read as double-kick or backbeat. Distortion is measured from harmonic and intermodulation structure on loud, pitched frames, not spectral flatness, so reverb tails and drum kits do not count. The reverb RT60 comes from free decays and has a `reverb_confidence`. `loop_seam` is only reported for a real discontinuity; a level change at the seam is `loop_level_change`. One-shots get `sweep_octaves`, which tells a laser or power-up glide from an impact.
@@ -244,18 +253,22 @@ art_audio { action:"song", name:"crypt", text:"<notation>", intent:"gothic cathe
 art_audio { action:"analyze", name:"crypt" }        // image + listener report
 art_audio { action:"export", name:"gib_*", format:"ogg" }
 art_audio { action:"sfx", recipe:"gunshot_marksman", variants:4, vars:{ environment:"canyon" } }
+art_audio { action:"sfx", name:"rifle_in", recipe:"gunshot_rifle", vars:{ environment:"indoor", intensity:0.8 }, reverb:{ preset:"room", wet:0.2 } }
 art_audio { action:"sfx", name:"hum", recipe:"drone_rotor", loop:true }
+art_audio { action:"sfx", name:"zap", layers:[{ kind:"glide", pts:[[0,2400],[0.25,300]], dur:0.3 }, { kind:"glitch", at:0.05, dur:0.2, gain:-9 }], fx:["dc", { comp:{ ratio:4 } }], target:-3 }
 ```
 
 `art_help {topic:"music"}` has the full worked "gothic cathedral doom" track; topics `audio`, `mixing` and `perception` cover the rest.
 
 ### Canvas op options worth knowing
 
+Behaviour changes in 0.5: `crop` on a frame strip takes frame coordinates, `adjust {alpha}` is a delta (use `set_alpha` for an absolute value), and `glow` selects by HSV value (`select:"luma"` is the old behaviour).
+
 - `art_canvas crop` keeps every frame, animation and tag of a frame strip, with the rect given in frame coordinates. `rotate {angle, expand:true}` grows the canvas so rotated content is not cut off.
 - `outline` is safe to re-run: it skips pixels next to existing outline-coloured pixels (`skip_existing`).
 - `clear` with no region clears the whole layer. `stamp_visible {keep_visible:true}` keeps the source layers. `ellipse {thickness}` draws a ring. `text {font:"5x7"|"7x9"}` gives larger fonts.
 - `noise` takes a `"keep"` colour and only erases under a mask with `erase:true`. `adjust {alpha:-0.3}` is a change in opacity (`set_alpha` sets it directly). `mask:"!#hex"` means everything but that colour. `glow {select:"value"}` lets saturated neon bloom. `gradient {dither:false}` turns dithering off.
-- `art_draw {commands_file}` runs a JSON batch from a file. `art_critique {tileable:true}` reports `seams:{ok, worst}`. Spritesheet export takes `json:false`.
+- `art_draw {commands_file}` runs a JSON batch from a file. `art_critique {tileable:true}` reports `seams:{ok, edge, interior, worst}`. Spritesheet export takes `json:false`. `art_view {tile:3, max_size:300}` zooms the tiled preview to fill `max_size`.
 
 ## Tools
 
@@ -265,9 +278,9 @@ art_audio { action:"sfx", name:"hum", recipe:"drone_rotor", loop:true }
 | `art_draw` | Batch of drawing commands as one undo step. `preview` returns the image, `critique` the score |
 | `art_view` | The canvas as an image: zoom/region, pixel grid, `tile` seam check, `onion`, guides (`grid:16`, `iso:32`), tint preview. Large canvases get a token-cheap overview |
 | `art_critique` | Heuristic quality report and score for a frame, an animation or every frame |
-| `art_help` | Usage and examples for any command (`{op}`), guides (`{topic}`: workflow, textures, characters, animation, rig, scenes, hires, minecraft, 3d), and step-by-step recipes (`{skill}`) |
-| `art_rig` | Multi-view, multi-animation characters from parts and poses (templates, presets, tweening) |
-| `art_model` | 3D: modular HD-2D kit pieces, ruins, extruded/lathed props and dioramas, previewed from the game camera, exported to `.glb` |
+| `art_help` | Usage and examples for any command (`{op}`), guides (`{topic}`: workflow, textures, characters, animation, rig, scenes, hires, minecraft, 3d, audio, music, mixing, perception), and step-by-step recipes (`{skill}`) |
+| `art_rig` | Multi-view, multi-animation characters from parts and poses (templates incl. `humanoid_hd`, presets, tweening, IK, foot planting, secondary motion) |
+| `art_model` | 3D: modular HD-2D kit pieces, ruins, extruded/lathed props, ships and vehicles, and dioramas, previewed from the game camera, exported to `.glb` |
 | `art_audio` | Sound effects, music, mixing and mastering; analysis images, listener reports and critiques; WAV/mp3/ogg/opus export |
 | `art_read` | Exact pixels as text rows plus a legend, in the format `grid` accepts |
 | `art_palette` | Named colors per canvas or project. `ramp` builds shading ramps |
@@ -287,7 +300,7 @@ Every command takes `layer`, `frame`, `mask` (opaque / transparent / a colour / 
 The recipes behind `art_help {skill}` are also served as MCP prompts and can be installed as agent skills:
 
 ```sh
-npx @rusticstack/agent-art skills --out ~/.claude/skills   # tileable-texture, sprite, rig, walk-cycle, iso-scene, hd2d-scene, 3d-kit, ui-icons, minecraft-pack, sfx-pack, music-track
+npx @rusticstack/agent-art skills --out ~/.claude/skills   # tileable-texture, sprite, rig, rig-hd, walk-cycle, iso-scene, hd2d-scene, 3d-kit, ship-model, ui-icons, minecraft-pack, sfx-pack, music-track
 ```
 
 ## CLI (no MCP needed)

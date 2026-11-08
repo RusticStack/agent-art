@@ -135,8 +135,8 @@ Iterate until critique has no intent_gap/genre_gap and the report describes what
 
 export const AUDIO_SKILLS = {
   'sfx-pack': {
-    title: 'Sound-effect pack with variants (gore, combat, holy, UI, monsters)',
-    when: 'Game SFX: hits, gore, weapons, explosions, bells, UI clicks, level-up, roars; N variants each.',
+    title: 'Sound-effect pack with variants (gore, combat, holy, UI, monsters, FPS firearms, sci-fi)',
+    when: 'Game SFX: hits, gore, weapons, gunshots, reloads, lasers, explosions, bells, UI clicks, level-up, roars, footsteps; N variants each.',
     body: `1. One call per sound, 3 variants each (different seeds = different takes):
    art_audio ${J({ action: 'sfx', recipe: 'gib_burst', seed: 1, variants: 3 })}
    Other recipes: ${Object.values(RECIPE_GROUPS).flat().slice(0, 30).join(' ')}.
@@ -144,7 +144,9 @@ export const AUDIO_SKILLS = {
 3. LOOK at each: art_audio ${J({ action: 'analyze', name: 'gib_burst_1' })} (spectrogram: gore = broadband burst + low thump + wet squelch band 300-1500 Hz; UI = short, mid/high only).
 4. art_audio ${J({ action: 'critique', name: 'gib_burst_1' })} -> fix head_silence / too_long / sub_heavy / harsh with vars or fx, re-run step 1 with the same seed.
 5. Custom layered sound: ${J({ action: 'sfx', name: 'censer_hit', layers: [{ kind: 'recipe', recipe: 'censer_whoosh' }, { kind: 'recipe', recipe: 'hit_heavy', at: 0.45 }, { kind: 'note', instrument: 'church_bells', note: 'e4', at: 0.45, gain: -12 }], reverb: { preset: 'hall', wet: 0.15 } })}
-6. Batch export: art_audio ${J({ action: 'export', name: 'gib_burst_*', format: 'ogg', path: 'sfx/gore/' })} (also wav 16/24-bit; JSON sidecars hold seed+recipe).`,
+6. FPS / sci-fi: art_audio ${J({ action: 'sfx', recipe: 'gunshot_rifle', variants: 4, vars: { environment: 'indoor', intensity: 0.8 } })} (gunshot_pistol|marksman|shotgun|smg|lmg|suppressed; environment outdoor|indoor|canyon). Handling: mag_out mag_in bolt_rack dry_fire shotgun_pump casing_drop; footstep vars.surface metal|dirt|concrete|snow|grate. Sci-fi: laser_bolt plasma_shot shield_hit glitch_tear teleport_swell servo hologram_ui radio_squelch_on/_off bullet_whiz ricochet; loops: ${J({ action: 'sfx', name: 'hum', recipe: 'drone_rotor', loop: true })} (also alarm_klaxon).
+   Own sci-fi layers: ${J({ action: 'sfx', name: 'zap', layers: [{ kind: 'glide', pts: [[0, 2400], [0.25, 300]], dur: 0.3 }, { kind: 'glitch', at: 0.05, dur: 0.2, gain: -9 }], fx: ['dc', { comp: { ratio: 4 } }], target: -3 })}. fx, reverb {preset, wet}, target, loop and tail work on recipes and layers alike; info {name} on a recipe asset shows resolved layers to edit.
+7. Batch export: art_audio ${J({ action: 'export', name: 'gib_burst_*', format: 'ogg', path: 'sfx/gore/' })} (also wav 16/24-bit; JSON sidecars hold seed+recipe).`,
   },
   'music-track': {
     title: 'Loopable game music track (any genre), checked with the listener report',
