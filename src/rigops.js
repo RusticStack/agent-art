@@ -390,9 +390,9 @@ export const RIG_OPS = {
   rig_check(a) {
     const { d, rig, def } = getRig(this, a.name);
     if (!rig.weapon) throw new Error(`rig "${a.name}" has no weapon: art_rig update {name:"${a.name}", weapon:{class:"rifle"}} (or create with weapon:{...}) first`);
-    const presets = a.clips || (a.preset ? [a.preset] : Object.keys(def.presets || {}));
+    const presets = a.clips ? [].concat(a.clips) : a.preset ? [a.preset] : Object.keys(def.presets || {});
     for (const p of presets) if (!(def.presets || {})[p]) throw new Error(`check: no preset "${p}" (presets: ${Object.keys(def.presets || {}).join(', ')})`);
-    const views = a.views || (a.view ? [a.view] : [...rig.views, ...Object.keys(rig.mirror)]);
+    const views = a.views ? [].concat(a.views) : a.view ? [a.view] : [...rig.views, ...Object.keys(rig.mirror)];
     const ropts = a.variant ? { variant: a.variant } : {};
     const cache = new Map();
     const clips = {};
@@ -617,7 +617,7 @@ function oneFrame(engine, rig, def, a) {
   const view = a.view || rig.views[0];
   if (a.preset) {
     const fp = framePoses(engine, rig, def, { ...a, view, animation: undefined });
-    const frame = Math.max(0, Math.min(fp.poses.length - 1, Number(a.frame ?? 0)));
+    const frame = Math.max(0, Math.min(fp.poses.length - 1, Number(a.frame ?? 0) || 0));
     return { pose: fp.poses[frame], view, frame, label: `${a.preset}[${frame}]` };
   }
   const pose = a.pose !== undefined ? resolvePose(rig, { pose: a.pose, ...(a.carry !== undefined ? { carry: a.carry } : {}) }) : { ...(a.parts || {}), ...(a.carry !== undefined ? { carry: a.carry } : {}) };
