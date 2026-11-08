@@ -121,7 +121,7 @@ ${QUADTREE_SNIPPET}
 ${IMPOSTOR_SNIPPET}
 6. Landing zone: art_planet ${J({ action: 'terrain', planet: 'kethra', lat: 12, lon: 30, size: 512 })}. The patch base elevation and colours come from the same planet field (orbit and ground match). Use anchors (landing_pad, mesa_top, arch) to place colony modules.
 ${TERRAIN_SNIPPET}
-7. Space: skybox (scene.background = new THREE.CubeTextureLoader().load([px, nx, py, ny, pz, nz]) with NearestFilter, or the equirect with EquirectangularReflectionMapping), asteroids (field glb is GPU-instanced per variant; LOD1+ nodes hidden), fx sprites (additive planes).
+7. Space: skybox (scene.background = new THREE.CubeTextureLoader().load([px, nx, py, ny, pz, nz]) with NearestFilter, or the equirect with EquirectangularReflectionMapping), asteroids (field glb is GPU-instanced per variant and LOD; the LOD1+ nodes (userData.lod > 0) are in the file too, so set them visible = false on load or show one level by camera distance), fx sprites (additive planes).
 8. Roblox later: every texture is <= 1024 px; meshes per chunk / tile stay well under 20k triangles; Sky faces map px->Rt, nx->Lf, py->Up, ny->Dn, pz->Ft, nz->Bk; heightfield.json can drive Terrain:WriteVoxels or a MeshPart grid; instanced props become cloned MeshParts from scatter.json.`,
   },
 };
