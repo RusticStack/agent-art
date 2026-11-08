@@ -1,0 +1,190 @@
+{
+  "boolean_union": {
+    "input": {
+      "triangles": 5568,
+      "closed": true,
+      "open_edges": 0,
+      "non_manifold_edges": 0,
+      "non_manifold_vertices": 0,
+      "shells": 33
+    },
+    "output": {
+      "triangles": 6884,
+      "closed": true,
+      "open_edges": 0,
+      "non_manifold_edges": 0,
+      "non_manifold_vertices": 0,
+      "shells": 5
+    },
+    "discarded": {
+      "triangles": 664,
+      "pieces": 1704,
+      "area_ratio": 0.3749
+    },
+    "ms": 156
+  },
+  "boolean_union_large": {
+    "input_triangles": 138720,
+    "output": {
+      "triangles": 123154,
+      "closed": true,
+      "open_edges": 0,
+      "non_manifold_edges": 0,
+      "non_manifold_vertices": 0,
+      "shells": 3
+    },
+    "ms": 2528
+  },
+  "voxel_remesh": {
+    "input": {
+      "triangles": 2340,
+      "closed": true,
+      "open_edges": 0,
+      "non_manifold_edges": 0,
+      "non_manifold_vertices": 0,
+      "shells": 60
+    },
+    "runs": [
+      {
+        "resolution": 32,
+        "voxel_px": 3.7783,
+        "output": {
+          "triangles": 1990,
+          "closed": true,
+          "open_edges": 0,
+          "non_manifold_edges": 0,
+          "non_manifold_vertices": 0,
+          "shells": 3
+        },
+        "remesh_to_source_px": 3.703,
+        "ms": 342
+      },
+      {
+        "resolution": 64,
+        "voxel_px": 1.8891,
+        "output": {
+          "triangles": 2672,
+          "closed": true,
+          "open_edges": 0,
+          "non_manifold_edges": 0,
+          "non_manifold_vertices": 0,
+          "shells": 4
+        },
+        "remesh_to_source_px": 1.706,
+        "ms": 1539
+      }
+    ]
+  },
+  "quad_remesh": {
+    "sphere": {
+      "input": 2208,
+      "quads": 527,
+      "triangles_left": 146,
+      "quad_ratio": 0.783,
+      "hausdorff_px": 1.975,
+      "closed": true,
+      "ms": 53
+    },
+    "hull_symmetric": {
+      "input": 5280,
+      "quads": 1064,
+      "quad_ratio": 0.796,
+      "feature_edges": 312,
+      "closed": true,
+      "ms": 82
+    }
+  },
+  "cluster_lod": {
+    "source_triangles": 22594,
+    "triangles": 22594,
+    "clusters": 998,
+    "leaf_clusters": 241,
+    "roots": 98,
+    "groups": 236,
+    "levels": 14,
+    "root_triangles": 688,
+    "max_cluster_triangles": 128,
+    "root_error_px": 217.86269348799868,
+    "cluster_size": 128,
+    "group_size": 4,
+    "seam_free_groups": 65,
+    "ms": 1027,
+    "clod_bytes": 2681204,
+    "cuts": [
+      {
+        "distance_units": 17.04,
+        "cut_triangles": 7728,
+        "cut_clusters": 209,
+        "drawn_triangles": 6689,
+        "clusters": 998,
+        "selected": 148,
+        "lod_rejected": 789,
+        "frustum_culled": 0,
+        "cone_culled": 61,
+        "triangles": 6689
+      },
+      {
+        "distance_units": 85.18,
+        "cut_triangles": 5434,
+        "cut_clusters": 204,
+        "drawn_triangles": 5102,
+        "clusters": 998,
+        "selected": 151,
+        "lod_rejected": 794,
+        "frustum_culled": 0,
+        "cone_culled": 53,
+        "triangles": 5102
+      },
+      {
+        "distance_units": 425.91,
+        "cut_triangles": 3766,
+        "cut_clusters": 182,
+        "drawn_triangles": 3628,
+        "clusters": 998,
+        "selected": 135,
+        "lod_rejected": 816,
+        "frustum_culled": 0,
+        "cone_culled": 47,
+        "triangles": 3628
+      }
+    ]
+  },
+  "culling": {
+    "camera_units": [
+      -2.13,
+      6.57,
+      7.81
+    ],
+    "clusters": 998,
+    "selected": 80,
+    "lod_rejected": 789,
+    "frustum_culled": 98,
+    "cone_culled": 31,
+    "triangles": 4775,
+    "lod_cut_triangles": 8800,
+    "drawn_triangles": 4775
+  },
+  "decimate": [
+    {
+      "bound_px": 0.5,
+      "input": 16128,
+      "output": 6734,
+      "hausdorff_px": 0.4541,
+      "ms": 327
+    },
+    {
+      "bound_px": 1,
+      "input": 16128,
+      "output": 3320,
+      "hausdorff_px": 0.948,
+      "ms": 298
+    },
+    {
+      "bound_px": 4,
+      "input": 16128,
+      "output": 1282,
+      "hausdorff_px": 3.6052,
+      "ms": 366
+    }
+  ]
+}

@@ -16,6 +16,7 @@ import { rigInfo, rigSummary, rigScene, rigMeta, resolveOffsets, clipKeys, sampl
 import { MODEL_TEMPLATES } from './modeltemplates.js';
 import { normPBR, normBump, bumpNormal, mrTexture, heightFromData } from './surface.js';
 import { exportExtras, previewExtras, wantsExtras, MODEL_EXTRA_OPS } from './modelexport.js';
+import { meshOpsFor, loadBaked } from './meshops.js';
 
 const NAME_RE = /^[A-Za-z0-9_\-.]{1,64}$/;
 
@@ -170,7 +171,7 @@ export function texResolver(engine, { normal = false, bump = null } = {}) {
 const greebleKinds = (engine) => Object.fromEntries([...models(engine).values()].filter((m) => typeof m.greeble_kind === 'string').map((m) => [m.greeble_kind, m.name]));
 function build(engine, def, opts = {}) {
   const tex = opts.tex || texResolver(engine, opts);
-  const r = buildModel(def, { tex, getModel: (n) => getModel(engine, n), instances: opts.instances, greebleKinds: () => greebleKinds(engine) });
+  const r = buildModel(def, { tex, getModel: (n) => getModel(engine, n), instances: opts.instances, greebleKinds: () => greebleKinds(engine), baked: (n) => loadBaked(modelDir(engine), n) });
   // GPU-instanced greebles stay separate only for export (EXT_mesh_gpu_instancing); previews,
   // renders and summaries see them merged
   if (r.gpu && !opts.keepGpu) { for (const it of r.gpu) for (const M of it.mats) r.mesh.add(it.mesh.clone().transform(M)); delete r.gpu; }
@@ -699,6 +700,7 @@ export const MODEL_OPS = {
     getModel(this, a.name);
     models(this).delete(a.name);
     fs.rmSync(path.join(modelDir(this), `${a.name}.json`), { force: true });
+    fs.rmSync(path.join(modelDir(this), `${a.name}.mesh.bin`), { force: true });
     this.emit('event', { type: 'model', model: a.name, deleted: true, source, ts: Date.now() });
     return { deleted: a.name };
   },
@@ -744,6 +746,7 @@ export const MODEL_OPS = {
     return { file, meta: metaFile, ...(ctmFile ? { ctm: ctmFile } : {}), bytes: glb.length, triangles: stats.triangles, vertices: stats.vertices, materials: stats.materials, nodes: stats.nodes, bounds_units: stats.bounds, atlased: stats.atlased, ...(info ? { animations: Object.keys(rigClips), sockets: info.sockets.map((s) => s.name) } : {}), ...(ext ? ext.result : {}) };
   },
   ...MODEL_EXTRA_OPS,
+  ...meshOpsFor({ getModel, build, saveModel, modelDir }),
 };
 
 // ---------- weapon handling (first-person): arms holding a gun model ----------

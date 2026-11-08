@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Mesh processing and cluster LOD (`art_model` boolean / remesh / decimate / cluster_lod / visibility)
+
+- `boolean`: exact-predicate booleans built on a symbolic intersection graph. Union, subtract and intersect with another model; with no `with`, it unions every shell of a model into one closed hull and drops hidden interior faces. Output is watertight, manifold and deterministic. Part booleans switch to this path above 4000 triangles; set `boolean_method: auto | robust | bsp` to choose.
+- `remesh`:
+  - `method: "voxel"`: winding-number signed occupancy that copes with self-intersecting or non-manifold input, then dual contouring with sharp features. UVs, materials and colours are transferred by closest point.
+  - `method: "quad"`: quad-dominant retopology with a face target, feature lines and an optional symmetry axis.
+  - `method: "cleanup"`: weld, remove degenerates, fix winding, fill small holes.
+- `decimate`: error-bounded mode in metres, with the measured Hausdorff error reported. Keeps UV seams, materials, normals, vertex colours and skin weights, and protects feature and silhouette edges.
+- `cluster_lod`: Nanite-style DAG of 128-triangle clusters, each with a bounds sphere and normal cone. Groups are simplified with locked borders, and error is monotonic up the DAG.
+  - Writes a `.clod` sidecar; the format is documented in `docs/meshproc/README.md`.
+  - Writes a glb with discrete LODs, split into parts of at most 20k triangles for Roblox.
+  - Includes a pure-JS runtime selector, `src/clodselect.js`.
+- `visibility`: cells, portals found through openings, PVS and conservative occluder boxes, written to `.vis.json`. `cluster_lod {visibility: true}` also puts them in the `.clod`.
+- New part type `baked`: holds the stored result of a mesh operation.
+- Model viewer: a "Clusters" colour toggle next to Wireframe.
+
 ### Animation library (`art_anim`) and 2D rotated-sprite tooling
 
 - New tool `art_anim`:

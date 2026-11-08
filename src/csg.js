@@ -5,6 +5,7 @@
 // the vertices lying on it, so the result is edge-manifold (closed solids stay watertight).
 // Also: merge (weld near vertices + drop internal coincident faces) and an edge-manifold check.
 import { Mesh } from './model3d.js';
+import { robustBoolean } from './meshbool.js';
 
 const EPS = 1e-4;
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -216,13 +217,21 @@ function components(polys) {
 }
 const overlaps = (a, b) => [0, 1, 2].every((k) => a.min[k] <= b.max[k] + EPS && b.min[k] <= a.max[k] + EPS);
 
+/** Above this many input triangles (A + B) booleans use the robust BVH / arrangement path (meshbool.js). */
+export const ROBUST_THRESHOLD = 4000;
+const baseTris = (m) => { let n = 0; for (const g of m.groups.values()) if (!g.overlay) n += g.idx.length / 3; return n; };
+
 /**
- * Boolean of two placed meshes: op subtract (a - b) | union | intersect -> new Mesh. Works per
- * closed piece: pieces of A whose box misses B pass through untouched (subtract / union) or drop
- * (intersect), so greebles and trims away from a cut keep their exact triangles.
+ * Boolean of two placed meshes: op subtract (a - b) | union | intersect -> new Mesh. opts.method:
+ * "auto" (default: BSP below ROBUST_THRESHOLD input triangles, robust above), "bsp", "robust".
+ * BSP works per closed piece: pieces of A whose box misses B pass through untouched (subtract /
+ * union) or drop (intersect), so greebles and trims away from a cut keep their exact triangles.
  */
-export function booleanMesh(op, A, B) {
+export function booleanMesh(op, A, B, opts = {}) {
   if (!['subtract', 'union', 'intersect'].includes(op)) throw new Error(`boolean must be "subtract", "union" or "intersect" (got ${JSON.stringify(op)})`);
+  const method = opts.method ?? 'auto';
+  if (!['auto', 'bsp', 'robust'].includes(method)) throw new Error(`boolean method must be "auto", "bsp" or "robust" (got ${JSON.stringify(method)})`);
+  if (method === 'robust' || (method === 'auto' && baseTris(A) + baseTris(B) > (opts.threshold ?? ROBUST_THRESHOLD))) return robustBoolean(op, A, B, opts).mesh;
   const ca = components(toPolys(A)), pb = toPolys(B);
   const bb = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
   for (const p of pb) for (const v of p.verts) for (let k = 0; k < 3; k++) { bb.min[k] = Math.min(bb.min[k], v.p[k]); bb.max[k] = Math.max(bb.max[k], v.p[k]); }
