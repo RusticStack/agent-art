@@ -4,6 +4,8 @@
 import { packImages } from './sheet.js';
 import { cross, dot, norm } from './model3d.js';
 
+const sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+
 export const VIEWS = {
   front: { yaw: 0, pitch: 0 }, back: { yaw: 180, pitch: 0 }, side: { yaw: 90, pitch: 0 }, right: { yaw: 90, pitch: 0 }, left: { yaw: -90, pitch: 0 },
   top: { yaw: 0, pitch: 90 }, iso: { yaw: 45, pitch: 30 }, game: { yaw: 0, pitch: 38, perspective: true, fov: 30 },
@@ -37,23 +39,28 @@ function project(groups, v, center, radius) {
     }
     return { X, Y, Z, W };
   });
-  return { out, box: [minX, maxX, minY, maxY] };
+  return { out, box: [minX, maxX, minY, maxY], view: zc };
 }
 
-function raster(groups, proj, k, cx, cy, S) {
+function raster(groups, proj, k, cx, cy, S, view) {
   const screen = proj.map(({ X, Y, Z, W }) => {
     const n = X.length, sx = new Float32Array(n), sy = new Float32Array(n);
     for (let i = 0; i < n; i++) { sx[i] = S / 2 + (X[i] - cx) * k; sy[i] = S / 2 - (Y[i] - cy) * k; }
     return { sx, sy, Z, W };
   });
-  return rasterCore(groups, screen, S, S);
+  return rasterCore(groups, screen, S, S, view ? { view } : {});
 }
 
 /**
  * Rasterize projected groups into a W x H RGBA image. screen[gi] = {sx, sy (screen px), Z (bigger
  * = closer), W (perspective 1/depth or 1), clip? (1 = vertex behind the near plane: its triangles
  * are skipped)}. opts: bg (RGB, default the preview grey; null = transparent), light (unit vector
- * toward the light), ambient (0..1), color ([r,g,b] 0..1 light tint).
+ * toward the light), ambient (0..1), color ([r,g,b] 0..1 light tint), view (unit vector toward the
+ * camera, for specular), aux ({normal, depth: RGBA buffers, zmin, zmax} filled per opaque pixel:
+ * impostor bakes).
+ * Surface shading (only for groups whose texture has PBR factors / maps, a normal map, or baked
+ * AO): per-pixel normal-mapped Lambert + Blinn-Phong specular from roughness, metals tint their
+ * highlight and darken their diffuse, AO multiplies.
  */
 export function rasterCore(groups, screen, IW, IH, opts = {}) {
   const bg = opts.bg === undefined ? BG : opts.bg;
@@ -70,6 +77,12 @@ export function rasterCore(groups, screen, IW, IH, opts = {}) {
     const mat = g.tex.material, blend = !!mat?.blend, twoSided = !!mat?.double_sided, opacity = blend ? mat.opacity : 1;
     const t = g.tex, tw = t.width, th = t.height, td = t.data, te = t.emissive;
     const { idx, uv, nrm } = g, al = g.alpha; // overlay shells: per-vertex strength
+    const lit = !g.overlay && !!(t.pbr || t.mr || t.normal || g.ao || g.aoTex);
+    const aux = opts.aux || null;
+    const V = opts.view || [0, 0, 1];
+    const tn = lit ? t.normal : null, tmr = lit ? t.mr : null, aoT = lit ? g.aoTex : null, uv1 = g.uv1, gao = lit ? g.ao : null;
+    const pm = t.pbr ? t.pbr.metal : 0, pr = t.pbr ? t.pbr.rough : 1;
+    const Hh = norm([L[0] + V[0], L[1] + V[1], L[2] + V[2]]);
     for (let f = 0; f < idx.length; f += 3) {
       const a = idx[f], b = idx[f + 1], c = idx[f + 2];
       if (clip && (clip[a] || clip[b] || clip[c])) continue;
@@ -84,6 +97,20 @@ export function rasterCore(groups, screen, IW, IH, opts = {}) {
       const sh = (i) => amb + (1 - amb) * Math.max(0, nrm[i * 3] * L[0] + nrm[i * 3 + 1] * L[1] + nrm[i * 3 + 2] * L[2]);
       const sa = sh(a), sb = sh(b), sc = sh(c);
       const inv = 1 / area;
+      // tangent frame for normal maps: T = +u, Bu = image up (-v) on the surface (glTF: green = up)
+      let TT = null, BU = null;
+      if (tn) {
+        const P = (i) => [g.pos[i * 3], g.pos[i * 3 + 1], g.pos[i * 3 + 2]];
+        const p0 = P(a), e1 = sub3(P(b), p0), e2 = sub3(P(c), p0);
+        const du1 = uv[b * 2] - uv[a * 2], dv1 = uv[b * 2 + 1] - uv[a * 2 + 1], du2 = uv[c * 2] - uv[a * 2], dv2 = uv[c * 2 + 1] - uv[a * 2 + 1];
+        const r = du1 * dv2 - du2 * dv1;
+        if (Math.abs(r) > 1e-12) {
+          TT = norm([(e1[0] * dv2 - e2[0] * dv1) / r, (e1[1] * dv2 - e2[1] * dv1) / r, (e1[2] * dv2 - e2[2] * dv1) / r]);
+          const bv = norm([(e2[0] * du1 - e1[0] * du2) / r, (e2[1] * du1 - e1[1] * du2) / r, (e2[2] * du1 - e1[2] * du2) / r]);
+          BU = [-bv[0], -bv[1], -bv[2]];
+        }
+      }
+      const u1a = aoT && uv1 ? uv1[a * 2] * wa : 0, v1a = aoT && uv1 ? uv1[a * 2 + 1] * wa : 0, u1b = aoT && uv1 ? uv1[b * 2] * wb : 0, v1b = aoT && uv1 ? uv1[b * 2 + 1] * wb : 0, u1c = aoT && uv1 ? uv1[c * 2] * wc : 0, v1c = aoT && uv1 ? uv1[c * 2 + 1] * wc : 0;
       for (let py = y0; py <= y1; py++) {
         const qy = py + 0.5;
         for (let px = x0; px <= x1; px++) {
@@ -103,6 +130,31 @@ export function rasterCore(groups, screen, IW, IH, opts = {}) {
           const k = al ? (l0 * al[a] * wa + l1 * al[b] * wb + l2 * al[c] * wc) / iw : 1;
           const shade = l0 * sa + l1 * sb + l2 * sc;
           let r = td[p] * shade, gg = td[p + 1] * shade, bb = td[p + 2] * shade;
+          if (lit) {
+            let n = norm([l0 * nrm[a * 3] + l1 * nrm[b * 3] + l2 * nrm[c * 3], l0 * nrm[a * 3 + 1] + l1 * nrm[b * 3 + 1] + l2 * nrm[c * 3 + 1], l0 * nrm[a * 3 + 2] + l1 * nrm[b * 3 + 2] + l2 * nrm[c * 3 + 2]]);
+            if (tn && TT) {
+              const nx = tn[p] / 127.5 - 1, ny = tn[p + 1] / 127.5 - 1, nz = tn[p + 2] / 127.5 - 1;
+              n = norm([TT[0] * nx + BU[0] * ny + n[0] * nz, TT[1] * nx + BU[1] * ny + n[1] * nz, TT[2] * nx + BU[2] * ny + n[2] * nz]);
+            }
+            const metal = tmr ? tmr[p + 2] / 255 : pm, rough = tmr ? tmr[p + 1] / 255 : pr;
+            const ndl = Math.max(0, n[0] * L[0] + n[1] * L[1] + n[2] * L[2]);
+            const diff = amb + (1 - amb) * ndl;
+            const al2 = Math.max(0.03, rough * rough), shin = Math.max(0, 2 / (al2 * al2) - 2);
+            const ndh = Math.max(0, n[0] * Hh[0] + n[1] * Hh[1] + n[2] * Hh[2]);
+            const spec = shin > 0 ? Math.min(1.5, ((shin + 2) / 8) * Math.pow(ndh, shin)) * ndl : 0;
+            let ao = 1;
+            if (gao) ao *= l0 * gao[a] + l1 * gao[b] + l2 * gao[c];
+            if (aoT && uv1) {
+              const qu = (l0 * u1a + l1 * u1b + l2 * u1c) / iw, qv = (l0 * v1a + l1 * v1b + l2 * v1c) / iw;
+              const ax = Math.min(aoT.width - 1, Math.max(0, Math.floor(qu * aoT.width))), ay = Math.min(aoT.height - 1, Math.max(0, Math.floor(qv * aoT.height)));
+              ao *= aoT.data[(ay * aoT.width + ax) * 4] / 255;
+            }
+            const kd = (1 - metal) * diff + metal * (amb * 0.55 + 0.35 * ndl);
+            const f0 = 0.04 * (1 - metal);
+            r = (td[p] * kd + (f0 * 255 + td[p] * metal) * spec) * ao;
+            gg = (td[p + 1] * kd + (f0 * 255 + td[p + 1] * metal) * spec) * ao;
+            bb = (td[p + 2] * kd + (f0 * 255 + td[p + 2] * metal) * spec) * ao;
+          }
           if (lc) { r *= lc[0]; gg *= lc[1]; bb *= lc[2]; }
           if (te && te[p + 3]) { const ea = te[p + 3] / 255; r += te[p] * ea; gg += te[p + 1] * ea; bb += te[p + 2] * ea; }
           if (blend) {
@@ -122,6 +174,12 @@ export function rasterCore(groups, screen, IW, IH, opts = {}) {
           }
           if (td[p + 3] * k < 128) continue; // alpha test (MASK 0.5; overlays x COLOR_0 alpha)
           zbuf[o] = z;
+          if (aux) {
+            const n = norm([l0 * nrm[a * 3] + l1 * nrm[b * 3] + l2 * nrm[c * 3], l0 * nrm[a * 3 + 1] + l1 * nrm[b * 3 + 1] + l2 * nrm[c * 3 + 1], l0 * nrm[a * 3 + 2] + l1 * nrm[b * 3 + 2] + l2 * nrm[c * 3 + 2]]);
+            aux.normal[o * 4] = Math.round((n[0] * 0.5 + 0.5) * 255); aux.normal[o * 4 + 1] = Math.round((n[1] * 0.5 + 0.5) * 255); aux.normal[o * 4 + 2] = Math.round((n[2] * 0.5 + 0.5) * 255); aux.normal[o * 4 + 3] = 255;
+            const dz = Math.round(Math.max(0, Math.min(1, (z - aux.zmin) / (aux.zmax - aux.zmin || 1))) * 255);
+            aux.depth[o * 4] = dz; aux.depth[o * 4 + 1] = dz; aux.depth[o * 4 + 2] = dz; aux.depth[o * 4 + 3] = 255;
+          }
           img[o * 4] = r; img[o * 4 + 1] = gg; img[o * 4 + 2] = bb; img[o * 4 + 3] = 255;
           drawn++;
         }
@@ -201,7 +259,7 @@ export function renderCamera(groups, cam, IW, IH, opts = {}) {
     }
     return { sx, sy, Z, W, clip };
   });
-  return rasterCore(groups, screen, IW, IH, opts);
+  return rasterCore(groups, screen, IW, IH, cam.basis && !opts.view ? { ...opts, view: cam.basis[2] } : opts);
 }
 
 /**
@@ -226,7 +284,7 @@ export function renderViews(groups, { views = ['game', 'front', 'side', 'top', '
     if (v.cam) return { img: renderCamera(groups, makeCamera(v.cam, S, S, [], { fov: v.cam.fov }), S, S), label: v.label, sub: v.cam === 'fp' ? '60 DEG EYE' : null };
     const { out, box } = projs[i];
     const k = v.perspective || !Number.isFinite(orthoK) ? fit(box) : orthoK;
-    const img = raster(groups, out, k, (box[0] + box[1]) / 2, (box[2] + box[3]) / 2, S);
+    const img = raster(groups, out, k, (box[0] + box[1]) / 2, (box[2] + box[3]) / 2, S, projs[i].view);
     return { img, label: v.label, sub: v.perspective ? `${v.pitch} DEG PERSP` : v.label === 'iso' ? 'ORTHO 3/4' : null };
   });
   const sheet = items.length === 1 && !labels ? items[0].img : packImages(items, { labels, checker: false, columns: Math.min(items.length, 3) });

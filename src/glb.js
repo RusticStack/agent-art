@@ -55,7 +55,7 @@ function buildAtlas(meshes, maxSize = 256) {
     if (!users.has(k)) users.set(k, { tex: p.tex, prims: [], ok: true });
     const u = users.get(k);
     u.prims.push(p);
-    if (p.overlay || p.tex.material) { u.ok = false; continue; } // decal shells keep their own texture (TEXCOORD_1); glass/opacity keep their own material
+    if (p.overlay || p.tex.material || p.morphs) { u.ok = false; continue; } // decal shells keep their own texture (TEXCOORD_1); glass/opacity keep their own material; morph targets keep their own primitive
     if (p.tex.width * p.tex.height > 1) for (const v of p.uv) if (v < -1e-4 || v > 1 + 1e-4) { u.ok = false; break; }
   }
   const items = [...users.values()].filter((u) => u.ok && u.tex.width <= maxSize && u.tex.height <= maxSize);
@@ -70,9 +70,12 @@ function buildAtlas(meshes, maxSize = 256) {
     u.x = x; u.y = y; x += w; rowH = Math.max(rowH, h);
   }
   const H = pow2(y + rowH);
-  const anyE = items.some((u) => u.tex.emissive), anyN = items.some((u) => u.tex.normal);
+  const anyE = items.some((u) => u.tex.emissive), anyN = items.some((u) => u.tex.normal), anyMR = items.some((u) => u.tex.mr || u.tex.pbr);
   const data = new Uint8ClampedArray(W * H * 4), emissive = anyE ? new Uint8ClampedArray(W * H * 4) : null, normal = anyN ? new Uint8ClampedArray(W * H * 4) : null;
   if (normal) for (let i = 0; i < normal.length; i += 4) normal.set([128, 128, 255, 255], i);
+  // PBR on the atlas: per-item factors / maps become one metallicRoughness atlas (factors 1)
+  const mr = anyMR ? new Uint8ClampedArray(W * H * 4) : null;
+  if (mr) for (let i = 0; i < mr.length; i += 4) mr.set([255, 255, 0, 255], i);
   for (const u of items) {
     const { width: tw, height: th } = u.tex;
     // 1 px border copies the edge texels so nearest sampling never bleeds a neighbour
@@ -82,9 +85,13 @@ function buildAtlas(meshes, maxSize = 256) {
       data.set(u.tex.data.subarray(s, s + 4), d);
       if (emissive && u.tex.emissive) emissive.set(u.tex.emissive.subarray(s, s + 4), d);
       if (normal && u.tex.normal) normal.set(u.tex.normal.subarray(s, s + 4), d);
+      if (mr) {
+        if (u.tex.mr) mr.set(u.tex.mr.subarray(s, s + 4), d);
+        else { const f = u.tex.pbr || { metal: 0, rough: 1 }; mr.set([255, Math.round(f.rough * 255), Math.round(f.metal * 255), 255], d); }
+      }
     }
   }
-  const atlas = { key: 'atlas', name: 'atlas', width: W, height: H, data, emissive, normal };
+  const atlas = { key: 'atlas', name: 'atlas', width: W, height: H, data, emissive, normal, ...(mr ? { mr } : {}) };
   const moved = new Set();
   for (const u of items) for (const p of u.prims) {
     const { width: tw, height: th } = u.tex;
@@ -102,9 +109,14 @@ function buildAtlas(meshes, maxSize = 256) {
     if (on.length < 2) continue;
     const vc = on.reduce((s, p) => s + p.pos.length / 3, 0);
     const merged = { tex: atlas, pos: new Float32Array(vc * 3), nrm: new Float32Array(vc * 3), uv: new Float32Array(vc * 2), idx: new Uint32Array(on.reduce((s, p) => s + p.idx.length, 0)) };
+    // baked AO rides along (every primitive of a mesh shares the AO lightmap / has vertex AO)
+    if (on.every((p) => p.uv1)) merged.uv1 = new Float32Array(vc * 2);
+    if (on.every((p) => p.ao)) merged.ao = new Float32Array(vc);
     let vo = 0, io = 0;
     for (const p of on) {
       merged.pos.set(p.pos, vo * 3); merged.nrm.set(p.nrm, vo * 3); merged.uv.set(p.uv, vo * 2);
+      if (merged.uv1) merged.uv1.set(p.uv1, vo * 2);
+      if (merged.ao) merged.ao.set(p.ao, vo);
       for (let i = 0; i < p.idx.length; i++) merged.idx[io + i] = p.idx[i] + vo;
       vo += p.pos.length / 3; io += p.idx.length;
     }
@@ -197,7 +209,10 @@ export function writeGLB(scene, opts = {}) {
     if (matOf.has(mk)) return matOf.get(mk);
     const name = (overlay ? 'overlay_' : '') + (t.name || t.key);
     const ik = t.imageKey ?? t.key; // material variants (glass, opacity) share the image
-    const m = { name, pbrMetallicRoughness: { baseColorTexture: texture(ik, t.width, t.height, t.data, t.name || t.key), metallicFactor: 0, roughnessFactor: 1 } };
+    const pbr = !overlay && t.pbr, mrMap = !overlay && t.mr;
+    // metallicRoughness: maps carry the factors baked in (factors 1); plain PBR = factors; default dielectric rough
+    const m = { name, pbrMetallicRoughness: { baseColorTexture: texture(ik, t.width, t.height, t.data, t.name || t.key), metallicFactor: mrMap ? 1 : pbr ? pbr.metal : 0, roughnessFactor: mrMap ? 1 : pbr ? pbr.rough : 1 } };
+    if (mrMap) m.pbrMetallicRoughness.metallicRoughnessTexture = texture(t.mrKey ?? ik + '#mr', t.width, t.height, t.mr, name + '_mr');
     const spec = !overlay && t.material;
     // overlay (grime/moss/...): own UV set TEXCOORD_1, strength in COLOR_0 alpha, cut out by MASK
     if (overlay) m.pbrMetallicRoughness.baseColorTexture.texCoord = 1;
@@ -206,13 +221,15 @@ export function writeGLB(scene, opts = {}) {
       // opaque geometry without depth writes (three.js GLTFLoader: transparent, depthWrite false).
       m.alphaMode = 'BLEND';
       m.pbrMetallicRoughness.baseColorFactor = [1, 1, 1, spec.opacity];
-      if (spec.glass) { m.pbrMetallicRoughness.roughnessFactor = 0.1; }
+      if (spec.glass && !pbr && !mrMap) { m.pbrMetallicRoughness.roughnessFactor = 0.1; }
       m.extras = { transparent: true, depthWrite: false, opacity: spec.opacity, ...(spec.glass ? { glass: true } : {}) };
     } else if (overlay || needsAlpha(t)) { m.alphaMode = 'MASK'; m.alphaCutoff = 0.5; }
     if (overlay) m.extras = { overlay: true };
     if (spec && spec.double_sided) m.doubleSided = true;
-    if (t.emissive) { m.emissiveTexture = texture(ik + '#e', t.width, t.height, t.emissive, name + '_emissive'); m.emissiveFactor = [1, 1, 1]; }
-    if (t.normal) m.normalTexture = texture(ik + '#n', t.width, t.height, t.normal, name + '_normal');
+    if (t.emissive) { m.emissiveTexture = texture(t.emissiveKey ?? ik + '#e', t.width, t.height, t.emissive, name + '_emissive'); m.emissiveFactor = [1, 1, 1]; }
+    if (t.normal) m.normalTexture = texture(t.normalKey ?? ik + '#n', t.width, t.height, t.normal, name + '_normal');
+    // baked AO lightmap: every opaque material samples it with TEXCOORD_1
+    if (!overlay && opts.ao && !(spec && spec.blend)) m.occlusionTexture = { ...texture('ao#map', opts.ao.width, opts.ao.height, opts.ao.data, 'ao'), texCoord: 1 };
     json.materials.push(m);
     matOf.set(mk, json.materials.length - 1);
     return json.materials.length - 1;
@@ -222,7 +239,7 @@ export function writeGLB(scene, opts = {}) {
   const meshTris = [];
   for (const m of meshes) {
     const prims = [];
-    let mt = 0;
+    let mt = 0, morphNames = null;
     for (const p of m.prims) {
       const vc = p.pos.length / 3;
       const P = new Float32Array(p.pos.length);
@@ -241,17 +258,43 @@ export function writeGLB(scene, opts = {}) {
         NORMAL: acc(view(p.nrm, ARRAY), FLOAT, vc, 'VEC3'),
         TEXCOORD_0: acc(view(p.overlay ? p.uv0 : p.uv, ARRAY), FLOAT, vc, 'VEC2'),
       };
+      if (!p.overlay && p.uv1) attributes.TEXCOORD_1 = acc(view(p.uv1, ARRAY), FLOAT, vc, 'VEC2');
+      if (!p.overlay && p.ao) {
+        const col = new Float32Array(vc * 3);
+        for (let i = 0; i < vc; i++) col.fill(p.ao[i], i * 3, i * 3 + 3);
+        attributes.COLOR_0 = acc(view(col, ARRAY), FLOAT, vc, 'VEC3');
+      }
       if (p.overlay) {
         attributes.TEXCOORD_1 = acc(view(p.uv, ARRAY), FLOAT, vc, 'VEC2');
         const col = new Float32Array(vc * 4);
         for (let i = 0; i < vc; i++) col.set([1, 1, 1, p.alpha[i]], i * 4);
         attributes.COLOR_0 = acc(view(col, ARRAY), FLOAT, vc, 'VEC4');
       }
-      prims.push({ attributes, indices: acc(view(I, ELEMENTS), big ? U32 : U16, I.length, 'SCALAR'), material: material(p.tex, !!p.overlay), mode: 4 });
+      const prim = { attributes, indices: acc(view(I, ELEMENTS), big ? U32 : U16, I.length, 'SCALAR'), material: material(p.tex, !!p.overlay), mode: 4 };
+      if (p.morphs) {
+        // morph targets: POSITION / NORMAL deltas (units), names in mesh.extras.targetNames
+        prim.targets = p.morphs.map((t) => {
+          const dp = new Float32Array(vc * 3), dn = new Float32Array(vc * 3), mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+          for (let i = 0; i < vc * 3; i++) {
+            const v = Math.fround(t.pos[i] / scale) - P[i];
+            dp[i] = v; dn[i] = t.nrm[i] - p.nrm[i];
+            if (dp[i] < mn[i % 3]) mn[i % 3] = dp[i]; if (dp[i] > mx[i % 3]) mx[i % 3] = dp[i];
+          }
+          return { POSITION: acc(view(dp, ARRAY), FLOAT, vc, 'VEC3', { min: mn, max: mx }), NORMAL: acc(view(dn, ARRAY), FLOAT, vc, 'VEC3') };
+        });
+        morphNames = p.morphs.map((t) => t.name);
+      }
+      prims.push(prim);
       mt += p.idx.length / 3;
       vertices += vc;
     }
-    json.meshes.push({ name: m.name, primitives: prims });
+    const jm = { name: m.name, primitives: prims };
+    if (morphNames) {
+      if (prims.some((p) => !p.targets || p.targets.length !== morphNames.length)) throw new Error(`mesh ${m.name}: every primitive needs the same morph targets`);
+      jm.weights = morphNames.map(() => 0);
+      jm.extras = { targetNames: morphNames };
+    }
+    json.meshes.push(jm);
     meshTris.push(mt);
   }
   // nodes (instances share meshes; rigs nest children with TRS)
@@ -259,6 +302,7 @@ export function writeGLB(scene, opts = {}) {
   const isChild = new Set(), parentOf = new Map();
   for (const [i, n] of scene.nodes.entries()) for (const c of n.children || []) { isChild.add(c); parentOf.set(c, i); }
   const top = [];
+  let gpuUsed = false;
   const f6 = (v) => +(+v).toFixed(6);
   const localM = (n) => (n.matrix ? n.matrix : n.translation || n.rotation || n.scale ? trsMatrix(n.translation, n.rotation, n.scale) : null);
   const worldM = new Map();
@@ -282,12 +326,24 @@ export function writeGLB(scene, opts = {}) {
     if (n.children && n.children.length) node.children = [...n.children];
     if (n.instance) node.extras = instanceExtras(M || [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0], scale, n.instance);
     else if (n.extras) node.extras = n.extras;
-    if (node.mesh !== undefined) {
-      triangles += meshTris[n.mesh];
-      const W = worldOf(ni);
-      for (const p of meshes[n.mesh].prims) for (let i = 0; i < p.pos.length; i += 3) {
-        const q = W ? applyP(W, [p.pos[i], p.pos[i + 1], p.pos[i + 2]]) : [p.pos[i], p.pos[i + 1], p.pos[i + 2]];
-        for (let k = 0; k < 3; k++) { const v = q[k] / scale; if (v < bmin[k]) bmin[k] = v; if (v > bmax[k]) bmax[k] = v; }
+    if (n.instancing) {
+      // EXT_mesh_gpu_instancing (three.js GLTFLoader -> InstancedMesh): per-instance TRS accessors
+      const it = n.instancing, cnt = it.t.length / 3;
+      const T = Float32Array.from(it.t, (v) => v / scale), R = Float32Array.from(it.r), S = Float32Array.from(it.s);
+      const acc3 = (arr, type) => { json.accessors.push({ bufferView: view(arr), componentType: FLOAT, count: cnt, type }); return json.accessors.length - 1; };
+      node.extensions = { EXT_mesh_gpu_instancing: { attributes: { TRANSLATION: acc3(T, 'VEC3'), ROTATION: acc3(R, 'VEC4'), SCALE: acc3(S, 'VEC3') } } };
+      gpuUsed = true;
+    }
+    if (node.mesh !== undefined && !n.proxy && !n.lodHidden) {
+      const W0 = worldOf(ni);
+      const insts = n.instancing ? n.instancing.mats : [null];
+      triangles += meshTris[n.mesh] * insts.length;
+      for (const IM of insts) {
+        const W = IM ? (W0 ? mul34(W0, IM) : IM) : W0;
+        for (const p of meshes[n.mesh].prims) for (let i = 0; i < p.pos.length; i += 3) {
+          const q = W ? applyP(W, [p.pos[i], p.pos[i + 1], p.pos[i + 2]]) : [p.pos[i], p.pos[i + 1], p.pos[i + 2]];
+          for (let k = 0; k < 3; k++) { const v = q[k] / scale; if (v < bmin[k]) bmin[k] = v; if (v > bmax[k]) bmax[k] = v; }
+        }
       }
     }
     json.nodes.push(node);
@@ -321,6 +377,7 @@ export function writeGLB(scene, opts = {}) {
     json.scenes[0].nodes = [json.nodes.length - 1];
   } else json.scenes[0].nodes = top;
 
+  if (gpuUsed) json.extensionsUsed = [...(json.extensionsUsed || []), 'EXT_mesh_gpu_instancing'];
   const binBuf = Buffer.concat([...bin, Buffer.alloc((4 - (binLen % 4)) % 4)]);
   json.buffers.push({ byteLength: binBuf.length });
   let js = Buffer.from(JSON.stringify(json), 'utf8');
