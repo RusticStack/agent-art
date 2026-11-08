@@ -14,7 +14,11 @@ import { SKILLS } from '../src/skills.js';
 import { helpText } from '../src/docs.js';
 import { normPlanet, bakeEquirect, bakeFace, cubeSphere, facePatch, tileSkirt, heightAt, elevKm, dirToEquirect, equirectDir } from '../src/space/planet.js';
 import { cubeDir, dirToCube, cubePoint, vnorm } from '../src/space/noise.js';
-import { normTerrain, patchHeight, buildTerrain, splatWeights, latLonDir, localFrame } from '../src/space/terrain.js';
+import { normTerrain, patchHeight, buildTerrain, splatWeights, latLonDir, localFrame, erode, groundMaterials, bakeGround, LAYERS } from '../src/space/terrain.js';
+import { authorTile, edgeMask, edgeTile, tileMip, GROUND_KINDS } from '../src/space/tiles.js';
+
+/** Small, fast terrain options for tests (same code paths as the defaults). */
+const SMALL = { size: 128, grid: 32, chunks: 2, chunk_px: 64, detail_patches: 1, horizon: { radius: 1000, rings: 6, segments: 24 }, rocks: 20, debris: 40, shrubs: 20, spires: 1, crystals: 0 };
 import { normSky, bakeSkyFaces, bakeSkyEquirect, skyGas } from '../src/space/skybox.js';
 import { generateSystem } from '../src/space/ops.js';
 import { mulberry32 } from '../src/util.js';
@@ -92,7 +96,7 @@ test('planet: seed determinism (maps, heights, terrain, sky, system)', () => {
   assert.deepEqual(a.heightKm, b.heightKm);
   assert.deepEqual(a.normal, b.normal);
   assert.notDeepEqual(a.albedo, c.albedo);
-  const P = normPlanet({ preset: 'desert', seed: 2 }), t = normTerrain(P, { size: 128, grid: 32, chunks: 2 });
+  const P = normPlanet({ preset: 'desert', seed: 2 }), t = normTerrain(P, SMALL);
   assert.deepEqual(buildTerrain(P, t).heights, buildTerrain(normPlanet({ preset: 'desert', seed: 2 }), t).heights);
   const s1 = bakeSkyFaces(normSky({ seed: 3 }), 32), s2 = bakeSkyFaces(normSky({ seed: 3 }), 32);
   s1.faces.forEach((f, i) => assert.deepEqual(f, s2.faces[i]));
@@ -209,7 +213,7 @@ test('equirect and cube maps agree (same field, both projections)', () => {
 
 test('terrain: patch heights come from the planet field at the sample point', () => {
   const P = normPlanet({ preset: 'desert', seed: 4 });
-  const t = normTerrain(P, { lat: 18, lon: -40, size: 512, grid: 64, chunks: 2, detail: { amplitude: 0 }, mesas: 0, cliffs: 0 });
+  const t = normTerrain(P, { lat: 18, lon: -40, size: 512, grid: 64, chunks: 2, chunk_px: 256, detail: { amplitude: 0 }, mesas: 0, cliffs: 0, mountains: false, dunes: false });
   const H = patchHeight(P, t), d0 = latLonDir(18, -40);
   assert.ok(Math.abs(H.base - elevKm(P, d0) * 1000) < 1e-6, 'base elevation = planet elevation at lat/lon');
   assert.ok(Math.abs(H.at(0, 0)) < 1e-6, 'patch centre at 0');
@@ -224,7 +228,7 @@ test('terrain: patch heights come from the planet field at the sample point', ()
   assert.ok(Math.abs(e - H.base) < 0.06 * P.relief_km * 1000, `orbit map ${e} vs ground ${H.base}`);
   assert.equal(heightAt(P, d0), heightAt(P, latLonDir(18, -40)));
   // with detail on, the difference is bounded by the detail amplitude
-  const t2 = normTerrain(P, { lat: 18, lon: -40, size: 512, grid: 64, chunks: 2, mesas: 0, cliffs: 0 }), H2 = patchHeight(P, t2);
+  const t2 = normTerrain(P, { lat: 18, lon: -40, size: 512, grid: 64, chunks: 2, chunk_px: 256, mesas: 0, cliffs: 0, mountains: false, dunes: false }), H2 = patchHeight(P, t2);
   assert.ok(Math.abs(H2.at(120, 40) - H2.planet(120, 40)) <= t2.detail.amplitude * 1.4 + 1e-9);
 });
 
@@ -240,12 +244,13 @@ test('terrain: the patch frame (+X east, +Y up, +Z south) is right-handed, so it
 test('terrain: splat weights always sum to 255', () => {
   const r = mulberry32(4);
   for (let i = 0; i < 2000; i++) {
-    const w = splatWeights(r() * 2, r(), r());
+    const w = splatWeights({ slope: r() * 2, hrel: r(), patch: r(), scree: r(), flow: r() });
     assert.equal(w.reduce((a, b) => a + b, 0), 255);
     assert.ok(w.every((v) => Number.isInteger(v) && v >= 0));
   }
-  assert.deepEqual(splatWeights(0, 0.5, 0), [255, 0, 0, 0]);
-  assert.equal(splatWeights(5, 0.5, 0)[1], 255);
+  assert.deepEqual(splatWeights({}), [255, 0, 0, 0]);
+  assert.equal(splatWeights({ slope: 5 })[1], 255);
+  assert.deepEqual(LAYERS, ['ground', 'rock', 'low', 'scree']);
 });
 
 test('art_planet ops: files, glb validity, texture limits, scatter counts, anchors', () => {
@@ -271,21 +276,31 @@ test('art_planet ops: files, glb validity, texture limits, scatter counts, ancho
   assert.ok(ring && ring.extras.rings.outer > ring.extras.rings.inner);
   assert.equal(gj.materials[gj.meshes[ring.mesh].primitives[0].material].alphaMode, 'BLEND');
   // terrain from the stored planet
-  const t = e.run('planet_terrain', { planet: 'kethra', lat: 10, lon: 20, size: 256, grid: 32, chunks: 2, rocks: 30, grass: 40, crystals: 5, arches: 1 });
+  const t = e.run('planet_terrain', { planet: 'kethra', lat: 10, lon: 20, size: 256, grid: 32, chunks: 2, chunk_px: 128, detail_patches: 1, horizon: { radius: 1500, rings: 6, segments: 24 }, rocks: 30, grass: 40, crystals: 5, debris: 60, spires: 2, arches: 1, preview_size: 48 });
   const td = t.dir, tm = JSON.parse(fs.readFileSync(path.join(td, 'kethra_lz.terrain.json'), 'utf8'));
   assert.equal(tm.chunk_files.length, 4);
   for (const c of tm.chunk_files) {
     const cj = validateGLB(path.join(td, c.file)).json;
     assert.ok(cj.nodes.some((n) => n.extras?.collision));
-    assert.equal(cj.nodes.find((n) => n.extras?.lod_group).children.length, 3);
+    assert.equal(cj.nodes.find((n) => n.extras?.lod_group).children.length, 4);
   }
+  // detail decals, horizon ring, ground maps for the runtime shader, fog, renders
+  assert.equal(tm.detail_files.length, 1);
+  for (const d of tm.detail_files) assert.ok(validateGLB(path.join(td, d.file)).json.nodes[0].extras.decal);
+  assert.ok(validateGLB(path.join(td, tm.horizon.file)).json.nodes[0].extras.horizon);
+  assert.deepEqual(pngSize(path.join(td, 'kethra_lz_tileset.png')), [384, 256]);
+  assert.deepEqual(pngSize(path.join(td, 'kethra_lz_ground_masks.png')), [64, 256]);
+  assert.match(tm.fog.color, /^#[0-9a-f]{6}$/);
+  assert.ok(tm.fog.density > 0 && tm.fog.sky.zenith);
+  for (const k of ['overview', 'eye', 'wide']) assert.deepEqual(pngSize(path.join(td, tm.renders[k])), [48, 48]);
+  assert.ok(tm.stats.props.debris.instances === 60 && tm.stats.prop_triangles > 0);
   const hf = JSON.parse(fs.readFileSync(path.join(td, 'kethra_lz.heightfield.json'), 'utf8'));
   assert.equal(hf.heights.length, 33 * 33);
   assert.ok(tm.anchors.some((a) => a.kind === 'landing_pad'));
   // instanced scatter count: requested == placed == glb instancing accessors
   const sc = JSON.parse(fs.readFileSync(path.join(td, 'kethra_lz.scatter.json'), 'utf8'));
   const pj = validateGLB(path.join(td, 'kethra_lz_props.glb')).json;
-  for (const [kind, want] of [['rocks', 30], ['grass', 40], ['crystals', 5]]) {
+  for (const [kind, want] of [['rocks', 30], ['shrubs', 40], ['crystals', 5], ['debris', 60], ['spires', 2]]) {
     assert.equal(sc.kinds[kind].requested, want);
     assert.equal(sc.kinds[kind].placed, want, `${kind} placed`);
     const inGlb = pj.nodes.filter((n) => n.extras?.scatter === kind).reduce((s, n) => s + pj.accessors[n.extensions.EXT_mesh_gpu_instancing.attributes.TRANSLATION].count, 0);
@@ -356,4 +371,105 @@ test('art_planet is wired into MCP, help and skills', () => {
   assert.match(SKILLS['planets-space'].body, /tiles\.json/);
   const e = new Engine({ home: tmp() });
   assert.ok(e.run('planet_info', {}).planet_presets.gas);
+});
+
+test('ground tiles: authored with Agent Art ops, deterministic, tileable sizes, edge tiles + mips', () => {
+  const ramp = ['#4a2a1e', '#6a3a26', '#844a30', '#9e5e3c', '#b8784e'];
+  for (const kind of GROUND_KINDS) {
+    const a = authorTile(kind, ramp, { size: 32, seed: 3, accent: '#c4d82b' }), b = authorTile(kind, ramp, { size: 32, seed: 3, accent: '#c4d82b' });
+    assert.deepEqual(a.data, b.data, `${kind} deterministic`);
+    assert.equal(a.width, 32);
+    assert.ok(a.commands.some((c) => ['cells', 'noise', 'scatter', 'line'].includes(c.op)), `${kind} painted with draw ops`);
+    for (let i = 3; i < a.data.length; i += 4) assert.equal(a.data[i], 255, `${kind} opaque`);
+    assert.notDeepEqual(authorTile(kind, ramp, { size: 32, seed: 4 }).data, a.data, `${kind} variants differ`);
+  }
+  assert.ok(authorTile('glow', ramp, { size: 32, seed: 1 }).emissive, 'glow seams are emissive');
+  assert.throws(() => authorTile('lava_lamp', ramp), /ground tile kind/);
+  const t = authorTile('plates', ramp, { size: 64, seed: 1 }), m = edgeMask(64, 5);
+  assert.deepEqual(m, edgeMask(64, 5));
+  const e = edgeTile(t, m, 0.5, [0, 0, 0]);
+  let opaque = 0;
+  for (let i = 3; i < e.data.length; i += 4) if (e.data[i]) opaque++;
+  assert.ok(opaque > 64 * 64 * 0.15 && opaque < 64 * 64 * 0.85, 'transition tile covers part of the cell');
+  assert.equal(tileMip(t, 4).width, 16);
+});
+
+test('terrain relief: erosion is deterministic, carves gullies, leaves the pad flat', () => {
+  const P = normPlanet({ preset: 'desert', seed: 9 });
+  const t = normTerrain(P, { ...SMALL, size: 256, grid: 64, chunk_px: 128 });
+  const A = buildTerrain(P, t), B = buildTerrain(P, t);
+  assert.deepEqual(A.heights, B.heights);
+  assert.deepEqual(A.splat, B.splat);
+  assert.ok(A.erosion.flow_max > 0 && A.erosion.deposit_max > 0);
+  // erosion changed the ground (vs the analytic heights) outside the pad, and not on it
+  const N = t.grid, V = N + 1, st = t.size / N, half = t.size / 2;
+  let moved = 0, padDev = 0;
+  for (let j = 0; j < V; j++) for (let i = 0; i < V; i++) {
+    const x = -half + i * st, z = -half + j * st, d = Math.abs(A.heights[j * V + i] - A.H.at(x, z));
+    if (Math.hypot(x, z) < t.pad.radius) padDev = Math.max(padDev, d); else moved += d;
+  }
+  assert.ok(moved > 1, 'erosion moved material');
+  assert.ok(padDev < 1e-6, 'pad untouched by erosion');
+  // pad is playable: gentle slope and small height range
+  let lo = Infinity, hi = -Infinity;
+  for (let j = 0; j < V; j++) for (let i = 0; i < V; i++) { const x = -half + i * st, z = -half + j * st; if (Math.hypot(x, z) < t.pad.radius * 0.8) { lo = Math.min(lo, A.heights[j * V + i]); hi = Math.max(hi, A.heights[j * V + i]); } }
+  assert.ok(hi - lo < 2.5, `pad height range ${hi - lo} m`);
+  // mountains rise beyond the patch (horizon) but not on the pad
+  const H = A.H;
+  let peak = 0;
+  for (let a = 0; a < 64; a++) peak = Math.max(peak, H.mountains(Math.cos(a / 10) * 1500, Math.sin(a / 10) * 1500));
+  assert.ok(peak > 20, `distant ranges ${peak} m`);
+  assert.equal(H.mountains(0, 0), 0);
+  // the erode() primitive itself is deterministic
+  const h1 = Float32Array.from({ length: 33 * 33 }, (_, k) => Math.sin(k * 0.37) * 4 + (k % 33) * 0.5), h2 = h1.slice(), mask = new Float32Array(33 * 33).fill(1);
+  const r1 = erode(h1, 32, 2, { thermal: 5, talus: 0.7, droplets: 200 }, mask, 4), r2 = erode(h2, 32, 2, { thermal: 5, talus: 0.7, droplets: 200 }, mask, 4);
+  assert.deepEqual(h1, h2); assert.deepEqual(r1.flow, r2.flow);
+});
+
+test('terrain ground: deterministic texels, organic (non axis-aligned) layer borders, size limit', () => {
+  const P = normPlanet({ preset: 'desert', seed: 9 }), t = normTerrain(P, SMALL), T = buildTerrain(P, t);
+  const ctx = { splat: () => [128, 0, 0, 127], height: () => 0, slope: () => 0 };
+  const a = bakeGround(T.G, ctx, 0, 0, 8, 8, 256, 256), b = bakeGround(T.G, ctx, 0, 0, 8, 8, 256, 256);
+  assert.deepEqual(a.data, b.data);
+  assert.throws(() => bakeGround(T.G, ctx, 0, 0, 8, 8, 2048, 16), /1024/);
+  // half ground / half scree: both layers show, and the border is not a straight line of tile cells
+  const g = groundMaterials(P, t, T.layers);
+  const owner = new Uint8Array(256 * 256), out = [0, 0, 0, 0];
+  const ground = new Set(), scree = new Set();
+  for (const v of g.mats[0].variants) for (let i = 0; i < v.data.length; i += 4) ground.add(v.data[i] << 16 | v.data[i + 1] << 8 | v.data[i + 2]);
+  for (const v of g.mats[3].variants) for (let i = 0; i < v.data.length; i += 4) scree.add(v.data[i] << 16 | v.data[i + 1] << 8 | v.data[i + 2]);
+  let nG = 0, nS = 0;
+  for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) {
+    g.texel(x / 32, y / 32, ctx, 32, x, y, out, null);
+    const c = out[0] << 16 | out[1] << 8 | out[2];
+    owner[y * 256 + x] = scree.has(c) && !ground.has(c) ? 2 : 1;
+    if (owner[y * 256 + x] === 2) nS++; else nG++;
+  }
+  assert.ok(nS > 256 * 256 * 0.1 && nG > 256 * 256 * 0.1, `both layers present (${nS} / ${nG})`);
+  // borders: count changes along rows and columns; an axis-aligned square mosaic would put them on tile multiples
+  let onGrid = 0, changes = 0;
+  for (let y = 0; y < 256; y++) for (let x = 1; x < 256; x++) if (owner[y * 256 + x] !== owner[y * 256 + x - 1]) { changes++; if (x % 8 === 0) onGrid++; }
+  assert.ok(changes > 200 && onGrid / changes < 0.3, `border changes ${changes}, on an 8 px grid ${onGrid}`);
+});
+
+test('terrain props: clustered (not uniform), deterministic, horizon ring meets the patch border', () => {
+  const P = normPlanet({ preset: 'desert', seed: 9 }), t = normTerrain(P, { ...SMALL, size: 256, grid: 64, chunk_px: 128, rocks: 120 }), A = buildTerrain(P, t);
+  assert.deepEqual(A.scatter, buildTerrain(P, t).scatter);
+  assert.equal(A.scatter.rocks.length, 120);
+  // mean nearest-neighbour distance well below the uniform-random expectation 0.5 / sqrt(density)
+  const pts = A.scatter.rocks.map((r) => [r.p[0], r.p[2]]);
+  let sum = 0;
+  for (const p of pts) { let best = Infinity; for (const q of pts) if (q !== p) best = Math.min(best, Math.hypot(p[0] - q[0], p[1] - q[1])); sum += best; }
+  const expected = 0.5 / Math.sqrt(pts.length / (t.size * t.size));
+  assert.ok(sum / pts.length < expected * 0.6, `nn ${sum / pts.length} vs uniform ${expected}`);
+  for (const r of A.scatter.rocks) assert.ok(Math.hypot(r.p[0], r.p[2]) >= t.pad.radius * 0.8 - 1e-6, 'pad kept clear');
+  // horizon: inner ring = patch border heights, texture within limits
+  const g = A.horizon.group, half = t.size / 2;
+  for (let a = 0; a <= t.horizon.segments; a++) {
+    const x = g.pos[a * 3], y = g.pos[a * 3 + 1], z = g.pos[a * 3 + 2];
+    assert.ok(Math.abs(Math.max(Math.abs(x), Math.abs(z)) - half) < 1e-6, 'inner edge on the patch border');
+    assert.ok(Math.abs(y - A.heightAt(x, z)) < 1e-6, 'inner edge at the border height');
+  }
+  assert.ok(g.tex.width <= 1024 && g.tex.height <= 1024);
+  assert.ok(A.fog.density > 0 && A.fog.far > t.size);
 });

@@ -62,6 +62,28 @@ const farMat = new THREE.ShaderMaterial({ transparent: true, uniforms: { uMap: {
       gl_FragColor = vec4(c, 1.0); }\`,
 });  // quad side = 2 * radius; or just billboard <name>_disc.png (pre-lit) past impostor.switch_distance`;
 
+export const GROUND_SNIPPET = `// near-ground pixel detail at any distance (same rules as the baked chunk / detail textures):
+// splat (LinearFilter), tileset atlas + masks + noise (NearestFilter, RepeatWrapping)
+const groundMat = new THREE.ShaderMaterial({ uniforms: { uSplat: { value: splat }, uAtlas: { value: atlas }, uMask: { value: masks }, uNoise: { value: noise },
+    uSize: { value: meta.size_m }, uTileM: { value: meta.ground.tile_m }, uNoiseP: { value: meta.ground.noise.period_m } },
+  vertexShader: \`varying vec3 vW; void main() { vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }\`,
+  fragmentShader: \`uniform sampler2D uSplat, uAtlas, uMask, uNoise; uniform float uSize, uTileM, uNoiseP; varying vec3 vW;
+    void main() {
+      vec2 nz = texture2D(uNoise, vW.xz / uNoiseP).rg - 0.5;
+      vec4 w = texture2D(uSplat, (vW.xz + nz * 5.0) / uSize + 0.5);                 // noise-perturbed splat lookup
+      float ws[4] = float[4](w.r, w.g, w.b, w.a); int A = 0, B = 1;
+      for (int i = 1; i < 4; i++) if (ws[i] > ws[A]) A = i;
+      B = A == 0 ? 1 : 0; for (int i = 0; i < 4; i++) if (i != A && ws[i] > ws[B]) B = i;
+      float t = ws[B] / max(ws[A] + ws[B], 1e-4);
+      vec2 tuv = fract(vW.xz / uTileM);                                               // one tile per tile_m metres
+      float m = texture2D(uMask, vec2(tuv.x, (tuv.y + float(B)) / 4.0)).r;
+      int L = m < t ? B : A;                                                          // organic, noise-masked border
+      float variant = floor(texture2D(uNoise, vW.xz / (uNoiseP * 2.0)).r * 3.99);
+      vec2 auv = vec2((variant + tuv.x) / 6.0, (float(L) + tuv.y) / 4.0);            // atlas: 6 columns x 4 layers
+      gl_FragColor = vec4(texture2D(uAtlas, auv).rgb, 1.0);                         // + lighting / fog chunks as usual
+    }\`,
+});  // swap it in for the chunks within ~64 m of the camera; keep the baked textures beyond`;
+
 export const TERRAIN_SNIPPET = `// ground patch: chunks + props + heightfield for physics
 for (const c of meta.chunk_files) loader.load(base + c.file, (g) => {
   const lods = new THREE.LOD();
@@ -70,6 +92,9 @@ for (const c of meta.chunk_files) loader.load(base + c.file, (g) => {
   scene.add(lods);
 });
 loader.load(base + name + '_props.glb', (g) => scene.add(g.scene));    // EXT_mesh_gpu_instancing -> InstancedMesh
+for (const d of meta.detail_files) loader.load(base + d.file, (g) => { g.scene.traverse((o) => { if (o.material) { o.material.polygonOffset = true; o.material.polygonOffsetFactor = -1; } }); scene.add(g.scene); });
+if (meta.horizon) loader.load(base + meta.horizon.file, (g) => scene.add(g.scene));    // ring out to the far ranges
+scene.fog = new THREE.FogExp2(meta.fog.color, meta.fog.density);         // sky: gradient meta.fog.sky.horizon -> zenith
 const hf = await (await fetch(base + name + '.heightfield.json')).json();
 const heightAt = (x, z) => { const i = Math.round((x + hf.size_m / 2) / hf.spacing_m), j = Math.round((z + hf.size_m / 2) / hf.spacing_m);
   return hf.heights[j * (hf.grid + 1) + i]; };                             // or feed hf.heights to a physics heightfield`;
@@ -92,10 +117,19 @@ quadtree tiles and ground patches agree. Textures are palette ramps (banded + or
    <name>_impostor(_n).png + _disc.png (far LOD), <name>_orbit.png, <name>.planet.json (params, numbers, timings).
 2. System: ${J({ action: 'system', seed: 3, count: 6 })} -> original star + 4..8 bodies (distinct biomes, orbits, moons),
    <name>.system.json + palette strip render. bake:{equirect:512, face:128} also bakes each body.
-3. Ground: ${J({ action: 'terrain', planet: 'kethra', lat: 12, lon: 30, size: 512, grid: 128, chunks: 4 })} -> chunks/*.glb
-   (LOD steps [1,2,4] + skirts + hidden collision mesh), splat.png (RGBA = ground, rock, low, accent; bytes sum to 255),
-   tileset.png, heightfield.json, props.glb (instanced rocks / crystals / grass), formations.glb (arches), anchors (landing pad,
-   mesa tops) in .terrain.json. Counts: rocks, grass, crystals, mesas, cliffs, arches (numbers or false); detail {amplitude, wavelength}.
+3. Ground: ${J({ action: 'terrain', planet: 'kethra', lat: 12, lon: 30, size: 512 })} -> landing zone (+X east, +Z south, m).
+   Relief: planet elevation + detail + ridged-multifractal mountain ranges on some sides of the horizon + dunes (desert) +
+   mesas / escarpments, then thermal (scree) + droplet hydraulic (gullies) erosion; a flat pad (pad {radius:40}) stays put.
+   Ground: per-biome tilesets painted with cells / noise / scatter / line (plates, ripples, gravel, mud, ice, toxic, moss, snow,
+   glow, regolith), 4 variants + 2 transition tiles per layer, 64 px per 2 m (32 px/m); per texel a noise-perturbed splat lookup,
+   noise-masked dithered borders with a 1 px rim, strata bands on steep faces. chunks/*.glb (8 px/m, LOD steps [1,2,4,8], skirts,
+   collision), detail/*.glb (32 px/m decals around the pad), <name>_horizon.glb (ring to horizon.radius, fogged), splat.png
+   (ground, rock, low, scree; bytes sum to 255), tileset / ground_masks / ground_noise png (runtime shader), heightfield.json,
+   props.glb (instanced, clustered: boulder clusters at cliff bases / gullies, debris, spires, shrub clumps, crystal outcrops),
+   formations.glb (arches), anchors + fog {color, density, sky} in .terrain.json, renders overview / eye (1.7 m) / wide.
+   Options: grid (256), chunks (4), chunk_px (1024), detail_patches (3), mountains {height, wavelength} | false,
+   dunes | false, erosion {droplets, thermal, talus} | false, horizon {radius, rings, segments} | false,
+   rocks, debris, shrubs, crystals, spires, mesas, cliffs, arches (counts or false), detail {amplitude, wavelength}.
 4. Kits: ${J({ action: 'rocks', planet: 'kethra', kinds: ['boulder', 'rock', 'slab', 'shard', 'pebble', 'crystal', 'mesa', 'arch'] })}
    ${J({ action: 'asteroids', field: { shape: 'belt', count: 600, inner: 600, outer: 900, thickness: 60, size: [2, 40] } })}
 5. Backdrops: ${J({ action: 'skybox', preset: 'ember', size: 512, format: 'both' })} (presets ember tide verdigris void; layers, galaxy, stars {density})
@@ -119,8 +153,10 @@ ${NIGHT_SNIPPET}
 ${QUADTREE_SNIPPET}
 5. Far away (a few px): the disc sprite (<name>_disc.png) or:
 ${IMPOSTOR_SNIPPET}
-6. Landing zone: art_planet ${J({ action: 'terrain', planet: 'kethra', lat: 12, lon: 30, size: 512 })}. The patch base elevation and colours come from the same planet field (orbit and ground match). Use anchors (landing_pad, mesa_top, arch) to place colony modules.
+6. Landing zone: art_planet ${J({ action: 'terrain', planet: 'kethra', lat: 12, lon: 30, size: 512 })}. The patch base elevation and colours come from the same planet field (orbit and ground match). Use anchors (landing_pad, mesa_top, arch) to place colony modules. Look at the overview / eye / wide renders; set scene.fog from meta.fog and add the horizon ring.
 ${TERRAIN_SNIPPET}
+   Pixel ground detail everywhere near the camera (instead of only the detail decals):
+${GROUND_SNIPPET}
 7. Space: skybox (scene.background = new THREE.CubeTextureLoader().load([px, nx, py, ny, pz, nz]) with NearestFilter, or the equirect with EquirectangularReflectionMapping), asteroids (field glb is GPU-instanced per variant and LOD; the LOD1+ nodes (userData.lod > 0) are in the file too, so set them visible = false on load or show one level by camera distance), fx sprites (additive planes).
 8. Roblox later: every texture is <= 1024 px; meshes per chunk / tile stay well under 20k triangles; Sky faces map px->Rt, nx->Lf, py->Up, ny->Dn, pz->Ft, nz->Bk; heightfield.json can drive Terrain:WriteVoxels or a MeshPart grid; instanced props become cloned MeshParts from scatter.json.`,
   },

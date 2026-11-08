@@ -16,9 +16,10 @@ import {
   PRESETS, PRESET_NAMES, normPlanet, bakeEquirect, bakeFace, bakeRegion, heightImage, bakeCloudsEquirect, bakeCloudsFace, bakeRings, cubeSphere, facePatch,
   patchError, tileId, tileBounds, tileSkirt, atmosphereParams, renderPlanet, specPalette, elevKm,
 } from './planet.js';
-import { normTerrain, buildTerrain, latLonDir } from './terrain.js';
-import { rockMesh, crystalMesh, grassCard, grassTexture, formationMesh, texOf, ROCK_KINDS } from './rocks.js';
-import { makeTile } from './tiles.js';
+import { normTerrain, buildTerrain, latLonDir, LAYERS } from './terrain.js';
+import { rockMesh, crystalMesh, grassCard, grassTexture, shrubTexture, formationMesh, texOf, ROCK_KINDS } from './rocks.js';
+import { Mesh } from '../model3d.js';
+import { makeTile, edgeTile } from './tiles.js';
 import { normSky, SKY_PRESETS, bakeSkyFaces, bakeSkyEquirect, crossPreview } from './skybox.js';
 import { sunSprite, flareSheet, debrisCard, dustStorm, lightning, SUN_COLORS } from './fx.js';
 
@@ -446,17 +447,64 @@ function planetRocks(a, source) {
 }
 
 // ---------- terrain ----------
+const bayerT = (x, y) => (([[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]][y & 3][x & 3]) + 0.5) / 16;
+/**
+ * Render with distance fog and a sky gradient: a colour pass, then a second pass where every vertex
+ * carries its fog factor (baked AO channel, ambient 1, white texture), composited in banded steps.
+ */
+export function fogRender(groups, camSpec, S, fog, light) {
+  const cam = makeCamera(camSpec, S, S, [], { near: 0.05 });
+  const col = renderCamera(groups, cam, S, S, { ...light, bg: null });
+  const dens = fog.density, cp = cam.pos;
+  const white = (m) => ({ key: 'fog', name: 'fog', width: 1, height: 1, data: Uint8ClampedArray.from([255, 255, 255, 255]), ...(m ? { material: m } : {}) });
+  const fg = groups.map((g) => {
+    const n = g.pos.length / 3, ao = new Float32Array(n);
+    for (let i = 0; i < n; i++) { const d = Math.hypot(g.pos[i * 3] - cp[0], g.pos[i * 3 + 1] - cp[1], g.pos[i * 3 + 2] - cp[2]); ao[i] = Math.exp(-((d * dens) ** 2)); }
+    return { tex: white(g.tex.material), pos: g.pos, nrm: g.nrm, uv: g.uv, idx: g.idx, ao };
+  });
+  const fp = renderCamera(fg, cam, S, S, { bg: null, ambient: 1, light: [0, 1, 0] });
+  const fc = hexRGB(fog.color), zen = hexRGB(fog.sky.zenith), hor = hexRGB(fog.sky.horizon);
+  const out = new Uint8ClampedArray(S * S * 4);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const o = (y * S + x) * 4, b = bayerT(x, y) - 0.5;
+    let c;
+    if (!col.data[o + 3]) {
+      const t = Math.round(Math.min(1, Math.max(0, y / (S * 0.6) + b * 0.12)) * 6) / 6;
+      c = zen.map((z, k) => z + (hor[k] - z) * t);
+    } else {
+      const f = fp.data[o + 3] ? 1 - fp.data[o] / 255 : 0;
+      const q = Math.min(1, Math.max(0, Math.round((f + b / 8) * 10) / 10));
+      c = [0, 1, 2].map((k) => col.data[o + k] + (fc[k] - col.data[o + k]) * q);
+    }
+    out.set([c[0], c[1], c[2], 255], o);
+  }
+  return { width: S, height: S, data: out };
+}
+/** The three standard landing-zone cameras (also used for the before / after comparison). */
+export function lzCameras(heightAt, anchors = []) {
+  const pad = heightAt(0, 0);
+  // eye height at the pad rim, looking out toward the first mesa (or north)
+  const tgt = anchors.find((a) => a.kind === 'mesa_top') || { p: [0, pad, -200] };
+  const ang = Math.atan2(tgt.p[2], tgt.p[0]), ex = Math.cos(ang) * 20, ez = Math.sin(ang) * 20;
+  return {
+    overview: { pos: [25, Math.max(pad, heightAt(25, 420)) + 320, 420], look: [0, pad, -40], fov: 55 },
+    eye: { pos: [ex, heightAt(ex, ez) + 1.7, ez], look: [tgt.p[0], heightAt(ex, ez) + 1.0, tgt.p[2]], fov: 70 },
+    wide: { pos: [0, Math.max(pad, heightAt(0, 230)) + 25, 230], look: [0, pad + 15, -600], fov: 75 },
+  };
+}
+const quatM = (q, s, p) => { const [x, y, z, w] = q; return [(1 - 2 * (y * y + z * z)) * s, 2 * (x * y - z * w) * s, 2 * (x * z + y * w) * s, p[0], 2 * (x * y + z * w) * s, (1 - 2 * (x * x + z * z)) * s, 2 * (y * z - x * w) * s, p[1], 2 * (x * z - y * w) * s, 2 * (y * z + x * w) * s, (1 - 2 * (x * x + y * y)) * s, p[2]]; };
+
 function planetTerrain(a, source) {
   const T = timer();
-  const ps = previewSize(a.preview_size, 384);
+  const ps = previewSize(a.preview_size, 512);
   const { P } = loadPlanet(this, a.planet);
   const t = normTerrain(P, a);
   const name = a.name || `${typeof a.planet === 'string' ? a.planet : 'planet'}_lz`;
   if (!NAME_RE.test(name)) throw new Error('"name" must be 1-64 chars of letters, digits, _ - .');
   const B = buildTerrain(P, t);
-  T.lap('heights_splat_chunks');
+  T.lap('relief_erosion_ground');
   const dir = outDir(this, a, name), W = writer(dir);
-  // chunks: one glb each, LOD group + hidden collision proxy
+  // ---- chunks: one glb each, LOD group + hidden collision proxy
   let tri0 = 0;
   const chunkFiles = [];
   for (const c of B.chunks) {
@@ -473,52 +521,88 @@ function planetTerrain(a, source) {
     tri0 += levels[0].triangles;
     chunkFiles.push({ x: c.cx, z: c.cz, file, levels });
   }
-  T.lap('chunk_glbs');
-  const V = t.grid + 1;
+  // ---- detail patches (32 px/m decals around the pad)
+  const detailFiles = [];
+  for (const d of B.details) {
+    const file = `detail/detail_${d.px}_${d.pz}.glb`;
+    W.glb(file, { meshes: [{ name: `detail_${d.px}_${d.pz}`, groups: [d.group] }], nodes: [{ name: `detail_${d.px}_${d.pz}`, mesh: 0, extras: { decal: true, lift_m: 0.04, px_per_m: t.detail_px_per_m } }] }, { name: `detail_${d.px}_${d.pz}` });
+    const albedo = W.png(file.replace(/\.glb$/, '_albedo.png'), d.tex.width, d.tex.height, d.tex.data);
+    detailFiles.push({ file, albedo, rect: [d.x0, d.z0, d.size, d.size], px: d.tex.width, triangles: d.group.idx.length / 3 });
+  }
+  // ---- horizon ring
+  let horizonMeta = null;
+  if (B.horizon) {
+    W.glb(`${name}_horizon.glb`, { meshes: [{ name: `${name}_horizon`, groups: [B.horizon.group] }], nodes: [{ name: `${name}_horizon`, mesh: 0, extras: { horizon: true, radius: B.horizon.radius } }] }, { name: `${name}_horizon` });
+    W.png(`${name}_horizon.png`, B.horizon.group.tex.width, B.horizon.group.tex.height, B.horizon.group.tex.data);
+    horizonMeta = { file: `${name}_horizon.glb`, radius_m: B.horizon.radius, rings: B.horizon.rings, segments: B.horizon.segments, triangles: B.horizon.triangles, peak_m: B.horizon.peak_m, note: 'square inner edge = the patch border, out to a circle; same height function (mountains rise past the pad); draw it with fog' };
+  }
+  T.lap('chunk_detail_horizon_glbs');
+  // ---- ground maps: splat, tile atlas (4 variants + 2 transition tiles per layer), heightfield
+  const V = t.grid + 1, ts = t.tile_px;
   W.png(`${name}_splat.png`, V, V, B.splat);
-  const ts = t.tile_px, sheet = new Uint8ClampedArray(ts * 4 * ts * 4);
-  B.layers.forEach((L, k) => { for (let y = 0; y < ts; y++) sheet.set(L.tile.data.subarray(y * ts * 4, (y + 1) * ts * 4), (y * ts * 4 + k * ts) * 4); });
-  W.png(`${name}_tileset.png`, ts * 4, ts, sheet);
+  const cols = 6, atlas = new Uint8ClampedArray(ts * cols * ts * 4 * 4);
+  B.G.mats.forEach((m, row) => {
+    const cells = [...m.variants, edgeTileOf(m, 0.4), edgeTileOf(m, 0.65)];
+    cells.forEach((cimg, col) => { for (let y = 0; y < ts; y++) atlas.set(cimg.data.subarray(y * ts * 4, (y + 1) * ts * 4), ((row * ts + y) * ts * cols + col * ts) * 4); });
+  });
+  W.png(`${name}_tileset.png`, ts * cols, ts * 4, atlas);
+  // continuous blend masks (row per layer) + warp noise (R, G over 48 m) for the runtime ground shader
+  const masks = new Uint8ClampedArray(ts * ts * 4 * 4);
+  B.G.mats.forEach((m, row) => { for (let i = 0; i < ts * ts; i++) { const v = Math.round(Math.min(1, Math.max(0, m.mask[i])) * 255); masks.set([v, v, v, 255], (row * ts * ts + i) * 4); } });
+  W.png(`${name}_ground_masks.png`, ts, ts * 4, masks);
+  const nt = B.G.tables, NS = nt.warpX.size, noiseImg = new Uint8ClampedArray(NS * NS * 4);
+  for (let i = 0; i < NS * NS; i++) noiseImg.set([Math.round(nt.warpX.tab[i] * 255), Math.round(nt.warpZ.tab[i] * 255), 0, 255], i * 4);
+  W.png(`${name}_ground_noise.png`, NS, NS, noiseImg);
   W.json(`${name}.heightfield.json`, {
-    planet: typeof a.planet === 'string' ? a.planet : null, lat: t.lat, lon: t.lon, size_m: t.size, grid: t.grid, spacing_m: B.step, origin: 'patch centre (heights relative to it)', axes: '+X east, +Z south, +Y up (metres)',
+    planet: typeof a.planet === 'string' ? a.planet : null, lat: t.lat, lon: t.lon, size_m: t.size, grid: t.grid, spacing_m: B.step, origin: 'patch centre (heights relative to the pad base)', axes: '+X east, +Z south, +Y up (metres)',
     base_elevation_m: r4(B.H.base), min: r4(B.lo), max: r4(B.hi), layout: 'row-major: heights[z * (grid + 1) + x], x = -size/2 + i * spacing', heights: Array.from(B.heights, (v) => Math.round(v * 100) / 100),
   });
-  T.lap('splat_heightfield');
-  // props: variants per kind, GPU instanced (EXT_mesh_gpu_instancing)
+  T.lap('maps');
+  // ---- props: variants per kind, GPU instanced (EXT_mesh_gpu_instancing)
   const seed = seedOf(t.seed, 801);
-  const { tex } = rockKit(P, {}, seed);
-  const crystalTex = texOf(`crystal:${seed}`, makeTile('ground', (P.preset === 'ice' ? ['#3a6a9a', '#6aa8d8', '#b8e0ff', '#ffffff'] : P.preset === 'lava' ? ['#8a2a0a', '#e0521a', '#ffa21f', '#ffe45c'] : ['#5a7a10', '#8fae10', '#c4d82b', '#f0ff8a']).map(hexRGB), { size: 16, seed }));
+  const rockRamp = B.layers[1].ramp.map((c) => (Array.isArray(c) ? c : hexRGB(c)));
+  const rockTex = texOf(`rock:${seed}`, makeTile('rock', rockRamp, { size: 32, seed }));
+  const pebTex = texOf(`pebble:${seed}`, makeTile('rock', B.layers[3].ramp.map((c) => (Array.isArray(c) ? c : hexRGB(c))), { size: 16, seed: seed + 1 }));
+  const strataTex = texOf(`strata:${seed}`, makeTile('strata', rockRamp, { size: 32, seed }));
+  const crystalRamp = (P.preset === 'ice' ? ['#3a6a9a', '#6aa8d8', '#b8e0ff', '#ffffff'] : P.preset === 'lava' ? ['#8a2a0a', '#e0521a', '#ffa21f', '#ffe45c'] : ['#5a7a10', '#8fae10', '#c4d82b', '#f0ff8a']).map(hexRGB);
+  const crystalTex = texOf(`crystal:${seed}`, makeTile('ground', crystalRamp, { size: 16, seed }));
   if (P.preset === 'lava' || P.preset === 'toxic') crystalTex.emissive = crystalTex.data.map((v, i) => (i % 4 === 3 ? 255 : v * 0.5));
-  const groundRamp = B.layers[0].ramp;
-  const grassTex = { ...texOf(`grass:${seed}`, grassTexture(groundRamp.map((c) => shiftColor(c, -8, 0.9, 0.95)), { seed })), material: { double_sided: true } };
-  const variantMesh = { rocks: (v) => rockMesh({ kind: ['boulder', 'rock', 'slab', 'pebble'][v], size: [1.4, 1, 1.1, 0.4][v], seed: seedOf(seed, 810 + v), detail: v === 3 ? 1 : 2, tex }), crystals: (v) => crystalMesh({ size: 1, seed: seedOf(seed, 820 + v), count: 3 + v, tex: crystalTex }), grass: () => grassCard({ size: 0.9, tex: grassTex }) };
-  const meshes = [], nodes = [], scatterOut = {}, placedMeshes = [];
+  const groundRamp = B.layers[0].ramp.map((c) => (Array.isArray(c) ? c : hexRGB(c)));
+  const dry = groundRamp.map((c) => shiftColor(c, -10, 0.75, 0.8));
+  const shrubTex = { ...texOf(`shrub:${seed}`, shrubTexture(P.preset === 'bloom' ? groundRamp : dry, { seed })), material: { double_sided: true } };
+  const grassTex = { ...texOf(`grass:${seed}`, grassTexture(P.preset === 'bloom' ? groundRamp : dry.map((c) => shiftColor(c, 0, 1, 1.15)), { seed })), material: { double_sided: true } };
+  const variantMesh = {
+    rocks: (v) => rockMesh({ kind: ['boulder', 'rock', 'slab', 'rock'][v], size: 1, seed: seedOf(seed, 810 + v), detail: v === 0 ? 2 : 1, tex: rockTex, world: 1.2 }),
+    debris: (v) => rockMesh({ kind: v ? 'shard' : 'pebble', size: 1, seed: seedOf(seed, 830 + v), detail: 0, cuts: 2, tex: pebTex, world: 0.6 }),
+    spires: (v) => formationMesh({ kind: 'spire', size: 4 + v * 1.5, height: 16 + v * 8, seed: seedOf(seed, 840 + v), tex: strataTex }).mesh,
+    shrubs: (v) => (v ? grassCard({ size: 0.9, tex: grassTex }) : grassCard({ size: 1.1, cards: 3, aspect: 0.8, tex: shrubTex })),
+    crystals: (v) => crystalMesh({ size: 1, seed: seedOf(seed, 820 + v), count: 3 + v * 2, tex: crystalTex }),
+  };
+  const meshes = [], nodes = [], scatterOut = {}, placed = [];
   let propTris = 0, instances = 0;
-  for (const kind of ['rocks', 'crystals', 'grass']) {
+  for (const kind of Object.keys(B.scatter)) {
     const list = B.scatter[kind];
-    scatterOut[kind] = { requested: B.requested[kind], placed: list.length, variants: [] };
+    scatterOut[kind] = { requested: B.requested[kind], placed: list.length, triangles: 0, variants: [] };
     for (let v = 0; v < 4; v++) {
-      const its = list.filter((it) => (kind === 'grass' ? 0 : it.v) === v);
+      const its = list.filter((it) => it.v === v);
       if (!its.length) continue;
       const mesh = variantMesh[kind](v);
       meshes.push({ name: `${kind}_${v}`, groups: groups(mesh) });
-      const quatM = (q, s, p) => { const [x, y, z, w] = q; return [(1 - 2 * (y * y + z * z)) * s, 2 * (x * y - z * w) * s, 2 * (x * z + y * w) * s, p[0], 2 * (x * y + z * w) * s, (1 - 2 * (x * x + z * z)) * s, 2 * (y * z - x * w) * s, p[1], 2 * (x * z - y * w) * s, 2 * (y * z + x * w) * s, (1 - 2 * (x * x + y * y)) * s, p[2]]; };
       const mats = its.map((it) => quatM(it.r, it.s, it.p));
       nodes.push({ name: `${kind}_${v}_instances`, mesh: meshes.length - 1, instancing: { t: its.flatMap((it) => it.p), r: its.flatMap((it) => it.r), s: its.flatMap((it) => [it.s, it.s, it.s]), mats }, extras: { scatter: kind, variant: v, count: its.length } });
       scatterOut[kind].variants.push({ variant: v, node: `${kind}_${v}_instances`, count: its.length, triangles: mesh.triangles, instances: its.map((it) => ({ p: it.p, r: it.r, s: it.s })) });
+      scatterOut[kind].triangles += mesh.triangles * its.length;
       propTris += mesh.triangles * its.length; instances += its.length;
-      for (const M of mats.slice(0, kind === 'grass' ? 120 : 400)) placedMeshes.push(mesh.clone().transform(M));
+      placed.push({ mesh, mats });
     }
   }
   const propStats = meshes.length ? W.glb(`${name}_props.glb`, { meshes, nodes }, { name: `${name}_props` }) : null;
-  W.json(`${name}.scatter.json`, { seed: t.seed, kinds: scatterOut, note: 'Instance transforms: p = position (m, patch frame), r = rotation quaternion [x, y, z, w], s = uniform scale. The props glb carries the same as EXT_mesh_gpu_instancing (three.js GLTFLoader -> InstancedMesh).' });
+  W.json(`${name}.scatter.json`, { seed: t.seed, kinds: scatterOut, rules: 'boulder clusters (big rock + size falloff) at cliff bases / scree / gullies; debris around rocks + scree; spires on high ground; shrub clumps on gentle ground, denser in gullies; crystal outcrops on low ground / rock', note: 'Instance transforms: p = position (m, patch frame), r = rotation quaternion [x, y, z, w], s = uniform scale. The props glb carries the same as EXT_mesh_gpu_instancing (three.js GLTFLoader -> InstancedMesh).' });
   T.lap('scatter');
-  // formations (arches) + anchors
-  const strata = texOf(`strata:${seed}`, makeTile('strata', B.layers[1].ramp, { size: 32, seed }));
-  const fm = [], fn = [];
-  const formMeshes = [];
+  // ---- formations (arches) + anchors
+  const fm = [], fn = [], formMeshes = [];
   for (const [i, f] of B.forms.entries()) {
-    const { mesh, anchor } = formationMesh({ kind: f.kind, size: f.size, seed: seedOf(seed, 900 + i), tex: strata });
+    const { mesh, anchor } = formationMesh({ kind: f.kind, size: f.size, seed: seedOf(seed, 900 + i), tex: strataTex });
     fm.push({ name: `${f.kind}_${i}`, groups: groups(mesh) });
     const yaw = (f.yaw * Math.PI) / 180;
     fn.push({ name: `${f.kind}_${i}`, mesh: fm.length - 1, translation: f.p, rotation: [0, Math.sin(yaw / 2), 0, Math.cos(yaw / 2)], extras: { formation: f.kind, anchor } });
@@ -527,33 +611,48 @@ function planetTerrain(a, source) {
     propTris += mesh.triangles;
   }
   if (fm.length) W.glb(`${name}_formations.glb`, { meshes: fm, nodes: fn }, { name: `${name}_formations` });
-  // preview: perspective from the south-east over the landing pad
-  const sceneGroups = [...B.chunks.flatMap((c) => [c.lods[0]]), ...placedMeshes.flatMap(groups), ...formMeshes.flatMap(groups)];
-  const light = { light: [-0.45, 0.8, 0.35].map((v, i, A) => v / Math.hypot(...A)), ambient: 0.4 };
-  const view = renderCamera(sceneGroups, makeCamera({ pos: [t.size * 0.05, B.hi + t.size * 0.62, t.size * 0.82], look: [0, B.lo, -t.size * 0.08], fov: 55 }, ps, ps, []), ps, ps, light);
-  W.png(`${name}_preview.png`, ps, ps, view.data);
-  // close-up at the landing pad (props at human scale)
-  const h0 = B.anchors[0].p[1];
-  const close = renderCamera(sceneGroups, makeCamera({ pos: [16, h0 + 8, 30], look: [-4, h0, -8], fov: 60 }, ps, ps, [], { near: 0.2 }), ps, ps, light);
-  W.png(`${name}_closeup.png`, ps, ps, close.data);
-  if (a.canvas) toCanvas(this, `${name}_preview`, view, source);
-  T.lap('preview');
+  // ---- renders: overview, eye height (1.7 m), wide with the horizon; fogged, sky gradient
+  const renders = {};
+  let camsUsed = null;
+  if (ps > 0) {
+    const scene = [...B.chunks.map((c) => c.lods[0]), ...B.details.map((d) => d.group), ...(B.horizon ? [B.horizon.group] : [])];
+    for (const p of placed) { const all = new Mesh(); for (const M of p.mats) all.add(p.mesh.clone().transform(M)); scene.push(...groups(all)); }
+    for (const m of formMeshes) scene.push(...groups(m));
+    const light = { light: [-0.45, 0.8, 0.35].map((v, i, A) => v / Math.hypot(...A)), ambient: 0.42 };
+    const cams = lzCameras((x, z) => (Math.max(Math.abs(x), Math.abs(z)) <= t.size / 2 ? B.heightAt(x, z) : B.H.at(x, z)), B.anchors);
+    camsUsed = a.cameras ?? cams;
+    for (const [k, cam] of Object.entries(camsUsed)) {
+      const im = fogRender(scene, cam, ps, B.fog, light);
+      renders[k] = W.png(`${name}_${k}.png`, ps, ps, im.data);
+      if (k === 'overview') { W.png(`${name}_preview.png`, ps, ps, im.data); if (a.canvas) toCanvas(this, `${name}_preview`, im, source); }
+    }
+    T.lap('renders');
+  }
   const meta = {
     name, planet: typeof a.planet === 'string' ? a.planet : null, lat: t.lat, lon: t.lon, centre_biome: B.centreBiome, size_m: t.size, grid: t.grid, chunks: t.chunks, chunk_m: B.cm,
     base_elevation_m: r4(B.H.base), height_range_m: [r4(B.lo), r4(B.hi)], frame: { up: B.H.frame.up.map(r4), east: B.H.frame.east.map(r4), north: B.H.frame.north.map(r4), axes: '+X east, +Z south, +Y up' },
-    chunk_files: chunkFiles, lods: { steps: t.lods, error_m: B.lodErr.map(f6), screen: SCREEN },
-    textures: { chunk_albedo_px: B.px, texel_m: t.texel, splat: `${name}_splat.png`, splat_channels: B.layers.map((L) => L.name), tileset: `${name}_tileset.png`, tile_px: ts, layers: B.layers.map((L) => ({ name: L.name, kind: L.kind, ramp: L.ramp.map(toHex) })) },
-    heightfield: `${name}.heightfield.json`, props: propStats ? `${name}_props.glb` : null, scatter: `${name}.scatter.json`, formations: fm.length ? `${name}_formations.glb` : null, anchors: B.anchors,
-    stats: { terrain_triangles_lod0: tri0, prop_instances: instances, prop_triangles: propTris },
+    relief: { mountains: t.mountains, dunes: t.dunes, erosion: t.erosion ? { ...t.erosion, ...B.erosion } : null, pad: t.pad, mesas: B.H.mesas.length, cliffs: B.H.cliffs.length },
+    chunk_files: chunkFiles, detail_files: detailFiles, horizon: horizonMeta, fog: B.fog, lods: { steps: t.lods, error_m: B.lodErr.map(f6), screen: SCREEN },
+    ground: {
+      tileset: `${name}_tileset.png`, tile_px: ts, tile_m: t.tile_m, px_per_m: { tiles: ts / t.tile_m, chunks: r4(t.chunk_px / B.cm), detail: t.detail_px_per_m },
+      atlas_layout: 'rows = splat layers (ground, rock, low, scree); columns 0-3 = variants, 4-5 = transition tiles (alpha-cut organic edge, 1 px rim)', layers: B.layers.map((L) => ({ name: L.name, recipe: L.kind, ramp: L.ramp.map((c) => (Array.isArray(c) ? toHex(c) : c)) })),
+      masks: `${name}_ground_masks.png`, noise: { file: `${name}_ground_noise.png`, period_m: B.G.tables.warpX.period, channels: 'R = warp x, G = warp z (0..1, amplitude +-2.5 m)' },
+      splat: `${name}_splat.png`, splat_channels: LAYERS, blend: 'per texel: splat sampled at a noise-perturbed position (+-2.5 m); top two layers; layer B wins where its blob mask + dither < its weight; 1 px rim of B outside the blob; variant from low-frequency noise with organic borders; slope > 0.9 rock gets strata bands by world height',
+    },
+    heightfield: `${name}.heightfield.json`, props: propStats ? `${name}_props.glb` : null, scatter: `${name}.scatter.json`, formations: fm.length ? `${name}_formations.glb` : null, anchors: B.anchors, renders, cameras: camsUsed,
+    stats: { terrain_triangles_lod0: tri0, detail_triangles: detailFiles.reduce((s, d) => s + d.triangles, 0), horizon_triangles: horizonMeta ? horizonMeta.triangles : 0, prop_instances: instances, prop_triangles: propTris, props: Object.fromEntries(Object.entries(scatterOut).map(([k, v]) => [k, { instances: v.placed, triangles: v.triangles }])) },
     timings_ms: { ...T.laps, total: T.total() },
   };
   W.json(`${name}.terrain.json`, meta);
+  const shown = renders.overview ? path.join(dir, renders.overview) : null;
   return {
     terrain: name, dir, planet: meta.planet, lat: t.lat, lon: t.lon, biome: B.centreBiome, base_elevation_m: meta.base_elevation_m, height_range_m: meta.height_range_m,
-    chunks: chunkFiles.length, triangles_lod0: tri0, lod_triangles_per_chunk: chunkFiles[0].levels.map((L) => L.triangles), props: { instances, triangles: propTris, ...Object.fromEntries(Object.entries(scatterOut).map(([k, v]) => [k, `${v.placed}/${v.requested}`])) },
-    anchors: B.anchors.length, chunk_texture_px: B.px, ms: T.total(), image: encodePNG(view.width, view.height, view.data),
+    chunks: chunkFiles.length, triangles_lod0: tri0, lod_triangles_per_chunk: chunkFiles[0].levels.map((L) => L.triangles), detail_patches: detailFiles.length, horizon_triangles: meta.stats.horizon_triangles,
+    props: { instances, triangles: propTris, ...Object.fromEntries(Object.entries(scatterOut).map(([k, v]) => [k, `${v.placed}/${v.requested} (${v.triangles} tris)`])) },
+    anchors: B.anchors.length, fog: B.fog.color, renders: Object.keys(renders), ms: T.total(), ...(shown ? { image: fs.readFileSync(shown) } : {}),
   };
 }
+const edgeTileOf = (m, cover) => edgeTile(m.variants[0], m.mask, cover, m.rim);
 
 // ---------- asteroids ----------
 function planetAsteroids(a, source) {
