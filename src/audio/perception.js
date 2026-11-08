@@ -135,7 +135,7 @@ export function pickOnsets(flux, fps, { k = 1.4, minGap = 0.035 } = {}) {
 
 // ---------------- tempo + beats ----------------
 const tactusWeight = (bpm) => Math.exp(-0.5 * (Math.log2(bpm / 115) / 0.75) ** 2);
-export function tempoEstimate(env, fps) {
+export function tempoEstimate(env, fps, { preferSlow = false } = {}) {
   const F = env.length;
   const x = Float32Array.from(env);
   const w = Math.round(fps * 0.5);
@@ -146,6 +146,7 @@ export function tempoEstimate(env, fps) {
   const acf = new Float64Array(maxL * 4 + 2);
   for (let L = 1; L < acf.length && L < F; L++) { let s = 0; for (let i = L; i < F; i++) s += x[i] * x[i - L]; acf[L] = s / (F - L); }
   const at = (L) => { const i = Math.floor(L), f = L - i; return i + 1 < acf.length ? acf[i] * (1 - f) + acf[i + 1] * f : 0; };
+  const combAt = (L) => at(L) + 0.5 * at(2 * L) + 0.25 * at(4 * L) + 0.33 * at(L / 2);
   const cands = [];
   for (let L = minL; L <= maxL; L++) {
     const comb = at(L) + 0.5 * at(2 * L) + 0.25 * at(4 * L) + 0.33 * at(L / 2);
@@ -158,8 +159,18 @@ export function tempoEstimate(env, fps) {
   }
   if (!cands.length) return { bpm: 0, tactus: 0, confidence: 0, candidates: [] };
   const best = [...cands].sort((a, b) => b.score - a.score);
-  const metrical = best[0];
-  const tact = [...cands].sort((a, b) => b.score * tactusWeight(b.bpm) - a.score * tactusWeight(a.bpm))[0];
+  let metrical = best[0];
+  let tact = [...cands].sort((a, b) => b.score * tactusWeight(b.bpm) - a.score * tactusWeight(a.bpm))[0];
+  if (preferSlow) {
+    // slow, drumless material (pads, drones): the half-tempo reading is what a listener feels when
+    // its onset strength is comparable, so prefer it over the double-time candidate
+    const half = (c) => {
+      if (c.bpm / 2 < 30) return null;
+      return cands.find((d) => Math.abs(Math.log2(d.bpm / (c.bpm / 2))) < 0.04) || { bpm: c.bpm / 2, period: c.period * 2, score: combAt(c.period * 2) };
+    };
+    const hm = half(metrical); if (hm && hm.score >= 0.7 * metrical.score) metrical = hm;
+    const ht = half(tact); if (ht && ht.score >= 0.7 * tact.score) tact = ht;
+  }
   const conf = clamp(metrical.score / (mean(Array.from(acf.slice(minL, maxL))) * 3 + 1e-12) - 0.3, 0, 1);
   return { bpm: metrical.bpm, tactus: tact.bpm, period: tact.period, confidence: r2(conf), candidates: best.slice(0, 4).map((c) => r1(c.bpm)) };
 }
@@ -284,7 +295,8 @@ export function rhythm(mono, { tempo = null, beatsPerBar = 4, drums = null, of =
   // the analysed file often has a reverb/release tail: only bars that contain hits count
   const lastHit = Math.max(0, ...['low', 'snare', 'high'].map((b) => (on[b].length ? on[b][on[b].length - 1].t : 0)));
   const allOn = pickOnsets(of1.drum, fps);
-  const te = tempoEstimate(of1.drum, fps);
+  // no kick/snare evidence = pad/drone material: prefer the half-tempo reading when comparable
+  const te = tempoEstimate(of1.drum, fps, { preferSlow: on.low.length + on.snare.length < dur * 0.25 });
   // grid: the written grid when the perceived tempo is a simple ratio of it, else tracked beats
   let grid = null, gridSource = 'tracked';
   if (tempo) {
@@ -994,10 +1006,13 @@ function sfxShape(mono, meas, rhy, tim) {
   const pkS = pk * w;
   for (let k = 0; k < 6; k++) { const st = pkS + Math.round(k * Math.max(0, Math.min(mono.length - pkS - N, (end - pk) * w) / 6)); if (st + N <= mono.length) starts.push(st); }
   const clar = starts.map((st) => {
-    let r0 = 0; for (let i = 0; i < N; i++) r0 += mono[st + i] * mono[st + i];
+    // mean-removed frame: a DC offset would otherwise read as perfect periodicity
+    let mu = 0; for (let i = 0; i < N; i++) mu += mono[st + i]; mu /= N;
+    const x = new Float32Array(N); for (let i = 0; i < N; i++) x[i] = mono[st + i] - mu;
+    let r0 = 0; for (let i = 0; i < N; i++) r0 += x[i] * x[i];
     if (r0 < 1e-9) return 0;
     let best = 0;
-    for (let lag = Math.round(SR / 2000); lag < SR / 50; lag++) { let r = 0; for (let i = 0; i < N - lag; i++) r += mono[st + i] * mono[st + i + lag]; best = Math.max(best, r / r0); }
+    for (let lag = Math.round(SR / 2000); lag < SR / 50; lag++) { let r = 0; for (let i = 0; i < N - lag; i++) r += x[i] * x[i + lag]; best = Math.max(best, r / r0); }
     return best;
   });
   const clarity = clar.length ? mean(clar) : 0;

@@ -66,21 +66,24 @@ export function upscale(src, w, h, factor) {
  * RotSprite-style rotation of an RGBA block (w x h) by `deg` around (cx, cy) (block coords,
  * default centre). Upscales 8x with Scale2x, rotates with nearest sampling, samples back down.
  * Returns a w x h RGBA block (pixels rotated outside the block are lost — leave margin).
+ * opts {ox, oy, ow, oh}: return an ow x oh block instead, whose pixel (0,0) is block pixel (ox,oy)
+ * (a larger output rect keeps content rotated past the source block's edges).
  */
-export function rotsprite(src, w, h, deg, cx = w / 2, cy = h / 2) {
+export function rotsprite(src, w, h, deg, cx = w / 2, cy = h / 2, opts = {}) {
+  const ox = opts.ox ?? 0, oy = opts.oy ?? 0, ow = opts.ow ?? w, oh = opts.oh ?? h;
   const k = 8;
   const big = upscale(src, w, h, k);
   const BW = big.width, BH = big.height;
   const rad = (-deg * Math.PI) / 180; // inverse mapping
   const cos = Math.cos(rad), sin = Math.sin(rad);
-  const out = new Uint8ClampedArray(w * h * 4);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+  const out = new Uint8ClampedArray(ow * oh * 4);
+  for (let y = 0; y < oh; y++) for (let x = 0; x < ow; x++) {
     // sample the centre of the destination pixel in the 8x space
-    const dx = (x + 0.5 - cx) * k, dy = (y + 0.5 - cy) * k;
+    const dx = (x + ox + 0.5 - cx) * k, dy = (y + oy + 0.5 - cy) * k;
     const sx = Math.floor(cx * k + dx * cos - dy * sin), sy = Math.floor(cy * k + dx * sin + dy * cos);
     if (sx < 0 || sy < 0 || sx >= BW || sy >= BH) continue;
     const s = (sy * BW + sx) * 4;
-    out.set(big.data.subarray(s, s + 4), (y * w + x) * 4);
+    out.set(big.data.subarray(s, s + 4), (y * ow + x) * 4);
   }
   return out;
 }

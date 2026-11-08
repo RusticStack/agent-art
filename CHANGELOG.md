@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased
+
+### Audio
+
+- New SFX recipes for a sci-fi FPS, each with pitch/length/intensity/variation/wet vars:
+  - Firearms: `gunshot_rifle`, `gunshot_pistol`, `gunshot_marksman` (long outdoor slapback), `gunshot_shotgun`, `gunshot_smg`, `gunshot_lmg`, `gunshot_suppressed`. Each layers a crack, body, thump, sub, mechanical click and an environment tail (`vars.environment: "outdoor"|"indoor"|"canyon"`).
+  - Weapon handling: `mag_out`, `mag_in`, `bolt_rack`, `dry_fire`, `shotgun_pump`, `casing_drop` (`vars.surface: metal|concrete`).
+  - Sci-fi: `laser_bolt`, `plasma_shot`, `shield_hit`, `glitch_tear`, `teleport_swell`, `servo`, `drone_rotor` (loops), `hologram_ui`, `alarm_klaxon` (loops), `radio_squelch_on`/`_off`, `bullet_whiz`, `ricochet`.
+  - Movement: `footstep` (`vars.surface: metal|dirt|concrete|snow|grate`).
+- New layer kinds: `glide` (a tone or noise band following a frequency path, with AM, vibrato and a swell envelope) and `glitch` (stutter, bitcrush shards, dropouts).
+- `fx`, `reverb`, `target`, `loop`, `tail` and `names` are declared in the `art_audio` schema. Top-level `fx` and `reverb` now work on custom layered sfx. `fx` accepts `[{type}]`, `"dc"`, `{comp:{...}}` or a JSON string; this fixes `fx type "undefined" unknown`. `reverb` accepts `{preset, wet}`, a preset name or a JSON string, where before it was silently ignored. On recipes, `reverb` overrides the recipe's own.
+- `vars.target` (peak dBFS) is honoured for recipes and custom layers; the hover recipe used to peak at -9 dBFS while asked for -3. The critique's `too_quiet` respects the requested target.
+- A `note`/`voice` layer without an instrument or patch uses a default triangle tone instead of crashing. Bad layers (unknown kind, instrument or recipe) fail before anything is saved, and a failed render no longer leaves an empty asset behind.
+- `pitch_env`, `amp`, `filter`, `vibrato` and `oneshot` set on a layer override its patch. A negative `pitch_env.amount` rises, and `pitch_env.shape:"linear"` sweeps evenly over `time`. The recipe helper's `up` option now actually rises.
+- sfxr layers with a DC offset (square/saw slides) get a 20 Hz DC-blocking high-pass; `dc:false` keeps the raw output. Pitch clarity is measured on mean-removed frames, so an offset no longer reads as a clear tone.
+- `loop:true` (or `{length, crossfade}`) on sfx gives a seamless equal-power crossfaded loop, with loop points in the export (WAV `smpl`, OGG tags, sidecar).
+- `delete` accepts wildcards (`"pew_*"`) and `names:[...]`, like `export`.
+- Partial song update: re-sending a saved song with only `tracks` or only `sections` merges them into it per track/section (`null` removes one).
+- Analysis: drumless material (pads, drones) prefers the half-tempo candidate when its onset strength is comparable, so slow pads are no longer felt at double tempo. `loop_level_change` compares beat-aligned RMS windows when the tempo is known and discounts level changes the loop itself makes, so rhythmic loops with intended gaps no longer trigger it.
+- `info` on a recipe-made sfx shows `resolved: {layers, fx, reverb, target}`; sending these back with the same seed reproduces the sound.
+
+### Canvas and animation
+
+- `art_canvas crop` on frame strips crops every frame with the same rect (in frame coordinates) and keeps frames, animations, tags and rig anchors. It used to flatten the canvas to one frame.
+- `rotate {angle, expand:true}` grows the canvas (every frame) to fit the rotated content, so nothing is cut off. The default is unchanged.
+- `outline` no longer doubles to 2 px when re-run. `skip_existing:true` treats pixels already in the outline colour as outline. It is on by default when the layer already contains that exact colour; `skip_existing:false` restores the old behaviour.
+- `clear` with no region clears the whole layer (or the whole frame when `frame` is set). This is now documented.
+- `stamp_visible {keep_visible:true}` keeps the source layers visible.
+- `ellipse` honours `thickness`, like `rect`.
+- `text {font:"5x7"|"7x9"}` adds two larger built-in fonts (A-Z, 0-9 and punctuation); 3x5 stays the default.
+- Spritesheet export `json:false` skips the sidecar json. The shared exporter checks `a.json === false`.
+- `noise` accepts a `"keep"` colour that leaves pixels unchanged. Under a `mask`, transparent noise colours only erase with `erase:true`.
+- `adjust {alpha}` is a change in opacity (-1..1), clamped to 0..1, and bad values get a clear error. `set_alpha` sets opacity directly. Behaviour change: `alpha:0.5` no longer means "half opacity"; use `set_alpha:0.5`.
+- `mask:"!<color>"` paints everywhere except that colour.
+- `glow {select:"value"|"luma"|"saturation"}` defaults to HSV value, so saturated neon blooms; `luma` gives the old behaviour.
+- `gradient {dither:false}` means no dither. Radial gradients fill the corners with the outer colour, so there is no rectangle at the region edge.
+- `art_view {tile>1}` uses more of `max_size` (larger zoom plus a nearest-neighbour downscale). For example, `{tile:3, max_size:300}` on a 64 px texture gives 300 px instead of 192.
+- `art_draw {commands_file:"<path>.json"}` reads a JSON array of commands, or `{commands:[...]}`, from a file.
+- `art_critique {tileable:true}` returns `seams: {ok, edge, interior, worst:[x,y,delta]}`.
+
 ## 0.3.0
 
 Everything since 0.2.1.

@@ -104,6 +104,7 @@ export function critiqueImage(data, w, h, { kind = 'auto', tileable, maxColors }
   }
 
   // --- tiling seams (textures) ---
+  let seams;
   if (tileable ?? kind === 'texture') {
     // discontinuity across the wrap boundary vs every interior column/row boundary
     const colDiff = (x0, x1) => { let t = 0; for (let y = 0; y < h; y++) t += dist(at(x0, y), at(x1, y)); return t / h; };
@@ -114,7 +115,12 @@ export function critiqueImage(data, w, h, { kind = 'auto', tileable, maxColors }
     inner.sort((p, q) => p - q);
     const p90 = inner[inner.length - 1] ?? 0; // roughest interior line
     const e = Math.max(colDiff(w - 1, 0), rowDiff(h - 1, 0));
-    if (e > p90 * 1.1 + 6) add('tiling_seam', 'warn', `The wrap edge differs ${Math.round(e)} vs ${Math.round(p90)} for the roughest interior line: a visible seam when tiled.`, 'Check with art_view tile:3; continue shapes across the borders (shift wrap:true by half the size, fix the middle cross, shift back).');
+    // worst single pixel pair across the wrap (x,y = the right/bottom edge pixel)
+    let worst = [0, 0, 0];
+    for (let y = 0; y < h; y++) { const dd = dist(at(w - 1, y), at(0, y)); if (dd > worst[2]) worst = [w - 1, y, dd]; }
+    for (let x = 0; x < w; x++) { const dd = dist(at(x, h - 1), at(x, 0)); if (dd > worst[2]) worst = [x, h - 1, dd]; }
+    seams = { ok: !(e > p90 * 1.1 + 6), edge: Math.round(e), interior: Math.round(p90), worst: [worst[0], worst[1], Math.round(worst[2])] };
+    if (!seams.ok) add('tiling_seam', 'warn', `The wrap edge differs ${Math.round(e)} vs ${Math.round(p90)} for the roughest interior line: a visible seam when tiled.`, 'Check with art_view tile:3; continue shapes across the borders (shift wrap:true by half the size, fix the middle cross, shift back).');
     // straight lines that run exactly along the border look like a grid when tiled
     let rowSame = 0;
     for (let x = 0; x < w; x++) if (key(x, 0) === key(0, 0)) rowSame++;
@@ -193,6 +199,7 @@ export function critiqueImage(data, w, h, { kind = 'auto', tileable, maxColors }
   return {
     kind,
     stats: { size: `${w}x${h}`, colors: colors.length, coverage: pct(coverage), value_range: pct(hi - lo), noise: pct(noiseRatio) },
+    ...(seams ? { seams } : {}),
     issues,
     score,
   };

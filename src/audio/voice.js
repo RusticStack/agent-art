@@ -14,9 +14,12 @@ function pitchCurve(n, f, p, rng) {
   if (!(pe && pe.amount) && !(vb && vb.depth)) return f;
   const out = new Float32Array(n);
   const vib = vb && vb.depth ? lfo(n, vb.rate ?? 5.5, { depth: vb.depth, delay: vb.delay ?? 0, phase: rng.next() }) : null;
-  const k = pe && pe.amount ? -1 / Math.max(1e-4, (pe.time ?? 0.05) * SR) : 0;
+  // amount = start offset (semitones) gliding back to the note: positive falls, negative rises.
+  // shape "linear" glides evenly over `time` (an audible sweep) instead of the exponential drop.
+  const tN = Math.max(1, (pe?.time ?? 0.05) * SR), lin = pe?.shape === 'linear';
+  const k = pe && pe.amount ? -1 / tN : 0;
   for (let i = 0; i < n; i++) {
-    let semis = pe && pe.amount ? pe.amount * Math.exp(k * i) : 0;
+    let semis = pe && pe.amount ? pe.amount * (lin ? Math.max(0, 1 - i / tN) : Math.exp(k * i)) : 0;
     if (vib) semis += vib[i] / 100;
     const x = semis * 0.0577623;
     out[i] = f * (x > -0.2 && x < 0.2 ? 1 + x + x * x * 0.5 + x * x * x * 0.1666667 : Math.exp(x));

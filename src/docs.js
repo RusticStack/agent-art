@@ -15,9 +15,9 @@ export const SIGS = {
   curve: ['points:[3|4 pts],color,width?', 'bezier'],
   polygon: ['points,color?,outline?,fill?', 'polygon'],
   rect: ['x,y,w,h,color?,outline?,fill?,thickness?', 'rectangle'],
-  ellipse: ['x,y,w,h,color?,outline?,fill?', 'ellipse in a box'],
+  ellipse: ['x,y,w,h,color?,outline?,fill?,thickness?', 'ellipse in a box'],
   fill: ['x,y,color,tolerance?,contiguous?', 'flood fill'],
-  text: ['x,y,text,color,scale?,align?,shadow?', '3x5 pixel font'],
+  text: ['x,y,text,color,font?,scale?,align?,shadow?', 'pixel font'],
   // color
   replace: ['from,to,tolerance?,region', 'swap one color'],
   remap: ['map:{from:to},tolerance?,region', 'swap several colors (variants)'],
@@ -34,10 +34,10 @@ export const SIGS = {
   // transform
   copy: ['x,y,w,h,to_x,to_y,from_canvas?,from_layer?,from_frame?,scale?,flip_x?,tint?,opacity?', 'copy/stamp (also across canvases/frames)'],
   flip: ['axis,region', 'flip'],
-  rotate: ['turns|angle,region', 'rotate (90° steps or any angle)'],
+  rotate: ['turns|angle,expand?,region', 'rotate (90° steps or any angle)'],
   shift: ['dx,dy,wrap?,region', 'move pixels (wrap = fix seams)'],
   mirror: ['axis,source', 'mirror half'],
-  clear: ['region', 'erase'],
+  clear: ['region?', 'erase'],
   // light + atmosphere
   light: ['x,y,radius,color,intensity?,mode?,steps?', 'point light'],
   fog: ['color,from?,to?,direction?,noise?,steps?,region', 'haze'],
@@ -61,30 +61,30 @@ export const DETAILS = {
   curve: { doc: '3 points = quadratic, 4 = cubic bezier. Pixel-perfect. Use for hair, tails, round outlines.', ex: { op: 'curve', points: [[2, 12], [8, 0], [14, 12]], color: 'o' } },
   polygon: { doc: 'fill defaults to true; outline = border color.', ex: { op: 'polygon', points: [[8, 1], [15, 14], [1, 14]], color: 'g2', outline: 'o' } },
   rect: { doc: 'fill:false with color draws only the border.', ex: { op: 'rect', x: 2, y: 2, w: 12, h: 8, color: 'w2', outline: 'o' } },
-  ellipse: { doc: 'Bounding box x,y,w,h.', ex: { op: 'ellipse', x: 2, y: 2, w: 12, h: 12, color: 'r2', outline: 'o' } },
+  ellipse: { doc: 'Bounding box x,y,w,h. fill:false with color draws only the border; thickness = border width in px (like rect).', ex: { op: 'ellipse', x: 2, y: 2, w: 12, h: 12, color: 'r2', outline: 'o' } },
   fill: { doc: 'Flood fill on the target layer; contiguous:false replaces the color everywhere; diagonal:true spreads through corners.', ex: { op: 'fill', x: 8, y: 8, color: 'b2' } },
-  text: { doc: 'Built-in 3x5 font (A-Z 0-9 punctuation, \\n). scale multiplies; align left|center|right around x.', ex: { op: 'text', x: 32, y: 4, text: 'HELLO', color: '#fff', align: 'center', shadow: '#000' } },
+  text: { doc: 'Built-in pixel fonts, uppercase (A-Z 0-9 punctuation, \\n). font "3x5" (default, tiny), "5x7" (readable UI/labels) or "7x9" (titles). scale multiplies; align left|center|right around x; spacing, line_spacing in px.', ex: { op: 'text', x: 32, y: 4, text: 'HELLO', color: '#fff', align: 'center', shadow: '#000' } },
   replace: { doc: REGION, ex: { op: 'replace', from: '#ff0000', to: 'r2' } },
   remap: { doc: `Swap several colors at once (derive color variants of an asset). Errors listing the colors present if nothing matched (allow_none:true to skip). ${REGION}`, ex: { op: 'remap', map: { r1: 'b1', r2: 'b2', r3: 'b3' } } },
-  gradient: { doc: `direction: vertical|horizontal|diagonal|diagonal-reverse|radial. dither: bayer (default)|noise|none. Banded to the given colors. ${REGION}`, ex: { op: 'gradient', colors: ['#1a1030', '#4a2a60', '#c06070'], direction: 'vertical' } },
-  adjust: { doc: `hue in degrees, saturation/lightness -1..1, jitter = random ±lightness per pixel, alpha 0..1. ${REGION}`, ex: { op: 'adjust', lightness: -0.1, hue: 10 } },
+  gradient: { doc: `direction: vertical|horizontal|diagonal|diagonal-reverse|radial. dither: bayer (default)|noise|none (false = none). Banded to the given colors. radial reaches the last color on the region edge (corners filled with it). ${REGION}`, ex: { op: 'gradient', colors: ['#1a1030', '#4a2a60', '#c06070'], direction: 'vertical' } },
+  adjust: { doc: `hue in degrees, saturation/lightness -1..1, jitter = random ±lightness per pixel, alpha = opacity change -1..1 (-0.3 = 30% more transparent; result clamped 0..1), set_alpha = absolute opacity 0..1. ${REGION}`, ex: { op: 'adjust', lightness: -0.1, hue: 10 } },
   quantize: { doc: `Snap pixels to colors (default: the palette). dither none|bayer, strength. alpha_threshold:0.5 makes alpha binary. Run after effects to keep a coherent palette. ${REGION}`, ex: { op: 'quantize', dither: 'bayer' } },
   shade: { doc: `Shades shapes you already drew (any flat color) from ONE light direction using a ramp dark->light: rounded volume from the shape outline, no pillow shading. of: which colors form the shape (default every painted pixel in the region). light: top-left (default)|top|top-right|left|right|bottom-left|bottom|bottom-right or degrees. profile: round (dome, default)|flat (bevelled edges + flat top, set depth px)|sharp. per_color:true shades each flat color as its own part (e.g. arm vs body). bias -0.3..0.3 shifts lighter/darker; contrast; dither:true; wrap:true for tileable textures; cleanup:0 keeps lone pixels. Workflow: block in flat silhouettes -> shade -> outline -> hand detail. ${REGION}`, ex: { op: 'shade', colors: ['r0', 'r1', 'r2', 'r3', 'r4'], of: 'r2', light: 'top-left' } },
   cells: { doc: `Fills the region with a tileable pattern of separately shaded cells: cobblestone (size 5, gap 1), scales (layout brick), bricks (layout brick, stretch 2, profile flat, depth 1), cracked earth (gap_color dark, size 8), gravel (size 3). variation = per-cell tone shift (steps), jitter 0..1, depth/profile/light like shade. ${REGION}`, ex: { op: 'cells', colors: ['s0', 's1', 's2', 's3'], gap_color: '#2e2c36', size: 5, seed: 3 } },
-  noise: { doc: `Tileable value noise. weights = exact share of each color. scale = feature size px (1 = per-pixel). despeckle:1-2 absorbs lone pixels (flat cartoon surfaces). Prefer cells/shade for stone; noise is for subtle variation. ${REGION}`, ex: { op: 'noise', colors: ['d1', 'd2', 'd3'], weights: [0.3, 0.5, 0.2], scale: 3, despeckle: 1 } },
+  noise: { doc: `Tileable value noise. weights = exact share of each color. scale = feature size px (1 = per-pixel). despeckle:1-2 absorbs lone pixels (flat cartoon surfaces). Prefer cells/shade for stone; noise is for subtle variation. "keep" in colors leaves those pixels unchanged (sparse noise). Under a mask, transparent colors do not erase (no holes in the masked art) unless erase:true. ${REGION}`, ex: { op: 'noise', colors: ['d1', 'd2', 'd3'], weights: [0.3, 0.5, 0.2], scale: 3, despeckle: 1 } },
   scatter: { doc: `Random specks/blobs of size px. ${REGION}`, ex: { op: 'scatter', colors: ['g3', 'g4'], density: 0.05, size: 1, seed: 2 } },
-  outline: { doc: 'mode outer (around shapes, default)|inner (on the shape edge). of: only shapes of these colors (selective outline). from_layer: outline another layer\'s shapes onto this layer. diagonal:true = 8-connected. Region limits where it writes; honours mask. Use a dark hue-shifted color, not pure black.', ex: { op: 'outline', color: '#2a1a22' } },
+  outline: { doc: 'mode outer (around shapes, default)|inner (on the shape edge). of: only shapes of these colors (selective outline). from_layer: outline another layer\'s shapes onto this layer. diagonal:true = 8-connected. skip_existing:true = pixels already in the outline color count as outline, not shape, so re-running never doubles it to 2 px (only fills gaps); it is the default when the layer already has that exact color (pass skip_existing:false for a second ring). Region limits where it writes; honours mask. Use a dark hue-shifted color, not pure black.', ex: { op: 'outline', color: '#2a1a22' } },
   bevel: { doc: `Light top/left and dark bottom/right edge lines of size px (blocks, planks, buttons). ${REGION}`, ex: { op: 'bevel', light: 'w3', dark: 'w0' } },
   copy: { doc: 'Copy a block (from this layer, from_layer, from_frame or from_canvas = asset stamp). Order: scale/flip, then hue/saturation/lightness, then tint (multiply), then opacity. skip_transparent defaults true. Build animation frames from a base frame: copy from_frame then move parts.', ex: { op: 'copy', from_frame: 0, x: 0, y: 0, w: 32, h: 32, to_x: 0, to_y: 1 } },
   flip: { doc: `axis x|y. ${REGION}`, ex: { op: 'flip', axis: 'x' } },
-  rotate: { doc: 'turns:1..3 = 90° steps (square region). angle:<deg> = any angle with pixel-art-safe rotsprite-style sampling (no new colors). Region defaults to the whole canvas; pivot cx,cy defaults to its centre.', ex: { op: 'rotate', angle: 30, x: 8, y: 8, w: 16, h: 16 } },
+  rotate: { doc: 'turns:1..3 = 90° steps (square region). angle:<deg> = any angle with pixel-art-safe rotsprite-style sampling (no new colors). Region defaults to the whole canvas; pivot cx,cy defaults to its centre. Without expand, pixels rotated past the region/frame edge are cut. expand:true = nothing is cut: the canvas (every frame) grows just enough to hold the rotated content (content shifts by the left/top growth) and the result may extend past the region.', ex: { op: 'rotate', angle: 30, x: 8, y: 8, w: 16, h: 16 } },
   shift: { doc: `Move pixels by dx,dy (wrap:true default wraps around: shift by half the size to see/fix tile seams in the middle). ${REGION}`, ex: { op: 'shift', dx: 8, dy: 8 } },
   mirror: { doc: 'Copy one half onto the other mirrored: axis x|y, source left|right|top|bottom. Symmetric sprites: draw the left half, mirror.', ex: { op: 'mirror', axis: 'x', source: 'left' } },
-  clear: { doc: REGION, ex: { op: 'clear', x: 0, y: 0, w: 4, h: 4 } },
+  clear: { doc: `No region = the whole layer (with frame: the whole frame). ${REGION} Honours mask.`, ex: { op: 'clear', x: 0, y: 0, w: 4, h: 4 } },
   light: { doc: 'mode add|screen|multiply|paint; falloff smooth|linear|sharp; radius_y for ellipses; steps bands (0 = smooth). Paints empty pixels too (on_empty:false = only painted ones). Put lights on their own layer with blend screen/add.', ex: { op: 'light', x: 40, y: 30, radius: 18, color: '#ffb060', intensity: 0.8, mode: 'add' } },
   fog: { doc: `direction vertical|up|horizontal|radial; from/to = alpha; noise 0..1 wisps. For big smooth fog use steps:0 then quantize dither bayer once (a few steps + bayer looks like a screen door). ${REGION}`, ex: { op: 'fog', color: '#8fa6c0', from: 0, to: 0.4, direction: 'up', noise: 0.4 } },
   rays: { doc: 'God rays from x,y: angle (deg, 90 = down), spread, count, width (deg), length, alpha. Draw on a layer with blend screen/add.', ex: { op: 'rays', x: 20, y: -10, angle: 60, spread: 30, count: 4, width: 6, color: '#ffe7a8', alpha: 0.4 } },
-  glow: { doc: 'Bloom around pixels brighter than threshold. Tiny 1-2 px emitters need gain:3-6 or normalize:true. wrap:true for tiling textures. steps bands it.', ex: { op: 'glow', threshold: 0.7, radius: 2, gain: 3 } },
+  glow: { doc: 'Bloom around pixels brighter than threshold. select: value (default, HSV max channel: saturated neon blooms too) | luma (perceived brightness, the previous default) | saturation. Tiny 1-2 px emitters need gain:3-6 or normalize:true. wrap:true for tiling textures. steps bands it.', ex: { op: 'glow', threshold: 0.7, radius: 2, gain: 3 } },
   blur: { doc: `Depth of field for far/near layers (passes:1 for lighter). ${REGION}`, ex: { op: 'blur', radius: 1 } },
   vignette: { doc: 'strength 0..1, radius 0..1 where darkening starts.', ex: { op: 'vignette', strength: 0.5 } },
   cast_shadow: { doc: 'Projects from_layer\'s shapes onto this layer: dx,dy offset, squash (0.3-0.6 = on the ground), skew, base_y (ground row, default lowest painted row), soft = blur px (banded).', ex: { op: 'cast_shadow', from_layer: 'hero', dx: 3, dy: 0, squash: 0.4, color: '#00000066', soft: 1 } },
@@ -92,7 +92,7 @@ export const DETAILS = {
   iso_tile: { doc: 'Flat iso diamond with the iso_box positioning; inset:1 leaves grout gaps.', ex: { op: 'iso_tile', at: [0, 0, 0], tile: 32, origin: [64, 20], color: '#6a7a5a', inset: 1 } },
 };
 
-export const COMMON = 'Every command may set: layer, frame (frame-local coords), mask ("opaque" | "transparent" | color | "layer:<name>" | "!layer:<name>"), blend ("replace" | "over"), symmetry ("x"|"y"|"xy").';
+export const COMMON = 'Every command may set: layer, frame (frame-local coords), mask ("opaque" | "transparent" | color | "!<color>" | "layer:<name>" | "!layer:<name>"), blend ("replace" | "over"), symmetry ("x"|"y"|"xy").';
 
 /** art_draw description: compact signatures grouped by purpose. */
 export function drawDescription() {
@@ -149,7 +149,7 @@ Avoid: pillow shading (light on every edge), noise/speckle everywhere, pure blac
 - Key poses first, then in-betweens. Walk: contact, down, passing, up (x2 for left/right). Idle: 2-4 frames, 1px breathing bob. Attack: anticipation, smear, impact, recovery.
 - High frame rates (12-24 fps): use art_rig — poses on keyframes, tween generates the in-betweens with sub-pixel-safe rotation.
 - Draw a frame: art_draw {frame:N}. Check: art_view {frame, onion:1}, art_animation filmstrip, art_critique.
-- Export: art_animation export format gif (preview) | spritesheet (png + Aseprite-style json) | frames. path "out/knight" writes out/knight.png+.json; a folder path ("out/knight/") writes out/knight/<canvas>.*.`,
+- Export: art_animation export format gif (preview) | spritesheet (png + Aseprite-style json) | frames. path "out/knight" writes out/knight.png+.json (json:false = png only); a folder path ("out/knight/") writes out/knight/<canvas>.*.`,
   scenes: `2.5D / HD-2D SCENES
 Layers back to front: sky, far, mid, play, foreground. Far = lower contrast, bluer; optional blur. Lights on their own layers (art_layer add blend:"screen"/"add"), shadows blend "multiply", color grade "overlay". fog between depth layers, rays from windows/canopies, glow on emissive pixels. Finish: art_layer stamp_visible + quantize the stamp. Stamp repeated props with copy from_canvas (scaled/tinted for distance). Iso: iso_box/iso_tile back to front. art_canvas normal_map for engine lighting.`,
   hires: `HIGH-RESOLUTION PIXEL ART (128px .. 2048px)

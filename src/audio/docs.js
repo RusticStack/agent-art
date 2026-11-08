@@ -66,8 +66,20 @@ LOOP: create (sfx/song) -> analyze (image + listener report) -> critique (ranked
 SFX: art_audio {action:"sfx", recipe:"gib_burst", seed:1, variants:3, vars:{pitch:0 (semitones), length:1, intensity:0.6, variation:0.5, wet:0.7, reverb?}} -> assets gib_burst_1..3. Recipes:
 ${Object.entries(RECIPE_GROUPS).map(([g, l]) => `  ${g}: ${l.join(' ')}`).join('\n')}
   sfxr: {params:{wave:"square|saw|sine|noise", freq:0.3, slide:-0.2, attack, sustain, punch, decay, lpf_freq, hpf_freq, vib_strength, arp_mod, repeat_speed, phaser_offset, duty...}} (sfxr ranges 0..1 / -1..1).
-  Custom layers: {layers:[{kind:"voice"|"note"|"sfxr"|"crackle"|"drops"|"squelch"|"growl"|"whoosh"|"recipe", at:s, gain:dB, pan, ...}], fx:[...], reverb:{preset, wet}}.
+  Custom layers: {layers:[{kind:"voice"|"note"|"sfxr"|"crackle"|"drops"|"squelch"|"growl"|"whoosh"|"glide"|"glitch"|"recipe", at:s, gain:dB, pan, ...}], fx:[...], reverb:{preset, wet}}.
   SFX are trimmed (no head silence), faded and normalised to peak -1 dBFS (target:-3 for UI).
+FPS / SCI-FI SFX (firearms, weapon_handling, scifi, movement groups above):
+  Firearms gunshot_rifle|pistol|marksman|shotgun|smg|lmg|suppressed layer a transient crack, body, thump, sub, mechanical click and an environment tail: vars.environment "outdoor" (slapback; marksman = long slapback) | "indoor" (room) | "canyon" (long repeating echoes). vars.wet scales the tail, intensity the crack/drive.
+  Handling: mag_out mag_in bolt_rack dry_fire shotgun_pump casing_drop (vars.surface "metal"|"concrete"). footstep vars.surface "metal"|"dirt"|"concrete"|"snow"|"grate".
+  Sci-fi: laser_bolt plasma_shot shield_hit glitch_tear teleport_swell servo drone_rotor hologram_ui alarm_klaxon radio_squelch_on radio_squelch_off bullet_whiz ricochet. drone_rotor and alarm_klaxon are loops by default (loop:false = one-shot).
+  Example: {action:"sfx", recipe:"gunshot_rifle", variants:4, vars:{environment:"canyon", intensity:0.8}}.
+SFX OPTIONS (recipes and custom layers alike):
+  fx:[{type:"dc"|"eq"|"comp"|"drive"|"delay"|...}] runs on the mixed layers (also "dc", ["dc","comp"] or {comp:{ratio:4}}). reverb:{preset:"room"|"studio"|"hall"|"plate"|"crypt"|"cathedral", wet:0.3} | "hall" | false. target:-3 or vars.target = peak dBFS. tail:s = padding for delay/reverb tails.
+  loop:true | {length:s, crossfade:s} = seamless loop: the end crossfades (equal power) into the start and export writes loop points (WAV smpl, OGG tags).
+  Layer kinds also: glide {wave|noise:true, pts:[[t,hz],...] or f, dur, a, r, decay, env:"swell", am:{rate,depth}, vib:{rate,depth cents}, lp, bp, q, track} and glitch {dur, density, f}.
+  note/voice layers without instrument/patch use a plain triangle tone; pitch_env/amp/filter/vibrato set on the layer override the patch. pitch_env.amount = start offset in semitones gliding back to the note: positive falls, negative rises; shape:"linear" sweeps evenly over time.
+  sfxr layers are DC-blocked (20 Hz high-pass) when they carry an offset; dc:false keeps the raw output.
+  info {name} on a recipe asset shows resolved:{layers, fx, reverb, target}: send them back as {layers, fx, reverb, seed} to reproduce and edit the sound. delete {name:"pew_*"} takes wildcards.
 INSTRUMENTS: art_audio {action:"instrument"} lists presets; {name:"metal_guitar"} shows the patch JSON; save a tweak {name:"my_gtr", patch:{base:"metal_guitar", fx:[{gain:40}]}}; audition {name, notes:"E5 _ F5 _"}.
 Presets: ${Object.keys(PRESETS).filter((k) => !DRUMS[k]).join(' ')}; drums: ${Object.keys(DRUMS).join(' ')}.
 Patch = {sources:[{type:osc|additive|modal|fm|pluck|bowed|noise|metal|sample, ...}], amp:{a,d,s,r}, filter:{type,cutoff,q,keytrack,env,env_amount,lfo}, pitch_env, vibrato, mute:{...palm-mute overrides}, layers:[{max_vel, ...velocity layer}], hits, oneshot, fx:[...], gain, pan, width, reverb (send), double (L/R takes), humanize:{time,vel}, round_robin, octave}.
@@ -86,6 +98,7 @@ SECTIONS: {verse:{bars:8, <track>: <pattern>, transpose?, vel?}}. Missing track 
   lowercase = note (e2 f#3 bb1); Uppercase = chord at the track octave (Em C5 Bdim Am7 Fsus4; X5 = power chord); roman numerals vs key (i iv bVI V7); stacks e2+b2+e3;
   "_" holds the previous note, "." rests, tok*4 repeats. Suffixes: ! accent, ? ghost, ' palm-mute/staccato, ~ legato, % tremolo picking, < swell, @0.6 velocity.
 - Generators inline: {gen:"doom_riff", style:"chug|gallop|doom|breakdown|tremolo", seed}, {gen:"organ_progression", style:"dirge|phrygian|liturgical|harmonic"}, {gen:"blast_beat", style:"blast|hammer|gravity|double_kick|dbeat|half_time|doom|four_floor|breakbeat|trap|rock", fill}, {gen:"dread_ambient", part:"drone|bells|heartbeat|wind"}. art_audio {action:"generate", generator, ...} returns the text to edit.
+PARTIAL UPDATE: re-send a saved song (same name) with only tracks or only sections: they merge into it per track/section (null removes one); everything else is kept.
 ARRANGEMENT: ["intro","verse","verse","chorus"] or "intro verse*2 chorus". loop: true (whole song loops seamlessly: tails wrap to the start) | "verse" (intro plays once) | false. swing: 0..0.5. layers:{explore:["organ","drone"], combat:["gtr","bass","drums"], boss:["choir"]} -> export {layers:true} = one file per intensity layer + manifest.
 SCALES: ${['major', 'minor', 'dorian', 'phrygian', 'lydian', 'mixolydian', 'locrian', 'harmonic_minor', 'melodic_minor', 'phrygian_dominant', 'hungarian_minor', 'double_harmonic', 'pentatonic_minor', 'blues', 'diminished'].join(' ')}.
 GENRE RECIPES (compare with critique {genre}):

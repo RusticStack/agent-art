@@ -67,12 +67,13 @@ export const TOOLS = [
       properties: {
         canvas: S.canvas,
         commands: { type: 'array', minItems: 1, items: { type: 'object', properties: { op: { type: 'string', enum: COMMAND_NAMES } }, required: ['op'], additionalProperties: true } },
+        commands_file: { type: 'string' },
         layer: S.layer, frame: S.frame,
         label: { type: 'string', description: 'shown in the UI log' },
         preview: { type: 'boolean', description: 'also return an image of the result' },
         critique: { type: 'boolean', description: 'also return the art_critique summary' },
       },
-      required: ['canvas', 'commands'],
+      required: ['canvas'],
     },
     run: async (call, a) => {
       const { preview, critique, ...rest } = a;
@@ -172,7 +173,7 @@ export const TOOLS = [
   },
   {
     name: 'art_layer',
-    description: 'Layers. add {name, position?: above|below|top|bottom, blend?, opacity?, select?}, remove, select, rename, visibility, opacity, blend, move {index|position}, duplicate, merge_down, flatten {keep_hidden|discard_hidden}, stamp_visible (composite -> new top layer, to quantize/glow the whole image).',
+    description: 'Layers. add {name, position?: above|below|top|bottom, blend?, opacity?, select?}, remove, select, rename, visibility, opacity, blend, move {index|position}, duplicate, merge_down, flatten {keep_hidden|discard_hidden}, stamp_visible (composite of visible layers -> new top layer).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -180,7 +181,7 @@ export const TOOLS = [
         action: { type: 'string', enum: ['add', 'remove', 'select', 'rename', 'visibility', 'opacity', 'blend', 'move', 'duplicate', 'merge_down', 'flatten', 'stamp_visible'] },
         layer: S.layer, name: { type: 'string' }, index: { type: 'integer' }, position: { type: 'string', enum: ['above', 'below', 'top', 'bottom'] },
         blend: { type: 'string', enum: BLENDS }, opacity: { type: 'number' }, visible: { type: 'boolean' }, select: { type: 'boolean' },
-        keep_hidden: { type: 'boolean' }, discard_hidden: { type: 'boolean' }, hide_others: { type: 'boolean' },
+        keep_hidden: { type: 'boolean' }, discard_hidden: { type: 'boolean' }, hide_others: { type: 'boolean' }, keep_visible: { type: 'boolean' },
       },
       required: ['canvas', 'action'],
     },
@@ -215,7 +216,7 @@ export const TOOLS = [
         frame: { type: 'integer' }, at: { type: 'integer' }, count: { type: 'integer' }, copy_from: { type: 'integer' },
         duration: { type: 'integer' }, durations: { type: 'array', items: { type: 'integer' } }, fps: { type: 'number' }, loop: { type: 'boolean' },
         direction: { type: 'string', enum: ['forward', 'reverse', 'pingpong'] }, frame_height: { type: 'integer' }, animation: { type: 'string' },
-        onion: { type: 'integer' }, scale: { type: 'integer' }, format: { type: 'string', enum: ['gif', 'spritesheet', 'frames'] }, path: { type: 'string' }, layout: { type: 'string', enum: ['rows', 'strip'] },
+        onion: { type: 'integer' }, scale: { type: 'integer' }, format: { type: 'string', enum: ['gif', 'spritesheet', 'frames'] }, path: { type: 'string' }, layout: { type: 'string', enum: ['rows', 'strip'] }, json: { type: 'boolean' },
       },
       required: ['canvas', 'action'],
     },
@@ -270,7 +271,7 @@ export const TOOLS = [
   },
   {
     name: 'art_audio',
-    description: 'Sound effects, music and audio analysis you read as images + reports (you cannot hear). sfx {recipe|params|layers, seed, variants, vars}; instrument {name, patch, notes}; generate {generator,...}; song {name, text (notation) | song (JSON), intent, genre}; render; analyze {name, view:"mix"} = image + listener report; critique {name, intent, genre}; compare {name, reference}; import {path}; export {name|"x_*", format, stems, layers}; list; info; delete. Details: art_help {topic:"audio"|"music"|"mixing"|"perception"}.',
+    description: 'Sound effects, music and audio analysis you read as images + reports (you cannot hear). sfx {recipe|params|layers, seed, variants, vars, fx, reverb, target, loop}; instrument {name, patch, notes}; generate {generator,...}; song {name, text (notation) | song (JSON), intent, genre}; render; analyze {name, view:"mix"} = image + listener report; critique {name, intent, genre}; compare {name, reference}; import {path}; export {name|"x_*", format, stems, layers}; list; info; delete {name|"x_*"}. Details: art_help {topic:"audio"|"music"|"mixing"|"perception"}.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -279,6 +280,9 @@ export const TOOLS = [
         patch: { type: 'object' }, notes: { type: ['string', 'object'] }, generator: { type: 'string' }, text: { type: 'string' }, song: { type: 'object' },
         intent: { type: 'string' }, genre: { type: 'string' }, view: { type: 'string', enum: ['overview', 'mix'] }, reference: { type: 'string' }, path: { type: 'string' },
         format: { type: 'string', enum: ['wav', 'mp3', 'ogg', 'opus'] }, stems: { type: 'boolean' }, sample_rate: { enum: [44100, 48000] },
+        // sfx: fx chain [{type}], reverb {preset, wet}, peak target dBFS, loop true|{length, crossfade}, tail s
+        fx: { type: ['array', 'string'] }, reverb: { type: ['object', 'string', 'number', 'boolean'] }, target: { type: 'number' }, loop: { type: ['boolean', 'object'] }, tail: { type: 'number' },
+        names: { type: 'array', items: { type: 'string' } },
       },
       required: ['action'],
     },

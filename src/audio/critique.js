@@ -4,7 +4,7 @@ import { GENRES } from './genres.js';
 
 const r1 = (v) => Math.round(v * 10) / 10;
 
-export function critiqueAudio(stats, { kind = 'music', target_lufs, loop = false, perception = null, recipe = null, genre = null } = {}) {
+export function critiqueAudio(stats, { kind = 'music', target_lufs, target_peak = null, loop = false, perception = null, recipe = null, genre = null } = {}) {
   const issues = [];
   const add = (id, audibility, message, fix) => issues.push({ id, audibility: r1(audibility), message, fix });
   if (stats.clipped_samples > 0 || stats.true_peak_dbtp > 0) add('clipping', 0.95, `${stats.clipped_samples} clipped samples, true peak ${stats.true_peak_dbtp} dBTP (audible crackle/distortion)`, kind === 'music' ? 'lower track gains or keep master ceiling at -1 (master:{ceiling:-1})' : 'lower layer gains; the sfx normaliser targets -1 dBFS (target:-1)');
@@ -31,7 +31,10 @@ export function critiqueAudio(stats, { kind = 'music', target_lufs, loop = false
     else if (loop && stats.seam && stats.seam.level_jump_db > 9) add('loop_level_change', 0.2, `level changes ${stats.seam.level_jump_db} dB at the loop point (no click: a section change)`, 'fine if intended; for a smoother wrap make the last bar lead into the first (same density/chord)');
   } else {
     const dur = stats.duration;
-    if (stats.peak_dbfs < -4) add('too_quiet', 0.5, `peak ${stats.peak_dbfs} dBFS (SFX target -1 dBFS)`, 'target:-1');
+    // a quiet peak is only an issue when it misses the asked-for target (UI sounds often sit at -6..-9)
+    const tp = target_peak ?? -1;
+    if (stats.peak_dbfs < Math.min(-4, tp - 3)) add('too_quiet', 0.5, `peak ${stats.peak_dbfs} dBFS (SFX target ${tp} dBFS)`, `target:${tp}`);
+    if (loop && stats.seam?.click) add('loop_seam', 0.8, `loop seam has a discontinuity (sample jump ${stats.seam.jump}): audible click each loop`, 'loop:{crossfade:0.2} or a longer, steadier body');
     if (stats.true_peak_dbtp > -0.3) add('too_hot', 0.35, `true peak ${stats.true_peak_dbtp} dBTP`, 'target:-1.5');
     if (stats.head_silence_ms > 20) add('head_silence', 0.5, `${stats.head_silence_ms} ms of silence before the sound (feels laggy in game)`, 'move layer "at" times to 0');
     const ui = recipe && /click|hover|confirm|ui/.test(recipe);
