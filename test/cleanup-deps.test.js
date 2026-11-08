@@ -33,3 +33,35 @@ test('cleanup deps: trim sheets, baked meshes, material detail maps, masks and k
   assert.throws(() => e.run('cleanup_apply', { select: { ids: ['canvas:hull_trim'] }, confirm: true }), /refused, nothing removed/);
   assert.ok(e.docs.has('hull_trim'));
 });
+
+test('cleanup kinds: art_anim skeletons, clips, skins, weapons and art_planet planets are registered assets', () => {
+  const home = tmp();
+  const e = new Engine({ home });
+  e.run('anim_skeleton', { name: 'hum', template: 'humanoid_hd', frame: [48, 64] });
+  e.run('anim_skin', { name: 'hero', skeleton: 'hum' });
+  e.run('anim_weapon', { name: 'ak', class: 'rifle', frame: [48, 64] });
+  e.run('planet_create', { name: 'mars', preset: 'desert', equirect: 64, preview_size: 32 });
+  e.flush();
+  // the rigs a skin / weapon draws on are used, not orphans
+  const orphans = e.run('cleanup_flags', {}).orphans;
+  for (const id of ['rig:hero', 'rig:weapon_ak', 'skeleton:hum', 'clip:hum/idle']) assert.ok(!orphans.includes(id), `${id} is not an orphan`);
+  const by = blockedBy(e.run('cleanup_plan', { full: true, select: { ids: ['rig:hero', 'rig:weapon_ak', 'skeleton:hum'] } }));
+  assert.ok(by['rig:hero'].includes('skin:hero'));
+  assert.ok(by['rig:weapon_ak'].includes('weapon:ak'));
+  assert.ok(by['skeleton:hum'].includes('skin:hero') && by['skeleton:hum'].includes('clip:hum/idle'));
+  // selectable by kind, removed and restored byte for byte
+  const files = ['library/skins/hero.json', 'library/weapons/ak.json', 'library/clips/hum/idle.json', 'planets/mars.json'].map((f) => path.join(home, f));
+  const bytes = files.map((f) => fs.readFileSync(f));
+  const p = e.run('cleanup_plan', { full: true, select: [{ kind: ['skin', 'weapon', 'planet'] }, { ids: ['clip:hum/idle'] }] });
+  assert.deepEqual(p.items.map((x) => x.id).sort(), ['clip:hum/idle', 'planet:mars', 'skin:hero', 'weapon:ak']);
+  const r = e.run('cleanup_apply', { plan_id: p.plan_id, confirm: true });
+  for (const f of files) assert.ok(!fs.existsSync(f), `${f} moved to the trash`);
+  assert.throws(() => e.run('anim_info', { skin: 'hero' }), /no skin "hero"/);
+  // a whole skeleton goes with its clips (and the skin needing it) only on request
+  assert.match(e.run('cleanup_plan', { select: { ids: ['skeleton:hum'] }, include_dependents: true }).remove.by_kind.clip + '', /^\d+$/);
+  e.run('cleanup_restore', { ids: [r.trash] });
+  files.forEach((f, i) => assert.deepEqual(fs.readFileSync(f), bytes[i]));
+  assert.equal(e.run('anim_info', { skin: 'hero' }).rig, 'hero');
+  const usage = e.run('cleanup_usage', {});
+  for (const k of ['skeleton', 'clip', 'skin', 'weapon', 'planet']) assert.ok(usage.by_kind[k], `usage lists ${k}`);
+});

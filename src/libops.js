@@ -14,6 +14,7 @@ import { orderOf } from './depth.js';
 import { encodePNG } from './png.js';
 import { writeSkinGLB } from './gltfskin.js';
 import { compactCells } from './compact.js';
+import { registerAssetType } from './assettypes.js';
 
 const RIG_OPTS = ['sampling', 'secondary', 'feet', 'scale_children', 'weapon', 'variant_sets', 'depth', 'skin', 'constrain', 'limits'];
 const libDir = (e, ...p) => path.join(e.home, 'library', ...p);
@@ -691,3 +692,47 @@ function frontParts(rig, trace, spec) {
   return ['upper_arm_f', 'forearm_f', 'hand_f'].filter((n) => rig.parts[n]);
 }
 
+
+// ---------- asset graph + cleanup (assettypes.js) ----------
+// Library assets are JSON files read on demand (no in-memory cache), so unload / reload only
+// announce the change. Skins and weapon assets need the rig they draw on; clips need their skeleton.
+const mtime = (f) => { try { return Math.round(fs.statSync(f).mtimeMs); } catch { return undefined; } };
+const tryJSON = (f) => { try { return readJSON(f); } catch { return null; } };
+const libEvent = (kind) => (e, name, source) => e.emit('event', { type: 'anim_library', kind, name, source, ts: Date.now() });
+const libType = (kind, dir, edges, extra = {}) => registerAssetType(kind, {
+  list: (e) => listNames(e, dir),
+  exists: (e, n) => LIB_NAME.test(n) && fs.existsSync(libDir(e, dir, `${n}.json`)),
+  info: (e, n) => ({ updated: mtime(libDir(e, dir, `${n}.json`)) }),
+  files: (e, n) => (LIB_NAME.test(n) ? [libDir(e, dir, `${n}.json`)] : []),
+  edges, unload: libEvent(kind), reload: libEvent(kind), ...extra,
+});
+// a skeleton contains its clip library (clip part_of skeleton = a hard dependency, not an orphan)
+libType('skeleton', 'skeletons', undefined, { container: true });
+libType('skin', 'skins', (e, add) => {
+  for (const n of listNames(e, 'skins')) {
+    const s = tryJSON(libDir(e, 'skins', `${n}.json`));
+    if (!s) continue;
+    if (s.skeleton) add(`skin:${n}`, 'depends_on', `skeleton:${s.skeleton}`);
+    if (s.rig) add(`skin:${n}`, 'depends_on', `rig:${s.rig}`);
+  }
+});
+libType('weapon', 'weapons', (e, add) => {
+  for (const n of listNames(e, 'weapons')) { const w = tryJSON(libDir(e, 'weapons', `${n}.json`)); if (w?.rig) add(`weapon:${n}`, 'depends_on', `rig:${w.rig}`); }
+});
+/** Clips are "clip:<skeleton>/<clip>" (one file each under library/clips/<skeleton>/). */
+const clipParts = (n) => { const i = n.indexOf('/'); const sk = n.slice(0, i), c = n.slice(i + 1); return i > 0 && LIB_NAME.test(sk) && LIB_NAME.test(c) ? [sk, c] : null; };
+const clipDirs = (e) => { const d = libDir(e, 'clips'); try { return fs.readdirSync(d, { withFileTypes: true }).filter((x) => x.isDirectory() && LIB_NAME.test(x.name)).map((x) => x.name); } catch { return []; } };
+registerAssetType('clip', {
+  list: (e) => clipDirs(e).flatMap((sk) => listNames(e, 'clips', sk).map((c) => `${sk}/${c}`)),
+  exists: (e, n) => { const p = clipParts(n); return !!p && fs.existsSync(clipFile(e, ...p)); },
+  info: (e, n) => { const p = clipParts(n); return p ? { updated: mtime(clipFile(e, ...p)) } : {}; },
+  files: (e, n) => { const p = clipParts(n); return p ? [clipFile(e, ...p)] : []; },
+  edges: (e, add) => {
+    for (const sk of clipDirs(e)) for (const c of listNames(e, 'clips', sk)) {
+      add(`clip:${sk}/${c}`, 'part_of', `skeleton:${sk}`);
+      const clip = tryJSON(clipFile(e, sk, c));
+      for (const l of clip?.layers || []) if (l?.clip && l.clip !== c) add(`clip:${sk}/${c}`, 'depends_on', `clip:${sk}/${l.clip}`);
+    }
+  },
+  unload: libEvent('clip'), reload: libEvent('clip'),
+});

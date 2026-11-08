@@ -21,6 +21,7 @@ import { rockMesh, crystalMesh, grassCard, grassTexture, shrubTexture, formation
 import { Mesh } from '../model3d.js';
 import { makeTile, edgeTile } from './tiles.js';
 import { normSky, SKY_PRESETS, bakeSkyFaces, bakeSkyEquirect, crossPreview } from './skybox.js';
+import { registerAssetType } from '../assettypes.js';
 import { sunSprite, flareSheet, debrisCard, dustStorm, lightning, SUN_COLORS } from './fx.js';
 
 const NAME_RE = /^[A-Za-z0-9_\-.]{1,64}$/;
@@ -829,3 +830,24 @@ export const PLANET_OPS = {
   planet_asteroids: planetAsteroids, planet_skybox: planetSkybox, planet_fx: planetFx, planet_info: planetInfo,
 };
 export { latLonDir, elevKm };
+
+// ---------- asset graph + cleanup (assettypes.js) ----------
+// Planet specs are read from <workspace>/planets/<name>.json on demand (no cache): unload / reload
+// only announce the change. A planet coloured from a project palette uses that palette.
+const planetFile = (e, n) => path.join(e.home, 'planets', `${n}.json`);
+const planetNames = (e) => { try { return fs.readdirSync(path.join(e.home, 'planets')).filter((x) => x.endsWith('.json')).map((x) => x.slice(0, -5)).filter((n) => NAME_RE.test(n)); } catch { return []; } };
+const planetEvent = (e, name, source) => e.emit('event', { type: 'planet', name, source, ts: Date.now() });
+registerAssetType('planet', {
+  list: planetNames,
+  exists: (e, n) => NAME_RE.test(n) && fs.existsSync(planetFile(e, n)),
+  info: (e, n) => { try { const st = fs.statSync(planetFile(e, n)); const j = JSON.parse(fs.readFileSync(planetFile(e, n), 'utf8')); return { updated: Math.round(st.mtimeMs), ...(typeof j.project === 'string' ? { project: j.project } : {}) }; } catch { return {}; } },
+  files: (e, n) => (NAME_RE.test(n) ? [planetFile(e, n)] : []),
+  edges: (e, add) => {
+    for (const n of planetNames(e)) {
+      let j;
+      try { j = JSON.parse(fs.readFileSync(planetFile(e, n), 'utf8')); } catch { continue; }
+      if (typeof j.palette === 'string' && j.palette.startsWith('project:')) add(`planet:${n}`, 'uses_palette', `palette:${j.palette.slice(8)}`);
+    }
+  },
+  unload: planetEvent, reload: planetEvent,
+});
