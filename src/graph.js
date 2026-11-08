@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { audioStore } from './audio/ops.js';
 import { modelDefs } from './modelops.js';
+import { assetType, assetTypes, subOwnerKind } from './assettypes.js';
 
 export const RELS = ['part_of', 'variant_of', 'view_of', 'layer_of', 'uses_palette', 'rendered_from', 'exports_to', 'depends_on', 'replaces'];
 export const KINDS = ['canvas', 'layer', 'anim', 'frame', 'rig', 'rigpart', 'model', 'modelpart', 'palette', 'audio', 'export', 'project', 'group', 'file'];
@@ -20,6 +21,8 @@ const BARE_ORDER = ['canvas', 'model', 'rig', 'audio', 'group', 'project'];
 const DEFAULT_CHARS = 1600;
 
 const kindOf = (id) => id.slice(0, id.indexOf(':'));
+/** Registered kinds the built-in lookups do not already cover (assettypes.js). */
+const extraKinds = () => assetTypes().filter((t) => !t.builtin && !KINDS.includes(t.kind)).map((t) => t.kind);
 const nameOf = (id) => id.slice(id.indexOf(':') + 1);
 const fmtAttrs = (a) => (a && Object.keys(a).length ? ` {${Object.entries(a).map(([k, v]) => `${k}:${v}`).join(',')}}` : '');
 
@@ -71,7 +74,12 @@ export class Graph {
       case 'group': return !!this.data.groups[n];
       case 'export': return fs.existsSync(path.isAbsolute(n) ? n : path.join(e.exportDir, n));
       case 'file': return fs.existsSync(n);
-      default: return false;
+      default: {
+        // registered asset kinds (assettypes.js): planet:x, ship:y, ...
+        const t = assetType(k);
+        if (!t) return false;
+        try { return t.exists ? !!t.exists(e, n) : [...t.list(e)].includes(n); } catch { return false; }
+      }
     }
   }
   models() {
@@ -86,13 +94,13 @@ export class Graph {
     if (typeof ref !== 'string' || !ref.trim()) throw new Error('node reference must be a non-empty string like "canvas:helmet" or "helmet"');
     ref = ref.trim();
     const m = ref.match(/^([a-z]+):(.+)$/);
-    if (m && KINDS.includes(m[1])) {
+    if (m && (KINDS.includes(m[1]) || assetType(m[1]) || subOwnerKind(m[1]))) {
       const id = m[1] === 'export' ? `export:${this.exportRel(m[2])}` : ref;
       if (mustExist && !this.exists(id)) throw new Error(`no ${m[1]} "${m[2]}"`);
       return id;
     }
     if (m && m[1] === 'tag') return `anim:${m[2]}`;
-    for (const k of BARE_ORDER) if (this.exists(`${k}:${ref}`)) return `${k}:${ref}`;
+    for (const k of [...BARE_ORDER, ...extraKinds()]) if (this.exists(`${k}:${ref}`)) return `${k}:${ref}`;
     throw new Error(`unknown node "${ref}": no canvas, model, rig, audio, group or project of that name (prefix the kind: ${KINDS.map((k) => k + ':').join(' ')})`);
   }
   exportRel(p) {
@@ -144,6 +152,8 @@ export class Graph {
       for (const t of textures) add(id, 'depends_on', `canvas:${t}`);
       for (const s of sub) if (s !== m.name) add(id, 'depends_on', `model:${s}`);
     }
+    // registered asset kinds contribute their own structural edges
+    for (const t of assetTypes()) if (t.edges) { try { t.edges(e, add); } catch { /* a broken plug-in must not break the graph */ } }
     return out;
   }
   /** Every edge (stored + derived) with adjacency indexes. */
@@ -409,6 +419,7 @@ export class Graph {
     for (const n of this.audio()?.defs.keys() || []) ids.add(`audio:${n}`);
     for (const g of Object.keys(this.data.groups)) ids.add(`group:${g}`);
     for (const d of e.docs.values()) if (/_parts$/.test(d.name) && d.meta?.rig && typeof d.meta.rig === 'object') ids.add(`rig:${d.name.slice(0, -6)}`);
+    for (const k of extraKinds()) { try { for (const n of assetType(k).list(e)) ids.add(`${k}:${n}`); } catch { /* skip */ } }
     for (const id of Object.keys(this.data.nodes)) ids.add(id);
     for (const ed of this.all().edges) { ids.add(ed.from); ids.add(ed.to); }
     return ids;
@@ -509,6 +520,8 @@ export class Graph {
     const e = this.engine;
     const reviewCounts = e.reviews?.counts() || {};
     for (const id of Object.keys(reviewCounts)) ids.add(id);
+    let flags = null;
+    try { flags = e.cleanup?.flags(); } catch { /* badges are best effort */ }
     const nodes = [...ids].map((id) => {
       const n = this.data.nodes[id];
       const k = kindOf(id);
@@ -517,6 +530,8 @@ export class Graph {
       if (n?.note) out.note = n.note;
       if (n?.approved) out.approved = true;
       if (reviewCounts[id]) out.reviews = reviewCounts[id];
+      if (flags?.superseded.has(id)) out.superseded = true;
+      if (flags?.orphans.has(id)) out.orphan = true;
       if (k === 'group') { const g = this.data.groups[nameOf(id)]; if (g?.note) out.note = g.note; if (g?.parent) out.parent = `group:${g.parent}`; }
       if (k === 'canvas') { const d = e.docs.get(nameOf(id)); if (d) out.version = `${d.version}-${d.updated}`; else out.missing = true; }
       else if (['model', 'audio', 'project', 'rig'].includes(k) && !this.exists(id)) out.missing = true;

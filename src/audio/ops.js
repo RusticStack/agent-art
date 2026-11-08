@@ -169,9 +169,12 @@ export const AUDIO_OPS = {
     const deleted = [];
     for (const n of names) {
       const def = getDef(this, n);
-      for (const f of [path.join(s.d.root, `${def.name}.json`), path.join(s.d.cache, `${def.name}.wav`), path.join(s.d.cache, `${def.name}.meta.json`)]) fs.rmSync(f, { force: true });
-      s.defs.delete(def.name); s.mem.delete(def.name);
-      this.emit('event', { type: 'audio', name: def.name, deleted: true, source, ts: Date.now() });
+      // the asset (definition + render cache) goes to the trash (art_cleanup restore), unless cleanup.trash_deletes is false
+      if (!this.cleanup?.trashFiles('audio', def.name, source, 'art_audio delete')) {
+        for (const f of [path.join(s.d.root, `${def.name}.json`), path.join(s.d.cache, `${def.name}.wav`), path.join(s.d.cache, `${def.name}.meta.json`)]) fs.rmSync(f, { force: true });
+        s.defs.delete(def.name); s.mem.delete(def.name);
+        this.emit('event', { type: 'audio', name: def.name, deleted: true, source, ts: Date.now() });
+      }
       deleted.push(def.name);
     }
     return { deleted: deleted.length === 1 && !a.names && !a.name.includes('*') ? deleted[0] : deleted };

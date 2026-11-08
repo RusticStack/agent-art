@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Cleanup (`art_cleanup`)
+
+- New tool `art_cleanup` for bulk, dependency-aware cleanup of superseded assets. `plan {select, include_exports?, include_dependents?, prune_manifest?}` is a dry run with counts, sizes, blockers and warnings. `apply {plan_id, confirm:true}` moves exactly the planned assets to `<workspace>/trash/<batch>/` (a soft delete). `trash` lists the batches, `restore {ids|all}` puts back files, graph edges (in their original order), tags, notes, approvals, review notes and their images, pins and pruned manifest entries byte for byte, and `empty {older_than?, confirm:true}` is the only hard delete. `usage` reports disk use by kind, project and group, with the biggest offenders. `replace {old, new}` (or `pairs`) records `new replaces old`, moves old's semantic edges and open review notes to new, and marks old superseded.
+- Selectors: `names` (globs; `*` stops at `/`, `**` does not), `ids`, `kind`, `tag`, `group` (nested), `project`, `rel:{rel, to|from}`, `superseded`, `orphans`, `stale_exports`, `older_than`, `unused_since` and `exclude`. An array of selects is a union.
+- Safety: hard dependencies (`depends_on`, `uses_palette`, `part_of` a project; a rig and its parts canvas are one asset) block a plan unless `include_dependents` or `force` is set. Approved assets need `allow_approved`. Pinned assets warn. Export files are only touched inside `workspace/exports` or the user's `cleanup.allow_paths` (`config.json`, which the agent cannot set). Symlinks, traversal, paths that resolve outside and workspace internals are refused. Every apply and restore is logged as a `removed` / `restored` activity entry and graph event with the plan id.
+- Compact replies: counts plus the first 10 items (`limit`, or `full:true`).
+- `src/assettypes.js` adds `registerAssetType(kind, spec)`, the one hook through which a new asset kind joins the graph (resolve, exists, derived edges) and cleanup. Built-in kinds: canvas, rig, model, audio, project, export.
+- Web UI: multi-select in the asset browser (checkboxes, Shift+click range, all shown, by tag) with *Plan cleanup…* (dry run with blockers and sizes, then apply). The *Cleanup* panel has Trash (restore / empty, sizes), Disk usage and Settings (allowlist). Superseded and orphan badges appear in the browser and the graph. `/api/assets` adds `flags` and `tags`, and `/api/graph` nodes carry `superseded` and `orphan`.
+- `art_help {topic:"cleanup"}`.
+
+### Changed
+
+- `art_canvas delete`, `art_model delete`, `art_audio delete` and `art_project delete` now move the files to the trash instead of deleting them. Replies gain a `trash` id. Graph edges and review notes are left as before. Set `cleanup.trash_deletes: false` in `config.json` to get hard deletes back.
+- Tool list: the size test limit rose from 28380 to 29400 characters (`art_cleanup` adds ~1.15k; 29285 measured).
+
 ## 0.7.0
 
 ### Weapon handling (`art_rig`, `art_model`)

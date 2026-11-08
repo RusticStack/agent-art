@@ -5,13 +5,14 @@ import { encodePNG } from './png.js';
 
 /** Ops that never change the workspace: no snapshots, no version scan. */
 /** Ops that are never recorded (UI / MCP plumbing). */
-const SILENT = new Set(['review_hint', 'review_all']);
+const SILENT = new Set(['review_hint', 'review_all', 'cleanup_flags']);
 export const READ_ONLY = new Set([
   'review_list', 'review_get',
   'list', 'info', 'read', 'render', 'critique', 'sheet', 'filmstrip', 'commands', 'project_list', 'project_info',
   'rig_info', 'rig_preview', 'rig_templates', 'model_info', 'model_list', 'model_preview',
   'audio_list', 'audio_info', 'audio_analyze', 'audio_critique', 'audio_compare', 'audio_generate',
   'graph_query', 'graph_find', 'graph_path', 'graph_summary', 'pack_info',
+  'cleanup_plan', 'cleanup_trash', 'cleanup_usage', 'cleanup_flags',
 ]);
 /** Ops that write files (exports_to edges in the asset graph). */
 const EXPORTS = new Set(['export', 'export_animation', 'model_export', 'audio_export', 'pack_zip', 'pack_build']);

@@ -1,7 +1,10 @@
 // Asset browser: one tree of the workspace (pinned, groups, projects, canvases with layers and
 // animations, rigs, 3D models, audio, exports). Per item: hide (eye), pin, solo; collapsible
 // sections; name filter. Hidden / pinned state persists per workspace (server ui-state.json).
+// Select mode: checkboxes, shift-click ranges, "all shown" (the filter) and "by tag", then
+// "Plan cleanup…" (art_cleanup dry run + apply). Superseded / orphan assets carry badges.
 import { el, enc, thumbURL, KIND_ICON, store, fmtBytes, assetId } from './util.js';
+import { planDialog } from './cleanup.js';
 
 const SECTIONS = [['pinned', 'Pinned'], ['groups', 'Groups'], ['projects', 'Projects'], ['canvases', 'Canvases'], ['rigs', 'Rigs'], ['models', '3D models'], ['audio', 'Audio'], ['exports', 'Exports']];
 const MAX_PER_GROUP = 400;
@@ -19,9 +22,22 @@ export class Browser {
     this.soloBtn = el('button.btn.small', { text: 'Clear solo', hidden: true, on: { click: () => { this.app.solo.clear(); this.app.onSoloChange(); } } });
     this.newBtn = el('button.btn.small', { text: '+ New', title: 'New canvas', on: { click: () => this.toggleNew() } });
     this.newForm = this.buildNewForm();
-    root.append(el('div.pane-head', {}, el('h2', { text: 'Assets' }), el('div.spacer'), this.soloBtn, this.hiddenBtn, this.newBtn), this.newForm, el('div.pane-search', {}, this.search));
+    this.selectMode = false;
+    this.selected = new Set();
+    this.lastSel = null;
+    this.selBtn = el('button.btn.small', { text: '☐ Select', title: 'Select assets for cleanup (checkboxes, Shift+click = range)', on: { click: () => this.setSelectMode(!this.selectMode) } });
+    root.append(el('div.pane-head', {}, el('h2', { text: 'Assets' }), el('div.spacer'), this.soloBtn, this.hiddenBtn, this.selBtn, this.newBtn), this.newForm, el('div.pane-search', {}, this.search));
     this.tree = el('div.tree', { role: 'tree' });
     root.append(this.tree);
+    this.selCount = el('span.mono');
+    this.tagPick = el('select', { title: 'Add every asset with this tag', on: { change: () => { this.selectTag(this.tagPick.value); this.tagPick.value = ''; } } });
+    this.selbar = el('div.selbar', { hidden: true },
+      el('div.selbar-row', {}, this.selCount, el('div.spacer'),
+        el('button.btn.small', { text: 'All shown', title: 'Select every asset the filter shows', on: { click: () => this.selectShown() } }),
+        this.tagPick,
+        el('button.btn.small', { text: 'Clear', on: { click: () => { this.selected.clear(); this.render(); } } })),
+      el('div.selbar-row', {}, el('button.btn.small.primary.grow', { text: 'Plan cleanup…', title: 'Dry run: what goes, sizes, what still depends on it', on: { click: () => this.planCleanup() } })));
+    root.append(this.selbar);
     this.tree.addEventListener('click', (e) => this.onClick(e));
     this.tree.addEventListener('dblclick', (e) => { const row = e.target.closest('.row'); if (row?.dataset.kind === 'canvas') this.app.open({ kind: 'canvas', name: row.dataset.name, view: 'edit' }); });
   }
@@ -48,18 +64,61 @@ export class Browser {
     return this.showHidden || !this.app.isHidden(id);
   }
 
+  setSelectMode(on) {
+    this.selectMode = on;
+    this.selBtn.classList.toggle('on', on);
+    this.selBtn.textContent = on ? '☑ Select' : '☐ Select';
+    if (!on) this.selected.clear();
+    this.render();
+  }
+  toggleSel(id, range) {
+    const rows = [...this.tree.querySelectorAll('.row[data-sel="1"]')].map((r) => r.dataset.id);
+    if (range && this.lastSel && rows.includes(this.lastSel) && rows.includes(id)) {
+      const [a, b] = [rows.indexOf(this.lastSel), rows.indexOf(id)].sort((x, y) => x - y);
+      const on = !this.selected.has(id) || this.selected.has(this.lastSel);
+      for (const r of rows.slice(a, b + 1)) { if (on) this.selected.add(r); else this.selected.delete(r); }
+    } else if (this.selected.has(id)) this.selected.delete(id);
+    else this.selected.add(id);
+    this.lastSel = id;
+    this.render();
+  }
+  selectShown() { for (const r of this.tree.querySelectorAll('.row[data-sel="1"]')) this.selected.add(r.dataset.id); this.render(); }
+  selectTag(tag) {
+    if (!tag) return;
+    for (const [id, tags] of Object.entries(this.app.assets?.tags || {})) if (tags.includes(tag)) this.selected.add(id);
+    this.render();
+  }
+  updateSelbar() {
+    this.selbar.hidden = !this.selectMode;
+    this.selCount.textContent = `${this.selected.size} selected`;
+    const tags = [...new Set(Object.values(this.app.assets?.tags || {}).flat())].sort();
+    const k = tags.join('|');
+    if (this.tagPick.dataset.k !== k) { this.tagPick.replaceChildren(el('option', { value: '', text: 'by tag…' }), ...tags.map((t) => el('option', { value: t, text: '#' + t }))); this.tagPick.dataset.k = k; }
+    this.selbar.querySelector('.primary').disabled = !this.selected.size;
+  }
+  async planCleanup() {
+    if (!this.selected.size) return;
+    const done = await planDialog(this.app, [...this.selected]);
+    if (done) { this.selected.clear(); this.render(); }
+  }
+
   /** One row. kids: function returning child rows (lazy), or null. */
-  row({ id, kind, name, label, meta, thumb, depth = 0, kids, badge, open, actions = true, extra = {} }) {
+  row({ id, kind, name, label, meta, thumb, depth = 0, kids, badge, open, actions = true, sel = actions, extra = {} }) {
     const hidden = this.app.isHidden(id), pinned = this.app.isPinned(id), solo = this.app.solo.has(id);
+    const selectable = sel && kind !== 'group' && this.selectMode;
+    const fl = this.app.flags;
     const exp = kids && (this.filter ? true : this.expanded.has(id));
     const reviews = this.app.reviewCounts?.[id];
     const approved = this.app.approvedSet?.has(id);
-    const r = el(`div.row${hidden ? '.is-hidden' : ''}${this.app.currentId === id ? '.active' : ''}`, { role: 'treeitem', dataset: { id, kind, name, open: JSON.stringify(open || { kind, name }), ...extra }, style: { paddingLeft: 6 + depth * 14 + 'px' } },
+    const r = el(`div.row${hidden ? '.is-hidden' : ''}${this.app.currentId === id ? '.active' : ''}${selectable && this.selected.has(id) ? '.selected' : ''}`, { role: 'treeitem', dataset: { id, kind, name, open: JSON.stringify(open || { kind, name }), ...(selectable ? { sel: '1' } : {}), ...extra }, style: { paddingLeft: 6 + depth * 14 + 'px' } },
+      selectable ? el('input.selbox', { type: 'checkbox', checked: this.selected.has(id), tabindex: '-1', dataset: { act: 'select' } }) : null,
       el('span.twisty', { text: kids ? (exp ? '▾' : '▸') : '', dataset: { act: kids ? 'toggle' : '' } }),
       thumb ? el('img.thumb', { src: thumb, loading: 'lazy', alt: '' }) : el('span.kicon', { text: KIND_ICON[kind] || '•', style: { color: `var(--k-${kind}, #94a3b8)` } }),
       el('span.label', {}, el('span.name', { text: label ?? name }), meta ? el('span.meta', { text: meta }) : null),
       reviews ? el('span.badge.review', { text: String(reviews), title: `${reviews} open review note(s)` }) : null,
       approved ? el('span.badge.ok', { text: '✓', title: 'approved' }) : null,
+      fl?.superseded.has(id) ? el('span.badge.old', { text: 'superseded', title: 'replaced by a newer asset (art_cleanup plan {select:{superseded:true}})' }) : null,
+      fl?.orphans.has(id) ? el('span.badge.orphan', { text: 'orphan', title: 'nothing links to it, not in a project or group, not pinned' }) : null,
       badge ? el('span.badge', { text: badge }) : null,
       actions ? el('span.acts', {},
         el('button.act', { title: solo ? 'Unsolo' : 'Solo (show only this)', text: '◎', dataset: { act: 'solo' }, class: solo ? 'act on' : 'act' }),
@@ -156,7 +215,7 @@ export class Browser {
       const dirs = new Map();
       for (const f of files) { const d = f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : ''; if (!dirs.has(d)) dirs.set(d, []); dirs.get(d).push(f); }
       for (const [d, list] of dirs) {
-        const fileRows = () => list.slice(0, MAX_PER_GROUP).flatMap((f) => this.row({ id: `export:${f.path}`, kind: 'export', name: f.path.split('/').pop(), meta: fmtBytes(f.size), depth: d ? 1 : 0, actions: false, thumb: /\.(png|gif)$/i.test(f.path) ? `/api/export-file?path=${enc(f.path)}&m=${f.mtime}` : null }));
+        const fileRows = () => list.slice(0, MAX_PER_GROUP).flatMap((f) => this.row({ id: `export:${f.path}`, kind: 'export', name: f.path.split('/').pop(), meta: fmtBytes(f.size), depth: d ? 1 : 0, actions: false, sel: true, thumb: /\.(png|gif)$/i.test(f.path) ? `/api/export-file?path=${enc(f.path)}&m=${f.mtime}` : null }));
         if (d) rows.push(...this.row({ id: `dir:${d}`, kind: 'file', name: d + '/', badge: String(list.length), actions: false, kids: fileRows, open: { kind: 'none' } }));
         else rows.push(...fileRows());
       }
@@ -164,6 +223,7 @@ export class Browser {
     });
     this.tree.replaceChildren(frag);
     this.tree.scrollTop = st;
+    this.updateSelbar();
   }
 
   onClick(e) {
@@ -179,6 +239,8 @@ export class Browser {
     if (!row) return;
     const id = row.dataset.id;
     const act = e.target.dataset?.act || e.target.closest('[data-act]')?.dataset.act;
+    // select mode: a click on a selectable row (or its checkbox) toggles it; Shift = range
+    if (row.dataset.sel === '1' && (act === 'select' || !act)) { e.preventDefault(); this.toggleSel(id, e.shiftKey); return; }
     if (act === 'toggle') {
       if (this.expanded.has(id)) this.expanded.delete(id); else this.expanded.add(id);
       store.set('expanded', [...this.expanded].slice(-500));
