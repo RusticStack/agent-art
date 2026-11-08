@@ -14,6 +14,7 @@ import { parseClod, selectClusters, lookAtPlanes } from './clodselect.js';
 import { occluderBoxes, cellsAndPortals, boxTris, cellIndexOf } from './visibility.js';
 import { manifoldReport, hausdorff, meshFromTris } from './meshkit.js';
 import { writeGLB } from './glb.js';
+import { exportV2, finishV2 } from './matops.js';
 import { encodePNG } from './png.js';
 import { packImages } from './sheet.js';
 import { renderMeshViz, idTex } from './meshviz.js';
@@ -145,7 +146,12 @@ export function meshOpsFor(api) {
   const exportPath = (engine, def, a, ext = '.glb') => {
     let file = engine.resolvePath(a.path || `${def.name}${ext}`, engine.exportDir);
     if (/[\\/]$/.test(a.path || '') || (fs.existsSync(file) && fs.statSync(file).isDirectory())) file = path.join(file, `${def.name}${ext}`);
-    if (!file.toLowerCase().endsWith(ext)) file += ext;
+    if (!file.toLowerCase().endsWith(ext)) {
+      // "v.json" for ".vis.json" -> "v.vis.json" (not "v.json.vis.json")
+      const tail = path.extname(ext);
+      if (tail !== ext && file.toLowerCase().endsWith(tail)) file = file.slice(0, -tail.length);
+      file += ext;
+    }
     fs.mkdirSync(path.dirname(file), { recursive: true });
     return file;
   };
@@ -216,7 +222,7 @@ export function meshOpsFor(api) {
       const method = a.method ?? 'voxel';
       const src = sourceMesh(this, def);
       let r;
-      if (method === 'voxel') r = voxelRemesh(src, { ...(a.voxel !== undefined ? { voxel: num(a.voxel, 'voxel', { min: 1e-6 }) * scale } : {}), resolution: a.resolution, sharp: a.sharp, simplify: a.simplify, ...(a.max_error !== undefined ? { max_error: num(a.max_error, 'max_error', { min: 0 }) * scale } : {}), feature_angle: a.feature_angle });
+      if (method === 'voxel') r = voxelRemesh(src, { ...(a.voxel !== undefined ? { voxel: num(a.voxel, 'voxel', { min: 1e-6 }) * scale } : {}), ...(a.resolution !== undefined ? { resolution: num(a.resolution, 'resolution', { min: 1 }) } : {}), sharp: a.sharp, simplify: a.simplify, ...(a.max_error !== undefined ? { max_error: num(a.max_error, 'max_error', { min: 0 }) * scale } : {}), feature_angle: a.feature_angle });
       else if (method === 'quad') r = quadRemesh(src, { faces: a.faces, feature_angle: a.feature_angle, symmetry: a.symmetry, iterations: a.iterations });
       else if (method === 'cleanup') r = cleanupRemesh(src, { weld: a.weld !== undefined ? num(a.weld, 'weld', { min: 0 }) * scale : undefined, holes: a.holes });
       else throw new Error('method must be voxel (watertight shell from any soup), quad (quad-dominant retopology) or cleanup (weld, degenerates, winding, small holes)');
@@ -252,15 +258,20 @@ export function meshOpsFor(api) {
     model_cluster_lod(a) {
       const def = getModel(this, a.name), scale = scaleOf(def), t0 = performance.now();
       const built = build(this, def), mesh = built.mesh;
-      const dag = buildClusterDAG(mesh, { clusterSize: a.cluster_size, groupSize: a.group_size, seams: a.seams });
-      const screen = { height: 720, fov: 70, px: 1, ...(a.lod_screen || {}) };
-      const lods = discreteLods(dag, { levels: Math.max(1, Math.min(8, Math.round(Number(a.levels ?? 4)))) });
-      const maxPart = Math.max(100, Math.round(Number(a.max_part_tris ?? 20000)));
+      const ls = a.lod_screen ?? {};
+      if (typeof ls !== 'object' || Array.isArray(ls)) throw new Error('lod_screen must be {height?, fov?, px?}');
+      const screen = { height: num(ls.height, 'lod_screen.height', { min: 1, def: 720 }), fov: num(ls.fov, 'lod_screen.fov', { min: 1, def: 70 }), px: num(ls.px, 'lod_screen.px', { min: 0.01, def: 1 }) };
+      if (screen.fov >= 179) throw new Error(`lod_screen.fov must be 1..179 degrees (got ${JSON.stringify(ls.fov)})`);
+      const levels = Math.min(8, Math.round(num(a.levels, 'levels', { min: 1, def: 4 })));
+      const maxPart = Math.max(100, Math.round(num(a.max_part_tris, 'max_part_tris', { min: 1, def: 20000 })));
+      if (a.lightmap || a.thickness || a.bake_ao) throw new Error('cluster_lod does not bake lightmap / thickness / bake_ao; bake them with art_model export (profile, packing, tangents and vertex_colors work here)');
+      const dag = buildClusterDAG(mesh, { clusterSize: num(a.cluster_size, 'cluster_size', { min: 1, def: 128 }), groupSize: num(a.group_size, 'group_size', { min: 1, def: 4 }), seams: a.seams });
+      const lods = discreteLods(dag, { levels });
       const file = exportPath(this, { name: `${def.name}_lod` }, a); // default <name>_lod.glb: model export keeps <name>.glb
       const base = file.replace(/\.glb$/i, ''), clodFile = `${base}.clod`;
       // discrete LOD nodes: <name>_lods > <name>_LOD<i> > <name>_LOD<i>_p<k> (<= max_part_tris each)
       const meshes = [], nodes = [{ name: `${def.name}_lods`, children: [], extras: { lod_group: true } }];
-      const levels = lods.map((L) => {
+      const lodLevels = lods.map((L) => {
         const parts = splitParts(dag, L.clusters, maxPart);
         const ln = { name: `${def.name}_LOD${L.level}`, children: [], extras: {} };
         nodes.push(ln); nodes[0].children.push(nodes.length - 1);
@@ -268,14 +279,14 @@ export function meshOpsFor(api) {
         const dist = L.level === 0 ? 0 : switchDistance(L.tau / scale, screen);
         parts.forEach((pc, k) => {
           const m = clustersMesh(dag, pc);
-          meshes.push({ name: `${def.name}_LOD${L.level}_p${k}`, groups: m.groups.values() });
+          meshes.push({ name: `${def.name}_LOD${L.level}_p${k}`, groups: [...m.groups.values()] });
           nodes.push({ name: `${def.name}_LOD${L.level}_p${k}`, mesh: meshes.length - 1, extras: { lod: L.level, part: k, triangles: m.triangles, clusters: pc.length }, ...(L.level ? { lodHidden: true } : {}) });
           nodes[li].children.push(nodes.length - 1);
         });
         ln.extras = { lod: L.level, distance: r4(dist), error: L.level ? r4(L.tau / scale) : 0, triangles: L.triangles, parts: parts.length };
         return { level: L.level, triangles: L.triangles, error: L.level ? r4(L.tau / scale) : 0, distance: r4(dist), parts: parts.map((pc) => pc.reduce((s, c) => s + c.tris.length, 0)) };
       });
-      nodes[0].extras.levels = levels.map((l) => ({ level: l.level, distance: l.distance, triangles: l.triangles }));
+      nodes[0].extras.levels = lodLevels.map((l) => ({ level: l.level, distance: l.distance, triangles: l.triangles }));
       // visibility (cells / portals / pvs / occluders) in the same sidecar
       let vis = null;
       if (a.visibility) {
@@ -283,18 +294,24 @@ export function meshOpsFor(api) {
         vis = v.vis;
         if (v.cells.length) vis.cluster_cell = dag.clusters.map((c) => cellIndexOf(v.cells, c.bounds));
       }
-      const clod = writeClod(dag, { scale, extra: { screen, lods: levels, glb: path.basename(file), ...(vis ? { visibility: vis } : {}) } });
-      const { glb, stats } = writeGLB({ meshes, nodes }, { scale, name: def.name, extras: { cluster_lod: { file: path.basename(clodFile), format: 'agent-art cluster LOD v1 (docs/meshproc/README.md)', clusters: dag.clusters.length, levels: dag.stats.levels } } });
+      const clod = writeClod(dag, { scale, extra: { screen, lods: lodLevels, glb: path.basename(file), ...(vis ? { visibility: vis } : {}) } });
+      // materials v2 (glass / neon / paint extensions, packing, tangents, vertex colours): same stage as model export
+      const v2a = {}; for (const k of ['profile', 'packing', 'tangents', 'vertex_colors', 'uv2', 'uv3']) if (a[k] !== undefined) v2a[k] = a[k];
+      const v2 = exportV2(def, built, v2a, { meshes, nodes, ext: null, scale, file, info: null });
+      const { glb, stats } = writeGLB({ meshes: v2 ? v2.meshes : meshes, nodes }, { scale, name: def.name, extras: { cluster_lod: { file: path.basename(clodFile), format: 'agent-art cluster LOD v1 (docs/meshproc/README.md)', clusters: dag.clusters.length, levels: dag.stats.levels } }, ...(v2 ? { ...v2.glbOpts, v2: v2.v2 } : {}) });
+      if (v2) finishV2(v2, glb, stats);
       fs.writeFileSync(file, glb);
+      if (v2) for (const [f, buf] of v2.side) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, buf); }
       fs.writeFileSync(clodFile, clod);
       const meta = {
         name: def.name, file: path.basename(file), clod: path.basename(clodFile), generator: 'agent-art', px_per_unit: scale,
         cluster_lod: { ...dag.stats, root_error: r4(dag.stats.root_error_px / scale), bytes: clod.length },
-        lods: { levels, screen, max_part_tris: maxPart, note: 'Discrete LODs cut from the cluster DAG (uniform error). Roblox: one MeshPart per <name>_LOD<i>_p<k> node (<= max_part_tris). three.js: THREE.LOD with each <name>_LOD<i> at extras.distance, or stream the .clod with clodselect.js.' },
+        lods: { levels: lodLevels, screen, max_part_tris: maxPart, note: 'Discrete LODs cut from the cluster DAG (uniform error). Roblox: one MeshPart per <name>_LOD<i>_p<k> node (<= max_part_tris). three.js: THREE.LOD with each <name>_LOD<i> at extras.distance, or stream the .clod with clodselect.js.' },
         ...(vis ? { visibility: { cells: vis.cells?.length ?? 0, portals: vis.portals?.length ?? 0, occluders: vis.occluders?.boxes.length ?? 0 } } : {}),
+        ...(v2 ? v2.meta : {}),
       };
       fs.writeFileSync(`${base}.meta.json`, JSON.stringify(meta, null, 2));
-      const res = { file, clod: clodFile, meta: `${base}.meta.json`, bytes: { glb: glb.length, clod: clod.length }, clusters: dag.stats, lods: levels, glb_triangles: stats.triangles, ...(vis ? { visibility: meta.visibility } : {}), ms: Math.round(performance.now() - t0) };
+      const res = { file, clod: clodFile, meta: `${base}.meta.json`, bytes: { glb: glb.length, clod: clod.length }, clusters: dag.stats, lods: lodLevels, glb_triangles: stats.triangles, ...(vis ? { visibility: meta.visibility } : {}), ...(v2 ? v2.result : {}), ms: Math.round(performance.now() - t0) };
       // preview: clusters colour-coded at three camera distances (+ culling stats)
       if (a.preview || a.distances) {
         const h = parseClod(clod);

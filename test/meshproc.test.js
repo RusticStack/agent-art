@@ -358,3 +358,29 @@ test('derived meshes never overwrite another existing model unless overwrite:tru
   assert.equal(e.run('model_decimate', { name: 'm', ratio: 0.5, out: 'keep', overwrite: true }).model, 'keep');
   assert.equal(JSON.parse(fs.readFileSync(path.join(e.home, 'models', 'keep.json'), 'utf8')).baked.from, 'm');
 });
+
+test('cluster_lod keeps materials v2 (glass) and validates its numbers', async () => {
+  const { validateGLB, parseGLB } = await import('../src/gltfcheck.js');
+  const e = new Engine({ home: tmp() });
+  e.run('model_create', { name: 'pod', parts: [{ type: 'box', w: 48, h: 24, d: 32, color: '#778' }, { type: 'box', w: 16, h: 8, d: 16, color: '#9fd8ff', material: 'glass_canopy', at: [0, 16, 0] }] });
+  const r = e.run('model_cluster_lod', { name: 'pod', levels: 2 });
+  const buf = fs.readFileSync(r.file), v = validateGLB(buf);
+  assert.ok(v.ok, JSON.stringify(v.errors));
+  const { json } = parseGLB(buf);
+  assert.ok(json.extensionsUsed.includes('KHR_materials_transmission'), JSON.stringify(json.extensionsUsed));
+  assert.ok(r.materials_v2 && r.materials_v2.valid);
+  for (const [k, bad] of [['levels', 'abc'], ['cluster_size', 'x'], ['group_size', -1], ['lod_screen', { fov: 0 }], ['lod_screen', { height: 'tall' }], ['lod_screen', { fov: 200 }]]) {
+    assert.throws(() => e.run('model_cluster_lod', { name: 'pod', [k]: bad }), new RegExp(k), `${k}: ${JSON.stringify(bad)}`);
+  }
+  assert.throws(() => e.run('model_cluster_lod', { name: 'pod', lightmap: true }), /lightmap/);
+});
+
+test('visibility .json path is not doubled; remesh resolution must be >= 1', () => {
+  const e = new Engine({ home: tmp() });
+  e.run('model_create', { name: 'pod', parts: [{ type: 'box', w: 48, h: 24, d: 32, color: '#778' }] });
+  // visibility: a .json path is not doubled
+  const vis = e.run('model_visibility', { name: 'pod', path: 'out/v.json' });
+  assert.equal(path.basename(vis.file), 'v.vis.json');
+  assert.equal(path.basename(e.run('model_visibility', { name: 'pod', path: 'out/w.vis.json' }).file), 'w.vis.json');
+  assert.throws(() => e.run('model_remesh', { name: 'pod', method: 'voxel', resolution: -3 }), /resolution/);
+});
