@@ -424,7 +424,16 @@ export function openBrowser(url) {
 export async function runTool(name, args, call, backend = { remote: false, uiUrl: () => '', engine: null }) {
   const tool = TOOLS.find((t) => t.name === name);
   if (!tool) throw new Error(`Unknown tool ${name} (tools: ${TOOLS.map((t) => t.name).join(', ')})`);
-  return toContent(await tool.run(call, args || {}, backend));
+  // same reply as the MCP server: plus the one-line review hint when the touched asset has notes
+  let mutated = false;
+  const tracked = (op, a) => { if (!READ_ONLY.has(op)) mutated = true; return call(op, a); };
+  const content = toContent(await tool.run(tracked, args || {}, backend));
+  const ids = touchedAssets(name, args || {});
+  if (ids.length) {
+    const h = await Promise.resolve().then(() => call('review_hint', { ids, mutated })).catch(() => null);
+    if (h?.text) content.push({ type: 'text', text: h.text });
+  }
+  return content;
 }
 
 /** Format a result object into MCP content blocks. */
