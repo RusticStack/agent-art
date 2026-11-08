@@ -7,7 +7,7 @@ const MAX_INLINE = 240; // chars of a meta value kept inline in a summary
 function pick(full, fields, always) {
   const out = {};
   for (const k of always) if (full[k] !== undefined) out[k] = full[k];
-  for (const f of fields) {
+  for (const f of [].concat(fields)) {
     if (typeof f !== 'string') throw new Error('fields must be a list of reply field names');
     if (full[f] === undefined) throw new Error(`fields: no field "${f}" (fields: ${Object.keys(full).join(', ')})`);
     out[f] = full[f];
@@ -56,8 +56,10 @@ export function compactInfo(r, a = {}) {
       return [k, { frames: f.length, from: f[0], to: f[f.length - 1], loop: t.loop, ms: t.durations?.[0] }];
     })),
     project: r.project, meta: metaSummary(r.meta),
-    palette: Object.keys(r.palette || {}).length ? `${Object.keys(r.palette).length} keys` : undefined,
-    colors: r.colors ? { unique: r.colors.unique, top: (r.colors.top || []).slice(0, 8) } : undefined,
+    // palette key names (what draw commands and grids use); the colours via fields:["palette"]
+    palette: Object.keys(r.palette || {}).length ? Object.keys(r.palette) : undefined,
+    inheritedPalette: Object.keys(r.inheritedPalette || {}).length ? Object.keys(r.inheritedPalette) : undefined,
+    colors: r.colors ? { unique: r.colors.unique, top: (r.colors.top || []).slice(0, a.color_limit ?? 8) } : undefined,
     undo: r.undo, redo: r.redo, version: r.version, ui: r.ui,
     more: 'summary reply: full:true for everything, or fields:["palette","meta","animations","layers","colors",...]',
   };

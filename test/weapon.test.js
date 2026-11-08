@@ -265,6 +265,13 @@ test('complaint 5: art_rig info/create/update and art_info reply compactly; full
   const s = await infoTool.run(call, { canvas: 'sz_walk' });
   assert.equal(s.animations.walk_side.frames, 16);
   assert.equal(s.meta.anchors.walk_side, '16 frames');
+  // the summary keeps the palette key names and honours color_limit; fields may be one name
+  e.run('create', { name: 'pal', width: 8, height: 8, palette: { skin: '#e0a070', dark: '#202024' } });
+  e.run('draw', { canvas: 'pal', commands: [{ op: 'rect', x: 0, y: 0, w: 4, h: 8, color: 'skin' }, { op: 'rect', x: 4, y: 0, w: 4, h: 8, color: 'dark' }] });
+  const ps = await infoTool.run(call, { canvas: 'pal', color_limit: 1 });
+  assert.deepEqual(ps.palette, ['skin', 'dark']);
+  assert.equal(ps.colors.top.length, 1);
+  assert.deepEqual(Object.keys(await infoTool.run(call, { canvas: 'pal', fields: 'palette' })).sort(), ['height', 'name', 'palette', 'width']);
 });
 
 test('complaint 6: art_critique colour budget scales with size (<= 32 low-res, 48-128 HD); HD ordered dithering is not noise', () => {
