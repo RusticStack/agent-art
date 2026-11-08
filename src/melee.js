@@ -7,7 +7,7 @@
 import { projectPose } from './rigtemplates.js';
 import { solvePose, partIn, poseOf } from './rig.js';
 import { feetGround } from './rigops.js';
-import { MELEE_WEAPONS, meleeCell, DAMAGE_TYPES, CM_PER_UNIT } from './meleekit.js';
+import { MELEE_WEAPONS, meleeWeapon, meleeCell, DAMAGE_TYPES, CM_PER_UNIT } from './meleekit.js';
 
 const D2R = Math.PI / 180;
 const r1 = (v) => Math.round(v * 10) / 10;
@@ -163,7 +163,7 @@ const BLOCK_B = [-50, -150, -150];
  */
 function library(kind, opts = {}) {
   const gun = kind === 'rifle' || kind === 'pistol';
-  const W = opts.weapon ? MELEE_WEAPONS[opts.weapon] : null;
+  const W = opts.weapon ? meleeWeapon(opts.weapon) : null;
   const shield = !!opts.shield;
   const dmg = (k, d) => W?.damage?.[k] ?? d;
   const stam = (k) => Math.round((W?.stamina ?? 8) * k);
@@ -374,7 +374,7 @@ function pairedLibrary(kind, guard, rest, opts = {}) {
 export function meleeKind(def, weapon) {
   if (def.weapon) return ['pistol', 'handgun', 'revolver'].includes(def.weapon.class) || def.weapon.kind === 'pistol' ? 'pistol' : 'rifle';
   if (!weapon) return 'unarmed';
-  const W = MELEE_WEAPONS[weapon];
+  const W = meleeWeapon(weapon);
   if (!W) throw new Error(`melee weapon "${weapon}" unknown (${Object.keys(MELEE_WEAPONS).join(', ')})`);
   return W.shield ? 'shield' : W.set;
 }
@@ -389,7 +389,8 @@ export function meleeParts(def, { weapon, shield, shield_weapon = 'riot_shield' 
   const out = {};
   let cell = null, shieldCell = null;
   if (weapon && !def.weapon) {
-    const M = MELEE_WEAPONS[weapon];
+    const M = meleeWeapon(weapon);
+    if (!M) throw new Error(`melee weapon "${weapon}" unknown (${Object.keys(MELEE_WEAPONS).join(', ')})`);
     if (M.shield) throw new Error(`"${weapon}" is a shield: pass shield:true (the main hand keeps its weapon)`);
     cell = meleeCell(weapon, def.frame);
     if (def.parts.weapon) out.weapon = { ...def.parts.weapon, w: cell.w, h: cell.h, pivot: cell.pivot };

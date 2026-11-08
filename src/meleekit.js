@@ -178,10 +178,12 @@ export const MELEE_WEAPONS = {
   },
 };
 export const MELEE_IDS = Object.keys(MELEE_WEAPONS);
+/** The melee weapon with this id, or null (own keys only: "constructor" / "toString" are not weapons). */
+export const meleeWeapon = (id) => (typeof id === 'string' && Object.hasOwn(MELEE_WEAPONS, id) ? MELEE_WEAPONS[id] : null);
 
 /** art_model template for a melee weapon: {parts, sockets, poses?, clips?, notes, melee, scale, grid}. */
 export function meleeTemplate(id) {
-  const W = MELEE_WEAPONS[id];
+  const W = meleeWeapon(id);
   if (!W) throw new Error(`unknown melee weapon "${id}" (${MELEE_IDS.join(', ')})`);
   const m = W.model();
   const clips = Object.keys(m.clips || {});
@@ -199,7 +201,7 @@ export const MELEE_TEMPLATES = Object.fromEntries(MELEE_IDS.map((id) => [`melee_
  * px, radius px, shock_from?}. Units: humanoid_hd body units (u lengths, uw widths).
  */
 export function meleeCell(id, [W, H]) {
-  const M = MELEE_WEAPONS[id];
+  const M = meleeWeapon(id);
   if (!M) throw new Error(`unknown melee weapon "${id}" (${MELEE_IDS.join(', ')})`);
   const u = (H - 4) / 98, uw = Math.min(u, W / 66);
   const c = M.cell;

@@ -9,7 +9,8 @@ import { normalizeRig, resolvePose, lerpPose, solvePose, partIn, poseOf, renderP
 import { getRig, framePoses } from './rigops.js';
 import { normalizeClip, evalClip, applyProportions, retargetClip, LIB_NAME } from './animlib.js';
 import { meleeLibrary, meleeParts, meleeAnim, meleeEvents, hitSources, frameVolumes, segDist, inPoly, pairedOut, turnedView, VIEW_YAW8, normalizeMelee, frameOfT, HD_VIEWS } from './melee.js';
-import { MELEE_WEAPONS, MELEE_IDS, meleeCell, CM_PER_UNIT } from './meleekit.js';
+import { MELEE_IDS, meleeWeapon, meleeCell, CM_PER_UNIT } from './meleekit.js';
+import { checkName } from './util.js';
 import { encodePNG } from './png.js';
 import { packImages } from './sheet.js';
 
@@ -26,11 +27,18 @@ const VIEW_MODEL_YAW = { side: -90, front_side: -135, front: 180, back_side: -45
 
 function loadSkeleton(e, name) {
   if (!LIB_NAME.test(name || '')) throw new Error('melee needs skeleton:"<name>" (art_anim skeleton first)');
+  checkName(name, 'skeleton');
   const f = libDir(e, 'skeletons', `${name}.json`);
   if (!fs.existsSync(f)) throw new Error(`no skeleton "${name}" (art_anim skeleton {name, template:"humanoid_hd", frame} first)`);
   return readJSON(f);
 }
-const clipFile = (e, sk, name) => libDir(e, 'clips', sk, `${name}.json`);
+const clipFile = (e, sk, name) => libDir(e, 'clips', checkName(sk, 'skeleton'), `${checkName(name, 'clip')}.json`);
+/** A library skin by name (validated: it becomes a path under the library). */
+const loadSkin = (e, name, what = 'skin') => {
+  const f = libDir(e, 'skins', `${checkName(name, what)}.json`);
+  if (!fs.existsSync(f)) throw new Error(`no skin "${name}" (art_anim skin first)`);
+  return readJSON(f);
+};
 const loadClip = (e, sk, name) => { const f = clipFile(e, sk, name); return fs.existsSync(f) ? readJSON(f) : null; };
 const listClips = (e, sk) => { const d = libDir(e, 'clips', sk); return fs.existsSync(d) ? fs.readdirSync(d).filter((f) => f.endsWith('.json')).map((f) => f.slice(0, -5)).sort() : []; };
 
@@ -361,7 +369,7 @@ function checkPaired(e, rig, def, att, vic, getClip, sk, views, tol, cells) {
 // ---------- world sheets ----------
 /** Render a melee weapon's world sheet through art_model render: cells [view][pitch], grip fixed, edge per cell. */
 function weaponSheet(e, id, { frame = [64, 96], pitch = MELEE_PITCH, views = MELEE_SHEET_VIEWS, outline = '#15161a', model } = {}, source) {
-  const W = MELEE_WEAPONS[id];
+  const W = meleeWeapon(id);
   if (!W) throw new Error(`unknown melee weapon "${id}" (${MELEE_IDS.join(', ')})`);
   const name = model ?? `melee_${id}`;
   if (!modelExists(e, name)) e.run('model_create', { name, template: `melee_${id}` }, source);
@@ -418,8 +426,8 @@ export const MELEE_OPS = {
     const sk = loadSkeleton(this, a.skeleton);
     const weapon = a.weapon === undefined ? sk.melee?.weapon : a.weapon;
     const shield = a.shield === undefined ? !!sk.melee?.shield : !!a.shield;
-    if (weapon && !MELEE_WEAPONS[weapon]) throw new Error(`weapon "${weapon}": melee weapons are ${MELEE_IDS.join(', ')}`);
-    if (weapon && MELEE_WEAPONS[weapon].shield) throw new Error('riot_shield goes in the support hand: shield:true (with weapon:"baton" etc. in the main hand)');
+    if (weapon && !meleeWeapon(weapon)) throw new Error(`weapon "${weapon}": melee weapons are ${MELEE_IDS.join(', ')}`);
+    if (weapon && meleeWeapon(weapon).shield) throw new Error('riot_shield goes in the support hand: shield:true (with weapon:"baton" etc. in the main hand)');
     if (weapon && sk.def.weapon) throw new Error(`skeleton "${sk.name}" holds a ${sk.def.weapon.class}: melee on a gun skeleton uses the gun (butt-stroke / pistol whip); make a separate skeleton for a melee weapon`);
     const mp = meleeParts(sk.def, { weapon, shield });
     const def = structuredClone(sk.def);
@@ -433,16 +441,13 @@ export const MELEE_OPS = {
     // paired: fit offsets and hand contacts on this skeleton
     const byName = new Map(lib.clips.map((c) => [c.name, c]));
     for (const c of lib.clips) if (c.melee.paired?.role === 'attacker' && byName.get(c.melee.paired.partner)) fitPaired(rig, c, byName.get(c.melee.paired.partner), cellsOf(sk));
-    writeJSON(libDir(this, 'skeletons', `${sk.name}.json`), sk);
+    // every conflict and every clip is checked / built before anything is written (no partial installs)
+    if (!a.overwrite) for (const c of lib.clips) { const old = loadClip(this, sk.name, c.name); if (old && !old.melee) throw new Error(`skeleton "${sk.name}" already has a non-melee clip "${c.name}" (overwrite:true replaces it)`); }
     const getClip = (n) => byName.get(n) ?? loadClip(this, sk.name, n);
+    const built = lib.clips.map((c) => { normalizeMelee(c.melee, rig); return [c.name, normalizeClip(c, rig, sk, getClip)]; });
+    writeJSON(libDir(this, 'skeletons', `${sk.name}.json`), sk);
     const saved = [];
-    for (const c of lib.clips) {
-      if (!a.overwrite && loadClip(this, sk.name, c.name) && !loadClip(this, sk.name, c.name).melee) throw new Error(`skeleton "${sk.name}" already has a non-melee clip "${c.name}" (overwrite:true replaces it)`);
-      normalizeMelee(c.melee, rig);
-      const clip = normalizeClip(c, rig, sk, getClip);
-      writeJSON(clipFile(this, sk.name, c.name), clip);
-      saved.push(c.name);
-    }
+    for (const [name, clip] of built) { writeJSON(clipFile(this, sk.name, name), clip); saved.push(name); }
     return {
       skeleton: sk.name, set: lib.kind, ...(weapon ? { weapon, cell: { w: mp.cell.w, h: mp.cell.h, pivot: mp.cell.pivot, edge: mp.cell.edge } } : {}), ...(shield ? { shield: { w: mp.shieldCell.w, h: mp.shieldCell.h } } : {}),
       clips: saved, paired: saved.filter((n) => n.endsWith('_attacker')).map((n) => n.slice(0, -9)),
@@ -452,16 +457,20 @@ export const MELEE_OPS = {
 
   /** Validate melee clips: event order, active frames, no hit before the windup, sweep coverage, paired alignment. */
   anim_melee_check(a) {
-    const sk = loadSkeleton(this, a.skeleton ?? (a.skin ? readJSON(libDir(this, 'skins', `${a.skin}.json`)).skeleton : undefined));
+    const skinDef = a.skin !== undefined ? loadSkin(this, a.skin) : null;
+    const sk = loadSkeleton(this, a.skeleton ?? skinDef?.skeleton);
     let rig, def;
     let getClip = (n) => loadClip(this, sk.name, n);
-    if (a.skin) {
-      const skin = readJSON(libDir(this, 'skins', `${a.skin}.json`));
+    if (skinDef) {
+      const skin = skinDef;
       ({ rig, def } = getRig(this, skin.rig));
       if (skin.proportions && Object.keys(skin.proportions).length) { const raw = getClip; getClip = (n) => { const c = raw(n); return c ? retargetClip(c, sk.def, def, skin.map).clip : null; }; }
     } else { def = sk.def; rig = normalizeRig(def); }
-    const tol = Number(a.tolerance ?? 2);
-    const names = (a.clips ? [].concat(a.clips) : listClips(this, sk.name)).filter((n) => getClip(n)?.melee);
+    const tol = a.tolerance ?? 2;
+    if (!(typeof tol === 'number' && Number.isFinite(tol) && tol >= 0)) throw new Error(`"tolerance" must be a finite number >= 0 px (got ${JSON.stringify(a.tolerance)})`);
+    const asked = a.clips !== undefined ? [].concat(a.clips) : null;
+    if (asked) for (const n of asked) checkName(n, 'clip');
+    const names = (asked ?? listClips(this, sk.name)).filter((n) => getClip(n)?.melee);
     if (!names.length) throw new Error(`skeleton "${sk.name}" has no melee clips (art_anim melee {skeleton:"${sk.name}"})`);
     const views = a.views ? [].concat(a.views) : rig.views.filter((v) => HD_VIEWS.includes(v));
     const cells = cellsOf(sk);
@@ -487,7 +496,11 @@ export const MELEE_OPS = {
     const ids = a.weapons ? [].concat(a.weapons) : a.weapon ? [a.weapon] : MELEE_IDS;
     const out = this.resolvePath(a.out ?? 'assets', this.exportDir);
     const frame = a.frame ?? [64, 96];
+    if (!(Array.isArray(frame) && frame.length === 2 && frame.every((v) => Number.isInteger(v) && v > 0 && v <= 1024))) throw new Error(`"frame" must be [w, h]: two positive integers <= 1024 (got ${JSON.stringify(a.frame)})`);
     const pitch = a.pitch ?? MELEE_PITCH;
+    if (!(Array.isArray(pitch) && pitch.length && pitch.every((v) => typeof v === 'number' && Number.isFinite(v) && v >= -90 && v <= 90))) throw new Error(`"pitch" must be a non-empty list of degrees in -90..90 (got ${JSON.stringify(a.pitch)})`);
+    if (a.model !== undefined) checkName(a.model, 'model');
+    for (const id of ids) if (!meleeWeapon(id)) throw new Error(`unknown melee weapon ${JSON.stringify(id)} (${MELEE_IDS.join(', ')})`);
     const mf = path.join(out, 'manifest', 'melee_weapons.json');
     const man = fs.existsSync(mf) ? readJSON(mf) : {};
     man.melee_world = man.melee_world || {};
@@ -498,7 +511,7 @@ export const MELEE_OPS = {
       const file = `weapons_melee/${id}.png`;
       fs.mkdirSync(path.join(out, 'weapons_melee'), { recursive: true });
       fs.writeFileSync(path.join(out, file), encodePNG(img.W, img.H, img.data));
-      const W = MELEE_WEAPONS[id];
+      const W = meleeWeapon(id);
       man.melee_world[id] = { file, frame: s.frame, grip: s.grip, views: s.views, pitch: s.pitch, px_per_m: s.px_per_m, set: W.set, hands: W.hands, damage: W.damage, stamina: W.stamina, radius_px: r1(W.cell.radius * ((frame[1] - 4) / 98)), radius_cm: r1(W.cell.radius * CM_PER_UNIT), cells: s.meta, ...(W.shield ? { shield: true } : {}), ...(W.shock ? { shock: true } : {}) };
       report[id] = { file, frame: s.frame, sheet: [img.W, img.H] };
     }
@@ -511,10 +524,10 @@ export const MELEE_OPS = {
    * alignment), into a canvas strip + a contact sheet.
    */
   anim_paired(a, source) {
-    const skinA = readJSON(libDir(this, 'skins', `${a.skin}.json`));
-    const skinV = a.victim_skin ? readJSON(libDir(this, 'skins', `${a.victim_skin}.json`)) : skinA;
+    const skinA = loadSkin(this, a.skin);
+    const skinV = a.victim_skin !== undefined ? loadSkin(this, a.victim_skin, 'victim_skin') : skinA;
     const sk = loadSkeleton(this, skinA.skeleton);
-    const pair = a.pair ?? a.clip;
+    const pair = checkName(a.pair ?? a.clip, 'pair');
     const att = loadClip(this, sk.name, `${pair}_attacker`), vic = loadClip(this, sk.name, `${pair}_victim`);
     if (!att || !vic) throw new Error(`skeleton "${sk.name}" has no paired clip "${pair}" (${listClips(this, sk.name).filter((n) => n.endsWith('_attacker')).map((n) => n.slice(0, -9)).join(', ') || 'none: art_anim melee'})`);
     const view = a.view ?? 'side';
@@ -536,7 +549,7 @@ export const MELEE_OPS = {
       if (po.order === 'partner_front') { over(ia); over(iv); } else { over(iv); over(ia); }
       return out;
     });
-    const canvas = a.canvas ?? `${a.skin}_${pair}_${view}`;
+    const canvas = checkName(a.canvas ?? `${a.skin}_${pair}_${view}`, 'canvas');
     this.run('create', { name: canvas, width: FW, height: FH, frames: frames.length, overwrite: true }, source);
     const d = this.docs.get(canvas);
     frames.forEach((img, i) => d.layers[0].data.set(img, i * FW * FH * 4));
