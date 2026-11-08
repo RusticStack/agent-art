@@ -71,7 +71,7 @@ export function gunshipTemplate(o = {}) {
   const parts = [body];
   const Sx = (t, yl) => S.halfWidthAt(t, yl); // outer half width at local height
   // ---------- glazing + nose sensor cage ----------
-  parts.push({ type: 'glazing', hull: 'body', t: glz.t, u: glz.u, cols: 6, rows: 2, mullion: 5, frame: 9, inset: 3, textures: { glass: 'kit_glass', frame: DARK }, ...P });
+  parts.push({ type: 'glazing', hull: 'body', t: glz.t, u: glz.u, cols: 6, rows: 2, mullion: 5, frame: 9, inset: 3, opacity: 0.2, textures: { glass: '#8ec4dc', frame: DARK }, ...P });
   const nz = zt(1);
   parts.push({ type: 'truss', from: [0, Y(48), nz - 6], to: [0, Y(48), nz + 54], w: 26, h: 22, bay: 18, style: 'x', chord: 1.6, brace: 0.9, texture: DARK, ...P });
   parts.push({ type: 'sensor_dome', at: [0, Y(42), nz + 30], r: 7, ...P });
@@ -93,7 +93,7 @@ export function gunshipTemplate(o = {}) {
     // shoulder pivot: exposed knuckles + collar
     parts.push({ type: 'cylinder', r: 20, h: 16, segments: 12, rotate: [0, 0, 90], at: [r2(s * (xS + (s > 0 ? 14 : -2))), yB, zB], texture: DARK, material: 'bare_metal', ...P });
     parts.push({ type: 'hinge', len: 30, r: 9, count: 4, at: [r2(s * (xS + 8)), yB + 14, zB], ...P });
-    parts.push({ type: 'hull', ...(rig ? { name: boomN, parent: 'hull' } : {}), id: `boom_${sfx}`, length: boomLen, width: 40, height: 30, at: [r2(s * (xS + 12 + boomLen / 2)), yB - 15, zB], rotate: [0, s * 90, 0], pivot: [r2(-s * (boomLen / 2 + 12)) * 0, 15, r2(-(boomLen / 2 + 4))], plan: [[0, 20], [0.85, 16], [1, 12]], profile: [[0, 30, 0], [0.8, 26, 3], [1, 22, 6]], section: { points: [[0, 1], [0.6, 1], [1, 0.4], [1, -0.4], [0.6, -1], [-0.6, -1], [-1, -0.4], [-1, 0.4], [-0.6, 1]] }, rings: 8, segments: 12, panel_lines: { every: 48, seams: [0.25], width: 1.5, depth: 1.2 }, plates: [{ t: [0.15, 0.7], u: [0.92, 0.08], lift: 2 }], texture: HULL, groove: DARK, plate_texture: HULL2, material: 'painted_metal' });
+    parts.push({ type: 'hull', ...(rig ? { name: boomN, parent: 'hull' } : {}), id: `boom_${sfx}`, length: boomLen, width: 40, height: 30, at: [r2(s * (xS + 12 + boomLen / 2)), yB - 15, zB], rotate: [0, s * 90, 0], plan: [[0, 20], [0.85, 16], [1, 12]], profile: [[0, 30, 0], [0.8, 26, 3], [1, 22, 6]], section: { points: [[0, 1], [0.6, 1], [1, 0.4], [1, -0.4], [0.6, -1], [-0.6, -1], [-1, -0.4], [-1, 0.4], [-0.6, 1]] }, rings: 8, segments: 12, panel_lines: { every: 48, seams: [0.25], width: 1.5, depth: 1.2 }, plates: [{ t: [0.15, 0.7], u: [0.92, 0.08], lift: 2 }], texture: HULL, groove: DARK, plate_texture: HULL2, material: 'painted_metal' });
     // underslung gun pod near the root, missile rail outboard
     parts.push({ type: 'gun_pod', at: [r2(s * (xS + 70)), yB - 16, zB + 6], len: 96, r: 9, barrels: 6, ...PB });
     for (const k2 of [0, 1]) parts.push({ type: 'hardpoint', at: [r2(s * (xS + 140 + k2 * 40)), yB - 16, zB], len: 60, missile_r: 4, textures: { texture: MET, dark: DARK }, ...PB });

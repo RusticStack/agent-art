@@ -239,13 +239,14 @@ export function marketDistrict(name, o = {}) {
   const kits = new Map();
   const kit = (key, part) => { if (!kits.has(key)) kits.set(key, kitModel(name, key, part)); return kits.get(key).name; };
   const parts = [], walk = [];
-  const wallT = o.textures?.wall ?? '#4a4640', floorT = o.textures?.floor ?? '#3a3a3c';
+  const wallT = o.textures?.wall ?? 'kit_concrete_4a4640', floorT = o.textures?.floor ?? 'kit_deck';
   // cavern shell: floor, side walls, end walls (one open), ceiling slabs
   parts.push({ type: 'box', w: W, h: 8, d: L, at: [0, -8, 0], texture: floorT });
   for (const s of [1, -1]) parts.push({ type: 'box', w: 16, h: H, d: L, at: [s * (W / 2 + 8), 0, 0], texture: wallT });
   parts.push({ type: 'box', w: W + 32, h: H, d: 16, at: [0, 0, -L / 2 - 8], texture: wallT });
-  parts.push({ type: 'box', w: W + 32, h: 24, d: L, at: [0, H, 0], texture: o.textures?.ceiling ?? '#2c2a28' });
-  parts.push({ type: 'box', w: street * 0.9, h: 0.5, d: L, at: [0, 0, 0], color: '#2a2a2c' });
+  parts.push({ type: 'box', w: W + 32, h: 24, d: L, at: [0, H, 0], texture: o.textures?.ceiling ?? 'kit_rock_3a3632' });
+  parts.push({ type: 'box', w: street * 0.9, h: 0.5, d: L, at: [0, 0, 0], texture: 'kit_grate' });
+  for (const s of [1, -1]) parts.push({ type: 'box', w: 4, h: 0.6, d: L, at: [r2(s * street * 0.47), 0, 0], texture: 'kit_hazard' });
   walk.push({ min: [-W / 2, 0, -L / 2], max: [W / 2, 0, L / 2], kind: 'street' });
   // stalls along both sides (3 variants each side, instanced)
   const stallW = 64, nSt = Math.floor((L - 64) / (stallW + 16));

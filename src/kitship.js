@@ -242,12 +242,14 @@ registerAssembly('locker_wall', (p, k) => {
 registerAssembly('portal_arch', (p) => {
   // chamfered octagonal bulkhead portal round a corridor (plane xy, centred on x, floor at y = 0)
   const wi = n(p.w, 72), hi = n(p.h, 84), ci = n(p.chamfer, 16), fw = n(p.frame, 8), d = n(p.d, 8), T = tx(p, 'texture', 'kit_panel_light'), dark = tx(p, 'dark', 'kit_metal_dark');
-  const oct = (w, h, c) => [[-w / 2 + c, 0], [w / 2 - c, 0], [w / 2, c], [w / 2, h - c], [w / 2 - c, h], [-w / 2 + c, h], [-w / 2, h - c], [-w / 2, c]];
+  // chamfered at the head only: the jambs run straight down to the floor (nothing to trip over)
+  const oct = (w, h, c) => [[-w / 2, 0], [w / 2, 0], [w / 2, 0], [w / 2, h - c], [w / 2 - c, h], [-w / 2 + c, h], [-w / 2, h - c], [-w / 2, 0]];
   const I = oct(wi, hi, ci), O = oct(wi + 2 * fw, hi + fw, ci + fw * 0.6);
-  O[0][1] = O[1][1] = 0; O[2][1] = Math.max(O[2][1], 0);
+  O[0][1] = O[1][1] = O[2][1] = O[7][1] = 0;
   const parts = [];
   for (let e = 1; e < 8; e++) { // the floor edge (e = 0) stays open
-    if (e === 7 || e === 1) { // bottom chamfers: fill down to the floor
+    if (e === 7 || e === 1) continue; // no bottom chamfers
+    if (false) {
       const a = I[e], b = I[(e + 1) % 8], A = O[e], B = O[(e + 1) % 8];
       const pts = [a, b, B, A].map((q) => q.map(r3));
       const area = pts.reduce((s, q, i) => { const w = pts[(i + 1) % 4]; return s + q[0] * w[1] - w[0] * q[1]; }, 0);
@@ -260,6 +262,6 @@ registerAssembly('portal_arch', (p) => {
     parts.push({ type: 'shape', points: area < 0 ? pts.reverse() : pts, d, plane: 'xy', texture: T });
   }
   parts.push({ type: 'box', w: wi - 2 * ci, h: 1.4, d: d + 1, at: [0, hi - 1.4, 0], color: p.glow ?? '#60c8ff', material: { preset: 'emissive_panel' } });
-  for (const s of [1, -1]) parts.push({ type: 'box', w: 1, h: hi - 2 * ci, d: d + 0.6, at: [s * (wi / 2 + 0.2), ci, 0], texture: 'kit_hazard' });
+  for (const s of [1, -1]) parts.push({ type: 'box', w: 1, h: Math.min(40, hi - ci), d: d + 0.6, at: [s * (wi / 2 + 0.2), 0, 0], texture: 'kit_hazard' });
   return { parts };
 }, 'w?:72,h?:84 (clear opening, >= 1.4 x 2.3 m),chamfer?:16,frame?:8,d?:8 (chamfered octagonal bulkhead portal, open at the floor, light bar on the head, hazard jambs)');

@@ -2,57 +2,57 @@
   "fighter": {
     "model": "fighter",
     "class": "fighter",
-    "triangles": 9252,
-    "budget": 10000,
+    "triangles": 11380,
+    "budget": 14000,
     "verdict": "within budget",
     "lods": [
-      9252,
-      4626,
-      1850
+      11380,
+      5690,
+      2276
     ],
     "draw_calls": {
-      "merged": 22,
+      "merged": 24,
       "rig_nodes": 20
     },
-    "materials": 22,
+    "materials": 24,
     "export": {
-      "triangles": 9252,
-      "nodes": 29,
-      "materials": 22,
-      "bytes": 1071704,
+      "triangles": 11380,
+      "nodes": 30,
+      "materials": 24,
+      "bytes": 1396368,
       "split": "no mesh over the limit",
       "lods": [
         {
           "level": 0,
-          "triangles": 9252,
+          "triangles": 11380,
           "distance": 0
         },
         {
           "level": 1,
-          "triangles": 4626,
+          "triangles": 5690,
           "distance": 28.116664
         },
         {
           "level": 2,
-          "triangles": 1850,
-          "distance": 62.229504
+          "triangles": 2276,
+          "distance": 76.379733
         }
       ],
       "lights": 5,
-      "markers": 24
+      "markers": 25
     }
   },
   "dropship": {
     "model": "dropship",
     "class": "dropship",
-    "triangles": 17260,
-    "budget": 18000,
+    "triangles": 19458,
+    "budget": 45000,
     "verdict": "within budget",
     "lods": [
-      17260,
-      8630,
-      4314,
-      1725
+      19458,
+      9728,
+      4864,
+      1944
     ],
     "draw_calls": {
       "merged": 22,
@@ -60,92 +60,92 @@
     },
     "materials": 22,
     "export": {
-      "triangles": 17260,
-      "nodes": 30,
+      "triangles": 19458,
+      "nodes": 31,
       "materials": 22,
-      "bytes": 2350804,
+      "bytes": 2622340,
       "split": "no mesh over the limit",
       "lods": [
         {
           "level": 0,
-          "triangles": 17260,
+          "triangles": 19458,
           "distance": 0
         },
         {
           "level": 1,
-          "triangles": 8630,
+          "triangles": 9728,
           "distance": 32.13333
         },
         {
           "level": 2,
-          "triangles": 4314,
-          "distance": 104.433323
+          "triangles": 4864,
+          "distance": 152.633318
         },
         {
           "level": 3,
-          "triangles": 1725,
-          "distance": 236.559903
+          "triangles": 1945,
+          "distance": 237.925493
         }
       ],
       "lights": 6,
-      "markers": 24
+      "markers": 25
     }
   },
   "hauler": {
     "model": "hauler",
     "class": "freighter",
-    "triangles": 20392,
-    "budget": 35000,
+    "triangles": 21960,
+    "budget": 80000,
     "verdict": "within budget",
     "lods": [
-      20392,
-      10196,
-      5098,
-      2039
+      21960,
+      10979,
+      5489,
+      2196
     ],
     "draw_calls": {
-      "merged": 26
+      "merged": 28
     },
-    "materials": 26,
+    "materials": 28,
     "export": {
-      "triangles": 20392,
-      "nodes": 23,
-      "materials": 26,
-      "bytes": 2651236,
+      "triangles": 21960,
+      "nodes": 24,
+      "materials": 28,
+      "bytes": 2896452,
       "split": [
-        "hauler: 20392 -> 2 meshes"
+        "hauler: 21960 -> 2 meshes"
       ],
       "lods": [
         {
           "level": 0,
-          "triangles": 20392,
+          "triangles": 21960,
           "distance": 0
         },
         {
           "level": 1,
-          "triangles": 10196,
-          "distance": 35.346663
+          "triangles": 10979,
+          "distance": 38.941839
         },
         {
           "level": 2,
-          "triangles": 5098,
+          "triangles": 5489,
           "distance": 273.133306
         },
         {
           "level": 3,
-          "triangles": 2039,
-          "distance": 2865.292411
+          "triangles": 2196,
+          "distance": 2865.728419
         }
       ],
       "lights": 8,
-      "markers": 16
+      "markers": 17
     }
   },
   "capital_ring": {
     "model": "ring",
     "class": "capital",
     "triangles": 29776,
-    "budget": 150000,
+    "budget": 200000,
     "verdict": "within budget",
     "lods": [
       29776,
@@ -161,7 +161,7 @@
       "triangles": 29776,
       "nodes": 20,
       "materials": 13,
-      "bytes": 2788284,
+      "bytes": 2787560,
       "split": [
         "ring: 29776 -> 2 meshes"
       ],
@@ -189,61 +189,61 @@
   "interior": {
     "model": "engine_corridor",
     "class": "room",
-    "triangles": 4226,
+    "triangles": 5674,
     "budget": 8000,
     "verdict": "within budget",
     "lods": [
-      4226,
-      2110,
-      845
+      5674,
+      2282,
+      1133
     ],
     "draw_calls": {
-      "merged": 21
+      "merged": 18
     },
-    "materials": 21,
+    "materials": 18,
     "export": {
-      "triangles": 4226,
-      "nodes": 12,
-      "materials": 21,
-      "bytes": 332732,
+      "triangles": 5674,
+      "nodes": 13,
+      "materials": 18,
+      "bytes": 457608,
       "lights": 6,
-      "markers": 9
+      "markers": 10
     }
   },
   "dropship_interior": {
     "model": "dropship_interior",
     "class": "building",
-    "triangles": 11212,
+    "triangles": 15300,
     "budget": 25000,
     "verdict": "within budget",
     "lods": [
-      11212,
-      5606,
-      2242
+      15300,
+      7650,
+      3059
     ],
     "draw_calls": {
       "merged": 41
     },
     "materials": 41,
     "export": {
-      "triangles": 11212,
-      "nodes": 49,
+      "triangles": 15300,
+      "nodes": 59,
       "materials": 41,
-      "bytes": 866076,
-      "lights": 18,
-      "markers": 39
+      "bytes": 1205124,
+      "lights": 21,
+      "markers": 48
     }
   },
   "mining_colony": {
     "model": "colony",
     "class": "district",
-    "triangles": 14422,
+    "triangles": 14470,
     "budget": 150000,
     "verdict": "within budget",
     "lods": [
-      14422,
-      7210,
-      2884
+      14470,
+      7234,
+      2894
     ],
     "draw_calls": {
       "merged": 6,
@@ -252,38 +252,38 @@
     },
     "materials": 6,
     "export": {
-      "triangles": 14422,
-      "nodes": 39,
-      "materials": 26,
-      "bytes": 1092652,
+      "triangles": 14470,
+      "nodes": 42,
+      "materials": 28,
+      "bytes": 1136352,
       "lights": 18,
-      "markers": 23
+      "markers": 26
     }
   },
   "market": {
     "model": "market",
     "class": "district",
-    "triangles": 30844,
+    "triangles": 40000,
     "budget": 150000,
     "verdict": "within budget",
     "lods": [
-      30844,
-      15422,
-      6168
+      40000,
+      20000,
+      8000
     ],
     "draw_calls": {
-      "merged": 18,
+      "merged": 17,
       "instances": 41,
       "instanced_unique": 36
     },
-    "materials": 18,
+    "materials": 17,
     "export": {
-      "triangles": 30844,
-      "nodes": 135,
-      "materials": 29,
-      "bytes": 1650264,
-      "lights": 89,
-      "markers": 92
+      "triangles": 40000,
+      "nodes": 183,
+      "materials": 36,
+      "bytes": 2345912,
+      "lights": 113,
+      "markers": 140
     }
   }
 }
