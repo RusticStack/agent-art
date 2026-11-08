@@ -13,11 +13,11 @@
 
 ### Changed defaults and fixes
 
-- `mirror_pairs` no longer swaps arm chains that are held by IK onto a weapon (the gun used to change hands). Set `mirror_hands: true` on a key to swap them deliberately.
+- `mirror_pairs` no longer swaps arm chains that are held by IK onto a weapon (the gun used to change hands). This also applies to rigs without a weapon: an arm chain with a non-foot IK end in the key (a hand on a prop) keeps its side, so such existing clips render differently. Set `mirror_hands: true` on a key to swap them deliberately.
 - `humanoid_hd`: the `_f` limbs were on the wrong screen side in the 3/4, front and back views; they are now on the correct side. In the front and back views the thighs draw above the pelvis, which removes the "shorts" look.
 - Preset animation tags are always `<preset>_<view>` (previously `idle` for the first view and `idle_<view>` for the rest).
 - The `preview` ground line is drawn at the feet instead of at the root.
-- `art_critique`: HD sprites (64 px and up) get a 48-128 colour budget, with 32 kept for low-res. Ordered dithering in HD is no longer flagged as noise. `style` overrides the detection.
+- `art_critique`: HD sprites (64x96 and up: longest side >= 96 px and at least 6144 px) get a 48-128 colour budget, with 32 kept for low-res. Ordered dithering in HD is no longer flagged as noise. `style` overrides the detection.
 - Compact replies: `art_info` and `art_rig` `info`, `create` and `update` reply with a summary. `full: true` returns everything; `fields:[...]` returns only the fields named.
 - `docs/rig-hd-guide.md`: the view-band offsets are the tallest cell + 1 (0, 74, 148, 222, 296 by default; 55, 110, 165, 220 with `cape: null`). The doc was wrong; the code was right.
 
