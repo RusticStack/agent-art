@@ -334,3 +334,16 @@ test('damage render / preview on a model with part-attached sockets keeps the ri
   assert.ok(e.run('model_preview', { name: 'fighter', damage: 'scuffed', size: 64 }).image.length > 100);
 });
 
+test('roblox damage profile: the intact MeshPart is capped at 20k triangles and has no LOD nodes', () => {
+  const e = new Engine({ home: tmp() }), dir = tmp();
+  e.run('model_create', { name: 'drum', parts: [{ type: 'cylinder', r: 16, h: 16, segments: 6000, color: '#888' }] });
+  e.run('model_damage', { name: 'drum', states: ['scuffed'] });
+  const r = e.run('model_export', { name: 'drum', path: path.join(dir, 'drum.glb'), damage: { profile: 'roblox', lods: [1, 0.5] } });
+  const intact = r.damage.states.find((s) => s.name === 'intact');
+  assert.ok(intact.triangles <= 20000 && !intact.lods, JSON.stringify(intact));
+  const g = parseGLB(fs.readFileSync(path.join(dir, 'drum.damage.roblox.glb')));
+  assert.ok(!g.json.nodes.some((n) => /_LOD\d$/.test(n.name)), 'no LOD nodes');
+  const man = JSON.parse(fs.readFileSync(path.join(dir, 'drum.damage.json'), 'utf8'));
+  assert.equal(man.states[0].simplified_for_roblox, true);
+});
+

@@ -285,11 +285,13 @@ export function damageExport(engine, def, built, a, { file, scale }) {
     if (!S.nodes[id].children.length) delete S.nodes[id].children;
     return { id, rec };
   };
-  const intactMesh = blend && !roblox ? blend.mesh : built.mesh;
+  // roblox: the intact MeshPart is capped like the states and carries no LOD levels
+  const robloxIntact = roblox && spec ? capRoblox(built.mesh, 'intact') : null;
+  const intactMesh = blend && !roblox ? blend.mesh : robloxIntact ? robloxIntact.mesh : built.mesh;
   const addStates = (S, parent, only) => {
     if (!spec) return;
     if (!only || only === 'intact') {
-      const { id, rec } = stateNodes(S, def.name, 'intact', intactMesh, [], { amount: 0, visible: true, ...(blend ? { blend: { morph: 'damage', uv_set: 1, mask: path.basename(`${base}.damage_mask.png`) } } : {}) }, lodLevels(intactMesh, blend ? built.mesh : null));
+      const { id, rec } = stateNodes(S, def.name, 'intact', intactMesh, [], { amount: 0, visible: true, ...(blend ? { blend: { morph: 'damage', uv_set: 1, mask: path.basename(`${base}.damage_mask.png`) } } : {}), ...(robloxIntact?.simplified ? { simplified_for_roblox: true } : {}) }, roblox ? null : lodLevels(intactMesh, blend ? built.mesh : null));
       if (parent !== null) S.nodes[parent].children.push(id);
       if (blend?.overlays && !roblox) {
         // the intact mesh's overlay shells (no morph targets): sibling mesh under the intact node
