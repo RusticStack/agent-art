@@ -231,6 +231,20 @@ PRE-RENDERED FP WEAPON EXAMPLE: 1. create {name:"ar", template:"fp_rifle", textu
 
 Object.assign(TOPICS, AUDIO_TOPICS);
 
+TOPICS.graph = `ASSET GRAPH (art_graph): the light index of what is part of what
+Orient yourself with it instead of calling art_info on every asset: replies are ids, relation types and one-line notes only (a few hundred chars).
+Nodes: a bare name ("helmet_front": canvas, else model, rig, audio, group, project) or kind:name: canvas: rig: model: audio: project: group: palette: export:<path> file:<path>, and sub-assets layer:<canvas>/<layer>, anim:<canvas>/<tag>, frame:<canvas>/<n>, rigpart:<rig>/<part>, modelpart:<model>/<part>.
+Automatic (derived from the workspace, never stale): project membership (part_of project:), layers (layer_of), animation tags (part_of), rig parts canvas + parts (part_of rig:), rig animate / model render outputs (rendered_from), model textures and placed models (depends_on), normal maps (variant_of {map:normal}), CTM tilesets (rendered_from), exports (exports_to export:<file>).
+You add the semantic ones:
+- link {from:"helmet_side", rel:"variant_of", to:"helmet_front", attrs:{view:"side"}}; rels: part_of variant_of view_of layer_of uses_palette rendered_from exports_to depends_on replaces, or a custom lowercase label. unlink {from, rel?, to?} or {node}.
+- group {name:"Severance armour", members:["helmet_front","helmet_side"], parent?:"Armour", note?} (groups nest; cycles are refused); remove:[..]; delete:true.
+- tag {node, add:["helmet"], remove?}; note {node, note:"one line"} (null clears).
+Read:
+- summary {} = workspace outline (groups tree, projects, tags); summary {group} = one group as a tree.
+- query {node, depth?:1, rel?, dir?:"out"|"in"|"both", limit?:12} = adjacency list ("rel> target" outgoing, "<rel source" incoming, leaf sub-assets grouped on one line).
+- find {tag|rel|text|kind} = matching nodes (rel alone lists those edges). path {from, to} = shortest relation chain.
+Output is capped (max_chars, default 1600); narrow with rel, depth or limit. The web UI shows the graph live (Graph view).`;
+
 export function helpText(a = {}) {
   if (a.op) {
     const u = opUsage(a.op);

@@ -12,6 +12,9 @@ import { critiqueImage, critiqueFrames } from './critique.js';
 import { RIG_OPS } from './rigops.js';
 import { MODEL_OPS } from './modelops.js';
 import { AUDIO_OPS } from './audio/ops.js';
+import { Activity } from './activity.js';
+import { Graph, GRAPH_OPS } from './graph.js';
+import { Reviews, REVIEW_OPS } from './review.js';
 import crypto from 'node:crypto';
 
 const NAME_RE = /^[A-Za-z0-9_\-.]{1,64}$/;
@@ -53,6 +56,10 @@ export class Engine extends EventEmitter {
     this.saveTimers = new Map();
     this.uiUrl = null;
     this.load();
+    // timeline of ops / tool calls for the web UI, and the asset graph (relations, tags, groups)
+    this.activity = new Activity(this);
+    this.graph = new Graph(this);
+    this.reviews = new Reviews(this, this.graph);
   }
 
   load() {
@@ -164,11 +171,20 @@ export class Engine extends EventEmitter {
     return path.isAbsolute(p) ? p : path.join(baseDir, p);
   }
 
-  /** Run an operation. Returns a plain object; `image` (Buffer, PNG) when an image is produced. */
-  run(op, args = {}, source = 'agent') {
+  /**
+   * Run an operation. Returns a plain object; `image` (Buffer, PNG) when an image is produced.
+   * ctx (optional): {call, tool} of the MCP tool call this op belongs to (activity timeline).
+   */
+  run(op, args = {}, source = 'agent', ctx = null) {
     const fn = OPS[op];
     if (!fn) throw new Error(`Unknown op "${op}". Valid: ${Object.keys(OPS).join(', ')}`);
-    return fn.call(this, args, source);
+    return this.activity.record(op, args, source, ctx, () => fn.call(this, args, source));
+  }
+  /** Run a read-only op without recording it in the activity timeline (UI reads). */
+  peek(op, args = {}) {
+    const fn = OPS[op];
+    if (!fn) throw new Error(`Unknown op "${op}"`);
+    return fn.call(this, args, 'user');
   }
 }
 
@@ -940,5 +956,5 @@ const OPS = {
   },
 };
 
-Object.assign(OPS, RIG_OPS, MODEL_OPS, AUDIO_OPS);
+Object.assign(OPS, RIG_OPS, MODEL_OPS, AUDIO_OPS, GRAPH_OPS, REVIEW_OPS);
 export const OP_NAMES = Object.keys(OPS);

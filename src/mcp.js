@@ -13,6 +13,7 @@ import { startServer, APP_ID, packResult } from './server.js';
 import { COMMAND_NAMES } from './doc.js';
 import { drawDescription, helpText, TOPICS } from './docs.js';
 import { SKILLS, skillText } from './skills.js';
+import { summarizeArgs, summarizeResult, READ_ONLY } from './activity.js';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const log = (...a) => process.stderr.write(`[agent-art] ${a.join(' ')}\n`);
@@ -22,7 +23,9 @@ Workflow: palette ramps first (art_palette ramp) -> flat silhouettes -> shade (a
 Multi-asset work: art_project create (shared palette + style notes), review with art_sheet. Any character/creature with more than one view or frame: use art_rig (template:"humanoid"|"humanoid_hd" (detailed 64x96+)|"blob"|"flyer" is fastest; templates are only defaults) instead of hand-drawing frames, so every frame stays the same asset.
 3D (HD-2D maps, props -> .glb): art_model.
 Audio (SFX, music, mixing; you cannot hear, so read analyze/critique reports): art_audio.
-Details on demand: art_help {topic: workflow|textures|characters|animation|rig|scenes|hires|minecraft|3d|audio|music|mixing|perception} or {op:"<draw command>"}.`;
+The user leaves review notes on assets in the web UI: art_review list (replies say when the asset you touch has open notes).
+Orient yourself with art_graph (summary / query: what is part of what, a few hundred chars) instead of art_info on everything; record relations with art_graph link / group / tag / note.
+Details on demand: art_help {topic: workflow|textures|characters|animation|rig|scenes|hires|minecraft|3d|audio|music|mixing|perception|graph} or {op:"<draw command>"}.`;
 
 const S = {
   canvas: { type: 'string' },
@@ -58,7 +61,7 @@ export const TOOLS = [
   },
   {
     name: 'art_list',
-    description: 'List canvases (optionally of a project), projects and the UI URL.',
+    description: 'List canvases (optionally of a project), projects and the UI URL. Relations and groups: art_graph.',
     inputSchema: { type: 'object', properties: { project: { type: 'string' } } },
     run: (call, a) => call('list', a),
   },
@@ -306,6 +309,37 @@ export const TOOLS = [
     run: (call, a) => call(`audio_${a.action}`, a),
   },
   {
+    name: 'art_graph',
+    description: 'Asset graph: the light index of what is part of what (use it to orient yourself). summary {group?}; query {node, depth?, rel?, dir?}; find {tag|rel|text|kind}; path {from, to}; link {from, rel, to, attrs?} (rel: part_of variant_of view_of layer_of uses_palette rendered_from exports_to depends_on replaces | custom); unlink; tag {node, add|remove}; note {node, note}; group {name, members?, remove?, parent?, note?, delete?}. Node: name or kind:name (layer:c/l anim:c/tag rigpart:r/p). Structural edges are automatic. art_help {topic:"graph"}.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['summary', 'query', 'find', 'path', 'link', 'unlink', 'tag', 'note', 'group'] },
+        node: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, rel: { type: ['string', 'array'] }, attrs: { type: 'object' }, label: { type: 'string' },
+        add: { type: ['array', 'string'] }, remove: { type: ['array', 'string'] }, tags: { type: 'array' }, note: { type: ['string', 'null'] },
+        name: { type: 'string' }, members: { type: 'array', items: { type: 'string' } }, parent: { type: ['string', 'null'] }, delete: { type: 'boolean' },
+        depth: { type: 'integer' }, dir: { enum: ['out', 'in', 'both'] }, tag: { type: 'string' }, text: { type: 'string' }, kind: { type: 'string' }, limit: { type: 'integer' }, max_chars: { type: 'integer' },
+      },
+      required: ['action'],
+    },
+    run: (call, a) => call(`graph_${a.action}`, a),
+  },
+  {
+    name: 'art_review',
+    description: 'Review notes the user left in the web UI (pin/box on a frame, view, layer, part or audio range; category fix|redo|inconsistent|layering|style|question|approve; compare_with = the asset/view it should match). list {status?:active(default)|open|fixed|accepted|all, asset?} = one line each; get {id} = image of the marked region (noted, now, compare) + history; update {id, status:in_progress|fixed, reply?} (fixed attaches the new version; the user accepts or reopens); add {asset, note, category?, frame?, view?, region?:[x,y,w,h], compare_with?} to ask the user something.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['list', 'get', 'update', 'add'] }, id: { type: 'string' }, status: { type: 'string' }, reply: { type: 'string' }, version: { type: ['integer', 'string'] },
+        asset: { type: 'string' }, note: { type: 'string' }, category: { type: 'string' }, priority: { enum: ['low', 'normal', 'high'] },
+        frame: { type: 'integer' }, view: { type: 'string' }, tag: { type: 'string' }, layer: { type: 'string' }, part: { type: 'string' }, region: { type: 'array', items: { type: 'integer' } },
+        time: { type: ['number', 'array'] }, compare_with: { type: ['string', 'object'] }, limit: { type: 'integer' },
+      },
+      required: ['action'],
+    },
+    run: (call, a) => call(`review_${a.action}`, a),
+  },
+  {
     name: 'art_undo',
     description: 'Undo (redo:true = redo) the last N steps; each art_draw call is one step.',
     inputSchema: { type: 'object', properties: { canvas: S.canvas, steps: { type: 'integer' }, redo: { type: 'boolean' } }, required: ['canvas'] },
@@ -356,6 +390,19 @@ export const TOOLS = [
     },
   },
 ];
+
+/** Asset ids (graph node ids) a tool call names in its arguments, for the review hint. */
+export function touchedAssets(tool, a = {}) {
+  const ids = [];
+  const add = (kind, n) => { if (typeof n === 'string' && n && !n.includes('*')) ids.push(`${kind}:${n}`); };
+  if (['art_review', 'art_graph', 'art_help', 'art_list', 'art_open_ui', 'art_project'].includes(tool)) return ids;
+  if (tool === 'art_rig') { add('rig', a.name); add('canvas', a.canvas || a.name); if (a.name) add('canvas', `${a.name}_parts`); }
+  else if (tool === 'art_model') { add('model', a.name); add('canvas', a.canvas); }
+  else if (tool === 'art_audio') { add('audio', a.name); for (const n of a.names || []) add('audio', n); }
+  else if (tool === 'art_sheet') { for (const n of (a.canvases || []).slice(0, 20)) add('canvas', n); }
+  else { add('canvas', a.canvas); add('canvas', a.name); add('canvas', a.new_name); }
+  return [...new Set(ids)];
+}
 
 export function openBrowser(url) {
   const [cmd, args] = process.platform === 'win32' ? ['explorer.exe', [url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
@@ -504,23 +551,35 @@ export class Backend {
   uiUrl() {
     return `http://localhost:${this.port}`;
   }
-  async call(op, args, retry = true) {
-    if (!this.remote) return packResult(await this.engine.run(op, args, 'agent'));
+  /** ctx (optional): {call, tool} of the MCP tool call the op belongs to (web UI activity timeline). */
+  async call(op, args, retry = true, ctx = null) {
+    if (!this.remote) return packResult(await this.engine.run(op, args, 'agent', ctx));
     let r;
     try {
       r = await fetch(`http://127.0.0.1:${this.port}/api/op`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ op, args, source: 'agent' }),
+        body: JSON.stringify({ op, args, source: 'agent', ...(ctx ? { trace: ctx } : {}) }),
       });
     } catch (e) {
       if (!retry) throw e;
       await this.recover();
-      return this.call(op, args, false);
+      return this.call(op, args, false, ctx);
     }
     const j = await r.json();
     if (!j.ok) throw new Error(j.error);
     return j.result;
+  }
+  /** Tool call start / end for the UI timeline: never fails the tool call. */
+  async trace(ev) {
+    try {
+      if (!this.remote) {
+        if (!this.engine) return;
+        if (ev.phase === 'end') this.engine.activity.toolEnd(ev); else this.engine.activity.toolStart(ev);
+        return;
+      }
+      await fetch(`http://127.0.0.1:${this.port}/api/trace`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(ev), signal: AbortSignal.timeout(1500) });
+    } catch { /* the timeline is best effort */ }
   }
   close() {
     this.engine?.flush();
@@ -534,7 +593,7 @@ export class Backend {
 export async function runMcp({ port, home, open }) {
   const backend = new Backend({ port, home, open });
   await backend.init();
-  const call = (op, args) => backend.call(op, args);
+  let callSeq = 0;
   const send = (msg) => process.stdout.write(JSON.stringify(msg) + '\n');
 
   async function handle(msg) {
@@ -571,11 +630,26 @@ export async function runMcp({ port, home, open }) {
             result = { content: [{ type: 'text', text: `Unknown tool ${params?.name}` }], isError: true };
             break;
           }
+          // every tool call is one timeline entry in the web UI; its engine ops attach to it
+          const traceId = `c${process.pid.toString(36)}-${(++callSeq).toString(36)}`;
+          const args = params.arguments || {};
+          const t0 = performance.now();
+          await backend.trace({ phase: 'start', call: traceId, tool: tool.name, args: summarizeArgs(args) });
+          let mutated = false;
+          const traced = (op, a) => { if (!READ_ONLY.has(op)) mutated = true; return backend.call(op, a, true, { call: traceId, tool: tool.name }); };
           try {
-            const r = await tool.run(call, params.arguments || {}, backend);
+            const r = await tool.run(traced, args, backend);
             result = { content: toContent(r) };
+            // one line when the touched asset has open review notes or is approved by the user
+            const ids = touchedAssets(tool.name, args);
+            if (ids.length) {
+              const h = await backend.call('review_hint', { ids, mutated }).catch(() => null);
+              if (h?.text) result.content.push({ type: 'text', text: h.text });
+            }
+            await backend.trace({ phase: 'end', call: traceId, ok: true, ms: performance.now() - t0, summary: summarizeResult(r) });
           } catch (e) {
             result = { content: [{ type: 'text', text: `Error: ${e.message}` }], isError: true };
+            await backend.trace({ phase: 'end', call: traceId, ok: false, error: e.message, ms: performance.now() - t0 });
           }
           break;
         }

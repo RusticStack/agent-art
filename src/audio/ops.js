@@ -39,6 +39,8 @@ function store(e) {
   e.audio = { d, defs, inst, mem: new Map() };
   return e.audio;
 }
+/** The workspace audio store (definitions by name), loaded on first use. */
+export const audioStore = (e) => store(e);
 const hashDef = (def) => crypto.createHash('sha1').update(JSON.stringify({ ...def, updated: 0, created: 0, stats: 0 })).digest('hex').slice(0, 16);
 function saveDef(e, def, source) {
   const s = store(e);
