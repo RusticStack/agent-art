@@ -203,3 +203,17 @@ test('a skin mesh that absorbs the weapon-locked hand draws over the gun (z of i
   let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i]) n++;
   assert.ok(n > 20, `__front strip has the arm (${n} px)`);
 });
+
+test('anim_weapon points and anim_weapon_sheet views / pitch / max_size are validated', () => {
+  const e = setup();
+  e.run('anim_weapon', { name: 'ar', class: 'rifle', skin: 'mec' });
+  for (const p of [['x', 3], 5, [1], [1, 2, 3], [NaN, 2], { at: [1, 'y'] }, null]) assert.throws(() => e.run('anim_weapon', { name: 'ar', points: { grip_main: p } }), /two finite numbers/, JSON.stringify(p));
+  assert.throws(() => e.run('anim_weapon', { name: 'ar', points: { grip_support: { at: [1, 2], angle: 'up' } } }), /angle must be a finite/);
+  assert.throws(() => e.run('anim_weapon', { name: 'nw', class: 'rifle', skin: 'mec', points: { grip_main: ['x', 3] } }), /two finite numbers/);
+  const ok = e.run('anim_weapon', { name: 'ar', points: { grip_support: { at: [30, 4], angle: -90 } } });
+  assert.deepEqual(ok.points.grip_support, { ...ok.points.grip_support, at: [30, 4], angle: -90 });
+  for (const pitch of [[], ['a'], [0, 0], [30, 0], 15]) assert.throws(() => e.run('anim_weapon_sheet', { weapon: 'ar', out: tmp(), pitch }), /pitch: a non-empty list/, JSON.stringify(pitch));
+  for (const views of [['nope'], [], ['side', 'side']]) assert.throws(() => e.run('anim_weapon_sheet', { weapon: 'ar', out: tmp(), views }), /views: a non-empty list/, JSON.stringify(views));
+  assert.throws(() => e.run('anim_weapon_sheet', { weapon: 'ar', out: tmp(), max_size: 'big' }), /max_size/);
+  assert.equal(e.run('anim_weapon_sheet', { weapon: 'ar', out: tmp(), views: ['side'], pitch: [-15, 0, 15] }).cells, 3);
+});

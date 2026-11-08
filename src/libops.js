@@ -485,6 +485,14 @@ function supportError(f, cells, vi, pitch) {
   const [dx, dy] = rotDeg(f.sock.rot, c.support[0] - sl * c.axis[0] - cells.grip[0], c.support[1] - sl * c.axis[1] - cells.grip[1]);
   return Math.hypot(f.sock.x + dx - h.grip[0], f.sock.y + dy - h.grip[1]);
 }
+/** A weapon point from anim_weapon points: [x, y] or {at:[x, y], angle?} with finite numbers. */
+function weaponPoint(k, p) {
+  const at = Array.isArray(p) ? p : p && typeof p === 'object' ? p.at : undefined;
+  if (!Array.isArray(at) || at.length !== 2 || !at.every((v) => typeof v === 'number' && Number.isFinite(v))) throw new Error(`points.${k}: needs [x, y] or {at:[x, y], angle?} with two finite numbers (got ${JSON.stringify(p)})`);
+  const angle = !Array.isArray(p) && p.angle !== undefined ? p.angle : undefined;
+  if (angle !== undefined && !(typeof angle === 'number' && Number.isFinite(angle))) throw new Error(`points.${k}.angle must be a finite number of degrees (got ${JSON.stringify(angle)})`);
+  return { at: at.slice(), ...(angle !== undefined ? { angle } : {}) };
+}
 const rotDeg = (deg, x, y) => { const r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r); return [x * c - y * s, x * s + y * c]; };
 
 Object.assign(LIB_OPS, {
@@ -493,9 +501,11 @@ Object.assign(LIB_OPS, {
     const name = checkName(a.name, 'weapon');
     const f = libDir(this, 'weapons', `${name}.json`);
     if (fs.existsSync(f) && !a.overwrite && !a.points) throw new Error(`weapon "${name}" exists (overwrite:true replaces it; points:{...} updates its points)`);
+    if (a.points !== undefined && (!a.points || typeof a.points !== 'object' || Array.isArray(a.points))) throw new Error('points must be an object {<point>: [x, y] | {at:[x, y], angle?}}');
+    const pts = a.points ? Object.entries(a.points).map(([k, p]) => [k, weaponPoint(k, p)]) : [];
     if (fs.existsSync(f) && a.points && !a.overwrite) {
       const w = loadWeapon(this, name);
-      for (const [k, p] of Object.entries(a.points)) { if (!w.points[k] && !['grip_support', 'stock', 'muzzle', 'optic', 'mag', 'charge'].includes(k)) throw new Error(`points.${k}: unknown point`); w.points[k] = { ...(w.points[k] || {}), at: (Array.isArray(p) ? p : p.at).map(Number), ...(p.angle !== undefined ? { angle: Number(p.angle) } : {}) }; }
+      for (const [k, p] of pts) { if (!w.points[k] && !['grip_support', 'stock', 'muzzle', 'optic', 'mag', 'charge'].includes(k)) throw new Error(`points.${k}: unknown point`); w.points[k] = { ...(w.points[k] || {}), ...p }; }
       saveWeapon(this, w);
       const { def } = getRig(this, w.rig);
       return { weapon: name, points: w.points, conform: conformAsset(w, normalizeRig(def)) };
@@ -529,7 +539,7 @@ Object.assign(LIB_OPS, {
       this.changed(dd, { op: 'rig', source, label: `weapon ${name}: cells copied from the character rig`, structural: true });
     }
     const w = { ...built.asset, rig: rigName };
-    if (a.points) for (const [k, p] of Object.entries(a.points)) w.points[k] = { ...(w.points[k] || {}), at: (Array.isArray(p) ? p : p.at).map(Number) };
+    for (const [k, p] of pts) w.points[k] = { ...(w.points[k] || {}), ...p };
     saveWeapon(this, w);
     const { rig } = getRig(this, rigName);
     const cells = Object.fromEntries(rig.order.map((n) => { const c = cellOf(rig, n, 'side'); return [n, [c.x, c.y, c.w, c.h]]; }));
@@ -554,10 +564,13 @@ Object.assign(LIB_OPS, {
     const w = loadWeapon(this, a.weapon);
     const { d, def } = getRig(this, w.rig);
     const views = a.views ? [].concat(a.views) : SHEET_VIEWS;
+    if (!views.length || views.some((v) => !SHEET_VIEWS.includes(v)) || new Set(views).size !== views.length) throw new Error(`views: a non-empty list of distinct sheet views (${SHEET_VIEWS.join(', ')}); got ${JSON.stringify(a.views)}`);
+    if (a.pitch !== undefined && (!Array.isArray(a.pitch) || !a.pitch.length || !a.pitch.every((p, i) => typeof p === 'number' && Number.isFinite(p) && (i === 0 || p > a.pitch[i - 1])))) throw new Error(`pitch: a non-empty list of finite degrees in ascending order (e.g. [-30, 0, 30]); got ${JSON.stringify(a.pitch)}`);
     const proj = a.skin ? getRig(this, loadSkin(this, a.skin).rig).rig.weapon : null;
     const atts = a.attach !== undefined ? [].concat(a.attach) : Object.keys(w.attachments);
     for (const n of atts) if (!w.attachments[n]) throw new Error(`attach: weapon "${w.name}" has no attachment "${n}"`);
     const max = Number(a.max_size ?? 1024);
+    if (!(Number.isFinite(max) && max > 0)) throw new Error(`max_size must be a finite number of px > 0 (got ${JSON.stringify(a.max_size)})`);
     // pitch steps: given, or the default 15 deg steps, fewer when a long gun would pass max_size
     const tries = a.pitch ? [a.pitch] : [DEFAULT_PITCH, [-40, -20, 0, 20, 40], [-30, 0, 30]];
     let C, base, pitch;
