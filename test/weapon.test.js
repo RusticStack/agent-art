@@ -11,6 +11,7 @@ import { normalizeRig, solvePose, animatePoses, resolvePose, cellOf } from '../s
 import { weaponMetrics, weaponArt } from '../src/weapon.js';
 import { TOOLS } from '../src/mcp.js';
 import { critiqueImage } from '../src/critique.js';
+import { decodePNG } from '../src/png.js';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'agent-art-weapon-'));
 const VIEWS = ['side', 'front_side', 'front', 'back_side', 'back'];
@@ -352,10 +353,19 @@ test('humanoid_hd fixes: near limbs on the correct screen side in 3/4, front and
   assert.equal(e.run('rig_animate', { name: 'h', preset: 'idle' }).animation, 'idle_side');
   assert.equal(e.run('rig_animate', { name: 'h', preset: 'idle', view: 'front', canvas: 'hf' }).animation, 'idle_front');
   // preview ground line: on the feet's contact row, not at the root (hip) height
-  const img = e.run('rig_preview', { name: 'h', pose: 'idle_exhale', view: 'side', scale: 1 });
-  assert.ok(img.image.length > 100);
   const ground = Math.max(...['foot_f', 'foot_b'].map((f) => W('side')[f].y + rig.parts[f].h - 1 - rig.parts[f].pivot[1]));
   assert.ok(ground > rig.root[1] + 40, 'feet far below the root');
+  // in the rendered sheet the dashed red row sits directly under the lowest drawn (grey) pixel
+  const png = decodePNG(e.run('rig_preview', { name: 'h', pose: 'idle_exhale', view: 'side', scale: 1 }).image);
+  const px = (x, y) => png.data.subarray((y * png.width + x) * 4, (y * png.width + x) * 4 + 4);
+  let lowGrey = -1, redRow = -1;
+  for (let y = 0; y < png.height; y++) {
+    let grey = 0, red = 0;
+    for (let x = 0; x < png.width; x++) { const [r, g, b] = px(x, y); if (r === 128 && g === 128 && b === 128) grey++; if (r > g + 60 && r > b + 60) red++; }
+    if (grey) lowGrey = y;
+    if (red > 20 && redRow < 0) redRow = y;
+  }
+  assert.ok(lowGrey > 0 && redRow === lowGrey + 1, `ground line at row ${redRow}, feet end at ${lowGrey}`);
   const guide = fs.readFileSync(new URL('../docs/rig-hd-guide.md', import.meta.url), 'utf8');
   assert.match(guide, /tallest part cell \+ 1 px/);
   assert.match(guide, /0, 55, 110, 165, 220/);
