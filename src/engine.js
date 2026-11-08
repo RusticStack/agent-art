@@ -11,6 +11,7 @@ import { encodeGIF } from './gif.js';
 import { critiqueImage, critiqueFrames } from './critique.js';
 import { RIG_OPS } from './rigops.js';
 import { MODEL_OPS } from './modelops.js';
+import { FP_OPS } from './fpops.js';
 import { LIB_OPS } from './libops.js';
 import { AUDIO_OPS } from './audio/ops.js';
 import { PLANET_OPS } from './space/ops.js';
@@ -982,5 +983,5 @@ const OPS = {
   },
 };
 
-Object.assign(OPS, RIG_OPS, MODEL_OPS, AUDIO_OPS, GRAPH_OPS, REVIEW_OPS, LIB_OPS, PLANET_OPS);
+Object.assign(OPS, RIG_OPS, MODEL_OPS, AUDIO_OPS, GRAPH_OPS, REVIEW_OPS, LIB_OPS, PLANET_OPS, FP_OPS);
 export const OP_NAMES = Object.keys(OPS);

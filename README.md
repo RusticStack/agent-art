@@ -496,6 +496,30 @@ art_planet { action:"asteroids", name:"belt", field:{ shape:"belt", count:1200 }
 
 `art_help {topic:"planets"}` lists every option. The `planets-space` skill has the reference three.js snippets: the atmosphere shader (fresnel rim and day/night terminator), night lights, quadtree tile streaming, the far-planet sphere-on-quad impostor and terrain loading. `node docs/planets/build-demos.mjs` rebuilds the renders and `docs/planets/demo-stats.json`.
 
+### First-person viewmodels: `art_fp`
+
+First person built from separate pixel sprites, so the gun reads as 3D with no 3D models in the game (the fp v2 runtime contract). The arms are animated once per **handling class** (pistol, smg, rifle, dmr, shotgun, lmg, sniper, launcher, unarmed, knife, grenade, med, tablet). Guns, magazines, attachments and items are yaw × pitch sprite sweeps that the game turns with look sway and snaps onto per-frame sockets. Adding a gun or a scope never touches the arms.
+
+![two loadouts on the same arms clips](docs/fp/loadouts.png)
+
+- **Arms:** a 3D skeleton in eye space (clavicle, upper arm, forearm, palm, thumb, index and grouped fingers, both sides) solved with two-bone IK onto the anchors the game draws, so both palms stay on the grip and support at every frame. Finger presets cover trigger, support under the handguard, vertical grip, angled grip, magazine, charging-handle pinch, pistol cup, knife hammer grip, grenade hold, pin pull, open palm and fist. Every bone is a part sprite rendered once per view bucket (forearm foreshortening, back of the hand or palm) and placed with RotSprite rotation, so frames stay palette-stable. Skins (`mec`, `severance`) swap sleeves, bracers and gloves without re-animating.
+- **Sweeps:** an `art_model` gun, magazine, attachment or item rendered over a yaw × pitch grid into sheets of at most 1024 px, with every anchor per cell (`grip`, `support`, `mag_well`, `muzzle`, `optic`, `muzzle_mount`, `underbarrel`, `sight`, `mount`). One camera for all of them, so pixels per metre match. Moving parts export as state variants (`rifle@bolt_back`, `pistol@slide_locked`, `shotgun@pump_back`), and optics add a lens layer (`att:scope_4x@lens`).
+- **Clips per class:** idle, walk, sprint, fire and fire_ads (recoil kick and recovery), ads_in and ads_idle (iron sight on the frame centre), reload and reload_empty (mag out, pouch, new mag, seat, charging handle) with events, charge, draw, holster, inspect, jam_clear, firemode, check_mag, melee, a one-handed grenade throw over the held gun, use_med and interact. There is a shotgun shell loop, a sniper bolt cycle, an LMG cover, knife slash and stab, grenade cook and throw, med bandage, stim and kit, and tablet raise and use. `@vgrip` / `@agrip` variants move the support hand onto a foregrip.
+- **Check:** hands on every gun of a class, the ADS sight centred to 1 px, magazine hand-offs, anchor continuity across the sweep, grip geometry against the class (`handling.js` `conform`) and attachment fits.
+
+```js
+art_fp { action:"sweep", out:"public/assets" }                       // fp_guns / fp_mags / fp_attach
+art_fp { action:"batch", out:"public/assets", skins:["mec","severance"] } // fp: arms strips + sockets
+art_fp { action:"composite", out:"public/assets", class:"rifle", clip:"reload_empty", frame:14, attachments:{ optic:"scope_4x", muzzle:"compensator", underbarrel:"angled_grip" } }
+art_fp { action:"check", out:"public/assets" }
+```
+
+| Look sway (the gun turning through its sweep) | Inspect | Pistol reload |
+| --- | --- | --- |
+| ![look sway](docs/fp/look-sway.png) | ![inspect](docs/fp/rifle-inspect.gif) | ![pistol reload](docs/fp/pistol-reload.gif) |
+
+`art_help {topic:"fp"}` has the details. `node scripts/fp-demos.js` rebuilds `docs/fp/`.
+
 ### Canvas op options worth knowing
 
 - `art_canvas crop` keeps every frame, animation and tag of a frame strip, with the rect given in frame coordinates. `rotate {angle, expand:true}` grows the canvas so rotated content is not cut off.
@@ -512,10 +536,11 @@ art_planet { action:"asteroids", name:"belt", field:{ shape:"belt", count:1200 }
 | `art_draw` | Batch of drawing commands as one undo step. `preview` returns the image, `critique` the score |
 | `art_view` | The canvas as an image: zoom/region, pixel grid, `tile` seam check, `onion`, guides (`grid:16`, `iso:32`), tint preview. Large canvases get a token-cheap overview |
 | `art_critique` | Heuristic quality report and score for a frame, an animation or every frame |
-| `art_help` | Usage and examples for any command (`{op}`), guides (`{topic}`: workflow, textures, characters, animation, rig, scenes, hires, minecraft, 3d, audio, music, mixing, perception, graph), and step-by-step recipes (`{skill}`) |
+| `art_help` | Usage and examples for any command (`{op}`), guides (`{topic}`: workflow, textures, characters, animation, rig, scenes, hires, minecraft, 3d, audio, music, mixing, perception, planets, fp, graph), and step-by-step recipes (`{skill}`) |
 | `art_rig` | Multi-view, multi-animation characters from parts and poses (templates incl. `humanoid_hd`, presets, tweening, IK, foot planting, secondary motion, equipment sets, `ik_from` to follow rendered anchors). Held weapons: `weapon` with carry states; `check` validates every clip and view, `layers` lists the draw order with reasons, `explain` says why one part is over another. Compact replies (`full`, `fields`) |
 | `art_model` | 3D: modular HD-2D kit pieces, ruins, extruded/lathed props, ships and vehicles, and dioramas, previewed from the game camera, exported to `.glb`. Rigid-part rigs with `pose`, `animate` (glTF clips) and sockets, FP templates (`fp_rifle`, `fp_pistol`, `fp_arms`), `render` to pixel sprite frames. `hold` puts the arms on a gun in `render` / `animate`, and `check` validates it. Hard-surface: greebles, tubes, trim sheets (`trim`), PBR, height normals, booleans, morphs; export baked AO, LODs, impostors, collision/occluder proxies, cull data |
 | `art_audio` | Sound effects, music, mixing and mastering; analysis images, listener reports and critiques; WAV/mp3/ogg/opus export |
+| `art_fp` | First-person viewmodels: rigged 2D arms per handling class, gun / magazine / attachment / item sweeps with anchors, arms batch with per-frame sockets, runtime-identical composite and check |
 | `art_planet` | Planets (orbit maps, cube-sphere LODs, quadtree tiles, clouds, rings, atmosphere, impostors), original star systems, matching landing-zone terrain with splat maps, instanced props and colony anchors, rock and asteroid kits, nebula skyboxes and space FX sprites |
 | `art_read` | Exact pixels as text rows plus a legend, in the format `grid` accepts |
 | `art_palette` | Named colors per canvas or project. `ramp` builds shading ramps |

@@ -286,6 +286,15 @@ PRE-RENDERED FP WEAPON EXAMPLE: 1. create {name:"ar", template:"fp_rifle", textu
 
 Object.assign(TOPICS, AUDIO_TOPICS, PLANET_TOPICS);
 
+TOPICS.fp = `FIRST-PERSON VIEWMODELS (art_fp, the fp v2 runtime contract)
+Nothing is baked: arms are animated once per handling class; guns, magazines, attachments and items are sprite sweeps the game turns and snaps at runtime.
+1. art_fp kit (optional) -> editable art_model kit: one standard gun per class (built to the class grip geometry from handling.js), magazines, attachments (reflex, scope_4x, suppressor, compensator, vertical_grip, angled_grip), items (knife, frag, medpen, bandage, trauma_kit, tablet). Anchors are sockets: grip, support, mag_well, muzzle, optic, muzzle_mount, underbarrel, sight (+ mount on mags/attachments); moving parts are named nodes with state poses (bolt_back, charging_back, slide_locked, pump_back, bolt_up, cover_open).
+2. art_fp sweep {out} -> manifest/fp_guns.json, fp_mags.json, fp_attach.json + fp/guns|mags|attach|items/<name>/sweep_<n>.png. Cells: yaw columns x pitch rows, row-major across sheets of <= 1024 px; every anchor listed per cell; one camera for all (frame 384x216, focal 176 px, reference at 34 cm = ~518 px/m). Grids come from the angles the class clips use. State variants: <gun>@<state>; optic lens layers: att:<name>@lens.
+3. art_fp batch {out, skins?:[mec, severance], classes?, clips?} -> manifest/fp.json sprite sets fp_<class> (other skins fp_<class>.<skin>) with <anim>_back.png / _front.png strips and per-frame gun / mag / item sockets + events; @vgrip / @agrip variants for smg, rifle, dmr, lmg.
+4. art_fp composite {out, class, clip, frame, gun?, attachments:{optic, muzzle, underbarrel}, yaw_offset?, pitch_offset?} = the frame exactly as the game draws it. art_fp check {out} = hands on every gun's anchors, ADS sight centred, magazine hand-offs, anchor continuity, grip geometry (handling.js conform), attachment fits.
+Arms: 3D skeleton in eye space (clavicle, upper arm, forearm, palm, thumb / index / grouped fingers), two-bone IK onto the drawn anchors, finger presets (trigger, support_under, vgrip, agrip, mag_grasp, pinch, pistol_cup, knife_hammer, grenade_hold, pin_pull, open_palm, fist), part sprites per view bucket with RotSprite rotation (palette-stable). Arm pixels behind a prop go to the back layer.
+Paint-over: art_fp paint {action:"export", sweep} -> canvases; draw; {action:"import"} writes them back (anchors kept).`;
+
 TOPICS.graph = `ASSET GRAPH (art_graph): the light index of what is part of what
 Orient yourself with it instead of calling art_info on every asset: replies are ids, relation types and one-line notes only (a few hundred chars).
 Nodes: a bare name ("helmet_front": canvas, else model, rig, audio, group, project) or kind:name: canvas: rig: model: audio: project: group: palette: export:<path> file:<path>, and sub-assets layer:<canvas>/<layer>, anim:<canvas>/<tag>, frame:<canvas>/<n>, rigpart:<rig>/<part>, modelpart:<model>/<part>.
