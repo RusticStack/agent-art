@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
 
 ### 3D rigs, clips and pre-rendered sprites (`art_model`)
 
@@ -16,6 +16,12 @@
 ### Rigs (`art_rig`)
 
 - `animate {..., ik_from:{canvas, animation?, map:{hand_f:"socket_grip_r" | {anchor, bend?, rot?, at?}}, offset?}}` takes per-frame IK targets from another canvas's anchors and copies its frame count, timing and loop, so 2D arms follow a pre-rendered gun clip.
+
+### Docs
+
+- README: rigid-part rigs, poses, clips, sockets, FP templates and `render` in the feature list, the `art_model` section, the `art_rig` section (`ik_from`) and the tools table; a tested end-to-end example (`fp_rifle` > reload clip > `.glb` > sprite frames > 2D arms with `ik_from`); the fp-camera near-plane limitation.
+- Skill `fp-weapon` now runs as written in a fresh workspace (texture canvases, every render layer, a 2D arms rig for `ik_from`). New skill `prop-rig` (doors, chests, turrets: named parts, pivots, poses, clips, export).
+- `art_help {topic:"3d"}`: template part, pose and slot names, clip-level `ease`, loop closing, deleting clips and poses, render defaults and limits, `ik_from` map options, the near-plane limitation; the pre-rendered example no longer needs a project palette.
 
 ## 0.5.1
 
