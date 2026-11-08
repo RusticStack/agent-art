@@ -16,6 +16,8 @@ import { packImages } from './sheet.js';
 import { modelDefs } from './modelops.js';
 import { conform } from './handling.js';
 import { Doc } from './doc.js';
+import { sources2d, sourceKey, sweep2d } from './fp2d.js';
+import { skin2dOf, renderArms2d } from './fp2darms.js';
 
 export const GRID_STEP = 10;
 /** Gun grids never go past these (deg): the extreme sprint / melee frames take the nearest cell. */
@@ -63,6 +65,23 @@ const union = (grids) => {
 };
 /** Grid of a magazine (union of the classes it feeds) / attachment (compatible classes) / item (clips using it). */
 export function magGrid(name, step = GRID_STEP) { const cs = GUN_CLASSES.filter((c) => MAG_OF[c] === name); const gs = (cs.length ? cs : ['rifle']).map((c) => classGrid(c, step)); return { yaw: union(gs.map((g) => g.yaw)), pitch: union(gs.map((g) => g.pitch)), host: gunModel(cs[0] || 'rifle').sockets.mag_well.at }; }
+/** Grid of a magazine that may be hand-drawn: a kit name keeps magGrid; a new 2D magazine takes its class's grid. */
+export function magGrid2(engine, name, cls, step = GRID_STEP) {
+  const src = source2d(engine, name, 'mag');
+  if (!src || MAGS.includes(name)) return magGrid(name, step);
+  const c = src.class || cls || 'rifle', g = classGrid(GUN_CLASSES.includes(c) ? c : 'rifle', step);
+  return { yaw: g.yaw, pitch: g.pitch };
+}
+/** Grid of an attachment that may be hand-drawn (a new name: its slot decides the classes). */
+export function attachGrid2(engine, name, step = GRID_STEP) {
+  const src = source2d(engine, name, 'attachment');
+  if (!src || ATTACH[name]) return attachGrid(name, step);
+  const slot = src.slot || 'optic', anchor = SLOT_ANCHOR[slot];
+  if (!anchor) throw new Error(`2D attachment "${name}": slot "${slot}" (optic | muzzle | underbarrel)`);
+  const cs = GUN_CLASSES.filter((c) => fpGeometry(c)[anchor] && gunModel(c).sockets[anchor]);
+  const gs = cs.map((c) => classGrid(c, step));
+  return { yaw: union(gs.map((g) => g.yaw)), pitch: union(gs.map((g) => g.pitch)), classes: cs, host_class: cs.includes('rifle') ? 'rifle' : cs[0] };
+}
 export function attachGrid(name, step = GRID_STEP) {
   const slot = attachModel(name).fp.slot, anchor = SLOT_ANCHOR[slot];
   const cs = GUN_CLASSES.filter((c) => fpGeometry(c)[anchor] && gunModel(c).sockets[anchor]);
@@ -71,7 +90,7 @@ export function attachGrid(name, step = GRID_STEP) {
   const host = cs.includes('rifle') ? 'rifle' : cs[0];
   return { yaw: union(gs.map((g) => g.yaw)), pitch: union(gs.map((g) => g.pitch)), classes: cs, host: gunModel(host).sockets[anchor].at, host_class: host };
 }
-function itemGrid(id, step) {
+export function itemGrid(id, step = GRID_STEP) {
   return memo(`igrid:${id}:${step}`, () => {
     const vals = [];
     for (const cls of FP_CLASSES) {
@@ -92,6 +111,35 @@ export function sweepOf(engine, name, kind, grid, extra = {}) {
   const def = fpDef(engine, name, kind);
   return memo(`sweep:${defKey(def)}:${kind}:${JSON.stringify(grid)}:${JSON.stringify(extra)}`, () => renderSweep(buildRig(engine, def, (n) => fpDef(engine, n)), { yaw: grid.yaw, pitch: grid.pitch, kind, ...(grid.host ? { host: grid.host } : {}), ...extra }));
 }
+// ---------- hand-drawn (2D) sources: canvases with meta.fp2d (see fp2d.js) ----------
+/** The 2D source of that name and kind in the workspace, or null (3D model / kit then). */
+export function source2d(engine, name, kind) {
+  if (!engine?.docs || !name) return null;
+  const s = sources2d(engine).get(name);
+  return s && (!kind || s.kind === kind) ? s : null;
+}
+/** Sweep (cached) of a 2D source on a grid. */
+export function sweep2dOf(src, grid, extra = {}) {
+  return memo(`sweep2d:${sourceKey(src)}:${JSON.stringify(grid)}:${JSON.stringify(extra)}`, () => sweep2d(src, { yaw: grid.yaw, pitch: grid.pitch }, extra));
+}
+/** A sweep by name: a 2D source when one exists, else the art_model / kit model (sweepOf). */
+export function anySweep(engine, name, kind, grid, extra = {}) {
+  const src = source2d(engine, name, kind);
+  return src ? sweep2dOf(src, grid, extra) : sweepOf(engine, name, kind, grid, extra);
+}
+/** Gun-space sockets of a 2D source (fitted to its drawings) in a state. */
+function sockets2d(src, grid, state) {
+  const st = state && src.docs.some((d) => d.meta.fp2d.state === state) ? state : null;
+  return sweep2dOf(src, grid, st ? { state: st } : {}).fit.sockets;
+}
+/** Arms skin by name: a 3D skin (SKINS) or a hand-drawn 2D skin (canvases). */
+export function resolveSkin(engine, skin) {
+  if (typeof skin !== 'string' || SKINS[skin]) return skin;
+  const s = skin2dOf(engine, skin);
+  if (!s) throw new Error(`unknown skin "${skin}" (3D: ${Object.keys(SKINS).join(', ')}; or a 2D skin: canvases with meta.fp2d {kind:"arm", skin})`);
+  return s;
+}
+
 /** Gun-space sockets of a model in a state (pose). */
 function socketsIn(engine, def, state) {
   return memo(`sock:${defKey(def)}:${state || ''}`, () => {
@@ -111,15 +159,32 @@ export function classCtx(cls, step = GRID_STEP, opts = {}) {
   if (!GUN_CLASSES.includes(cls)) return { cls, gun: null, mag: null };
   const grid = classGrid(cls, step);
   const gunName = opts.gun || cls;
+  const src = source2d(engine, gunName, 'gun');
+  if (src) {
+    // a hand-drawn gun: its sweep from the drawings, its 3D anchors fitted to them (class geometry where unseen)
+    const gun = opts.anglesOnly ? { def: { yaw: grid.yaw, pitch: grid.pitch, anchors: new Proxy({}, { get: () => [[0, 0]] }) } } : sweep2dOf(src, grid);
+    const ctx = { cls, gun, gunDef: null, source: '2d', mag: src.mag || MAG_OF[cls], gunSockets: (state) => sockets2d(src, grid, state) };
+    if (opts.variant && !opts.anglesOnly) variantAtt(engine, ctx, opts.variant, step);
+    return ctx;
+  }
   const gdef = fpDef(engine, gunName, 'gun');
   const gun = opts.anglesOnly ? { def: { yaw: grid.yaw, pitch: grid.pitch, anchors: new Proxy({}, { get: () => [[0, 0]] }) } } : sweepOf(engine, gunName, 'gun', grid);
   const ctx = { cls, gun, gunDef: gdef, mag: gdef.fp?.mag || MAG_OF[cls], gunSockets: (state) => socketsIn(engine, gdef, state) };
   if (opts.variant && !opts.anglesOnly) {
     const an = VARIANTS[opts.variant].attachment;
     ctx.variant = opts.variant;
-    ctx.att = { sweep: sweepOf(engine, an, 'attachment', attachGrid(an, step)), sockets: socketsIn(engine, attachModel(an), null) };
+    const asrc = source2d(engine, an, 'attachment');
+    if (asrc) variantAtt(engine, ctx, opts.variant, step);
+    else ctx.att = { sweep: sweepOf(engine, an, 'attachment', attachGrid(an, step)), sockets: socketsIn(engine, attachModel(an), null) };
   }
   return ctx;
+}
+/** Foregrip of a variant (vgrip / agrip) for a solve context: 2D source of that name, else the kit attachment. */
+function variantAtt(engine, ctx, variant, step) {
+  const an = VARIANTS[variant].attachment, asrc = source2d(engine, an, 'attachment');
+  ctx.variant = variant;
+  if (asrc) { const g = attachGrid(an, step); const sw = sweep2dOf(asrc, g); ctx.att = { sweep: sw, sockets: sw.fit.sockets }; }
+  else ctx.att = { sweep: sweepOf(engine, an, 'attachment', attachGrid(an, step)), sockets: socketsIn(engine, attachModel(an), null) };
 }
 
 // ---------- arms frames ----------
@@ -131,7 +196,8 @@ export function classCtx(cls, step = GRID_STEP, opts = {}) {
 export function armsLayers(frame, skin, sweeps) {
   const [W, H] = FRAME;
   const bones = [...frame.hands.R.bones, ...frame.hands.L.bones];
-  const buf = renderBones(bones, skin);
+  // a hand-drawn skin draws its own sprites; hand drawings can force pixels to the back / front layer
+  const buf = skin?.kind === '2d' ? renderArms2d(frame, skin) : renderBones(bones, skin);
   const pd = new Float32Array(W * H).fill(Infinity), scratch = new Uint8ClampedArray(W * H * 4);
   for (const p of frame.props) {
     const sw = p.kind === 'gun' ? sweeps.gun : p.kind === 'mag' || p.kind === 'mag_in' ? sweeps.mag : p.kind === 'att' ? sweeps.att : p.kind === 'item' ? sweeps.items?.[p.id] : null;
@@ -144,11 +210,17 @@ export function armsLayers(frame, skin, sweeps) {
     drawCell(scratch, W, H, sw, idx, a, p.x, p.y, p.rot, 1, { depth: { buf: pd, cells: sw.depths, base: p.depth } });
   }
   const back = new Uint8ClampedArray(W * H * 4), front = new Uint8ClampedArray(W * H * 4);
+  const force = buf.force, hand = buf.hand, vis = hand ? { R: [0, 0], L: [0, 0] } : null;
   for (let i = 0; i < W * H; i++) {
     if (!buf.rgba[i * 4 + 3]) continue;
-    (pd[i] < buf.depth[i] - 0.6 ? back : front).set(buf.rgba.subarray(i * 4, i * 4 + 4), i * 4);
+    const f = force ? force[i] : 0;
+    const toBack = f === 1 || (f !== 2 && pd[i] < buf.depth[i] - 0.6);
+    (toBack ? back : front).set(buf.rgba.subarray(i * 4, i * 4 + 4), i * 4);
+    // hand pixels the player sees: front layer, or back layer where no prop covers them
+    if (vis && hand[i]) { const v = vis[hand[i] === 1 ? 'R' : 'L']; v[1]++; if (!toBack || pd[i] === Infinity) v[0]++; }
   }
-  return { back, front };
+  if (!vis) return { back, front };
+  return { back, front, vis: { R: vis.R[1] ? vis.R[0] / vis.R[1] : null, L: vis.L[1] ? vis.L[0] / vis.L[1] : null }, poses: buf.poses };
 }
 /** Frames -> horizontal strip {width, height, data}. */
 export function strip(frames) {
@@ -170,17 +242,20 @@ export function bakeClip(cls, clipName, { skin = 'mec', variant = null, engine =
   const sol = solveClip(clip, ctx);
   const magName = clip.mag === 'shell' ? 'shotgun_shell' : ctx.mag;
   const sweeps = { gun: ctx.gun, att: ctx.att?.sweep, items: {} };
-  if (magName) sweeps.mag = sweepOf(engine, magName, 'mag', magGrid(magName, step));
-  for (const fr of sol.frames) if (fr.item && !sweeps.items[fr.item.id]) sweeps.items[fr.item.id] = sweepOf(engine, fr.item.id, 'item', itemGrid(fr.item.id, step));
+  const sk = resolveSkin(engine, skin);
+  if (magName) sweeps.mag = anySweep(engine, magName, 'mag', magGrid2(engine, magName, cls, step));
+  for (const fr of sol.frames) if (fr.item && !sweeps.items[fr.item.id]) sweeps.items[fr.item.id] = anySweep(engine, fr.item.id, 'item', itemGrid(fr.item.id, step));
   const backs = [], fronts = [], locks = [];
   let worstMiss = 0, clamped = 0;
   for (const fr of sol.frames) {
-    const { back, front } = armsLayers(fr, skin, sweeps);
+    const { back, front, vis, poses } = armsLayers(fr, sk, sweeps);
     backs.push(back); fronts.push(front);
     const L = {};
     for (const side of ['R', 'L']) {
       const h = fr.hands[side];
       if (h.target2) { const p = project(h.palm); const miss = Math.hypot(p[0] - h.target2[0], p[1] - h.target2[1]); L[side] = { at: h.target2.map(r1), palm: [r1(p[0]), r1(p[1])], miss: r1(miss) }; worstMiss = Math.max(worstMiss, miss); }
+      // hand-drawn skins: the hand drawing used and how much of it shows (fp check warns on a hidden hand)
+      if (vis && L[side]) { L[side].vis = vis[side] == null ? 0 : Math.round(vis[side] * 100) / 100; L[side].pose = poses?.[side]; if (h.clamped) L[side].clamped = true; }
       if (h.clamped) clamped++;
     }
     locks.push(L);
@@ -197,19 +272,19 @@ export function bakeClip(cls, clipName, { skin = 'mec', variant = null, engine =
 }
 
 // ---------- files ----------
-const writePNG = (root, rel, img) => { const f = path.join(root, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, encodePNG(img.width, img.height, img.data)); return f; };
-function readManifest(root, group) { const f = path.join(root, 'manifest', `${group}.json`); return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : {}; }
-function writeManifest(root, group, m) { const f = path.join(root, 'manifest', `${group}.json`); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(m, null, 1)); return f; }
-const assetRoot = (engine, a) => (engine.resolvePath ? engine.resolvePath(a.out || 'fp_assets', engine.exportDir) : path.resolve(a.out || 'fp_assets'));
+export const writePNG = (root, rel, img) => { const f = path.join(root, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, encodePNG(img.width, img.height, img.data)); return f; };
+export function readManifest(root, group) { const f = path.join(root, 'manifest', `${group}.json`); return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : {}; }
+export function writeManifest(root, group, m) { const f = path.join(root, 'manifest', `${group}.json`); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(m, null, 1)); return f; }
+export const assetRoot = (engine, a) => (engine.resolvePath ? engine.resolvePath(a.out || 'fp_assets', engine.exportDir) : path.resolve(a.out || 'fp_assets'));
 
 /** Write a sweep's sheets + manifest entry. */
-function exportSweep(root, dir, sweep, extra = {}) {
+export function exportSweep(root, dir, sweep, extra = {}) {
   const { sheets } = packSheets(sweep);
   const files = sheets.map((s, i) => { const rel = `${dir}/sweep_${i}.png`; writePNG(root, rel, s); return rel; });
   return { ...sweep.def, ...extra, sheets: files, px_per_m: PX_PER_M };
 }
 
-function listArg(v, all) { if (v === undefined || v === true) return all; if (v === false || v === null) return []; return [].concat(v); }
+export function listArg(v, all) { if (v === undefined || v === true) return all; if (v === false || v === null) return []; return [].concat(v); }
 
 export const FP_OPS = {
   /** Kit models into the workspace (art_model definitions you can edit). */
@@ -274,7 +349,7 @@ export const FP_OPS = {
   fp_batch(a) {
     const root = assetRoot(this, a), t0 = performance.now(), step = Number(a.step ?? GRID_STEP);
     const skins = listArg(a.skins, ['mec']);
-    for (const s of skins) if (!SKINS[s]) throw new Error(`unknown skin "${s}" (${Object.keys(SKINS).join(', ')})`);
+    for (const s of skins) resolveSkin(this, s);
     const classes = listArg(a.classes, FP_CLASSES);
     const man = readManifest(root, 'fp');
     man.sprites = man.sprites || {};
@@ -333,7 +408,9 @@ export const FP_OPS = {
   /** Paint-over: sweep sheets out to canvases (export) and back into the files (import), anchors kept. */
   fp_paint(a, source) {
     const root = assetRoot(this, a);
-    const group = a.group || (a.sweep?.startsWith('att:') || a.sweep?.startsWith('item:') ? 'fp_attach' : MAGS.includes(a.sweep) ? 'fp_mags' : 'fp_guns');
+    const guess = a.sweep?.startsWith('att:') || a.sweep?.startsWith('item:') ? 'fp_attach' : MAGS.includes(a.sweep) ? 'fp_mags' : 'fp_guns';
+    // a hand-drawn magazine may have any name: look it up where it is
+    const group = a.group || (readManifest(root, guess).sweeps?.[a.sweep] ? guess : ['fp_guns', 'fp_mags', 'fp_attach'].find((g) => readManifest(root, g).sweeps?.[a.sweep]) || guess);
     const man = readManifest(root, group);
     const sw = man.sweeps?.[a.sweep];
     if (!sw) throw new Error(`no sweep "${a.sweep}" in ${group} (${Object.keys(man.sweeps || {}).join(', ')})`);
@@ -352,17 +429,40 @@ export const FP_OPS = {
       });
       return { canvases, cell: sw.cell, cells: steps(sw.yaw) * steps(sw.pitch), next: 'paint the canvases (art_draw), then art_fp paint {action:"import", sweep}' };
     }
+    const olds = [], news = [];
     const written = sw.sheets.map((rel, i) => {
       const d = this.get(`${base}_${i}`);
       const p = decodePNG(fs.readFileSync(path.join(root, rel)));
       if (d.width !== p.width || d.height !== p.height) throw new Error(`canvas ${d.name} is ${d.width}x${d.height}, sheet ${rel} is ${p.width}x${p.height}`);
       const data = d.composite();
+      olds.push({ width: p.width, height: p.height, data: p.data }); news.push({ width: d.width, height: d.height, data });
       fs.writeFileSync(path.join(root, rel), encodePNG(d.width, d.height, data));
       return rel;
     });
-    return { imported: written, anchors: 'unchanged', sweep: a.sweep };
+    // a hand-drawn source: every painted cell is kept as an override canvas, so the next sweep2d keeps it
+    const overrides = sw.source === '2d' && sw.source2d ? keepOverrides(this, sw, olds, news, source) : undefined;
+    return { imported: written, anchors: 'unchanged', sweep: a.sweep, ...(overrides ? { overrides } : {}) };
   },
 };
+
+/** Painted cells of a 2D sweep -> override canvases (meta.fp2d.override) the next sweep2d applies. */
+function keepOverrides(engine, sw, olds, news, source) {
+  const before = unpackSheets(sw, olds), after = unpackSheets(sw, news);
+  const yaws = steps(sw.yaw), out = [], ref = sw.source2d.kind === 'gun' || sw.source2d.kind === 'item' ? 'grip' : 'mount';
+  for (let i = 0; i < after.length; i++) {
+    if (Buffer.compare(Buffer.from(before[i].buffer), Buffer.from(after[i].buffer)) === 0) continue;
+    const yaw = +(sw.yaw[0] + (i % yaws) * sw.yaw[2]).toFixed(6), pitch = +(sw.pitch[0] + Math.floor(i / yaws) * sw.pitch[2]).toFixed(6);
+    const name = `fpo_${sw.source2d.name}${sw.source2d.state ? `_${sw.source2d.state}` : ''}_${yaw}_${pitch}`.replace(/-/g, 'm').replace(/[^\w.]/g, '_');
+    if (engine.docs.has(name)) engine.docs.delete(name);
+    const d = new Doc({ name, width: sw.cell[0], height: sw.cell[1] });
+    d.layers[0].data.set(after[i]);
+    d.meta = { fp2d: { source: sw.source2d.name, kind: sw.source2d.kind, ...(sw.source2d.state ? { state: sw.source2d.state } : {}), override: { yaw, pitch }, grip: sw.anchors[ref][i] } };
+    engine.attach(d);
+    engine.changed?.(d, { op: 'fp_paint', source, label: `fp2d override ${sw.source2d.name} ${yaw}/${pitch}`, structural: true });
+    out.push(name);
+  }
+  return out;
+}
 
 function zoomImg(r, k) {
   const W = r.width * k, H = r.height * k, d = new Uint8ClampedArray(W * H * 4);
@@ -423,6 +523,8 @@ export function checkAssets(root, { classes = null, engine = null, limit = 30 } 
   const issues = [], counts = { frames: 0, hand_checks: 0, ads_frames: 0, mag_handoffs: 0, attachment_pairs: 0, guns: 0 };
   const worst = { hand_px: 0, ads_px: 0, mag_handoff_px: 0, anchor_jump_px: 0 };
   const bad = (x) => { if (issues.length < limit) issues.push(x); counts.failed = (counts.failed || 0) + 1; };
+  const warnings = [];
+  const warn = (x) => { if (warnings.length < limit) warnings.push(x); counts.warnings = (counts.warnings || 0) + 1; };
   const sets = Object.entries(fpm.sprites || {}).filter(([n, s]) => n.startsWith('fp_') && (!classes || classes.includes(s.class)));
   if (!sets.length) bad({ issue: `no fp arms sets in ${root} (run art_fp batch)` });
   for (const [setName, set] of sets) {
@@ -459,6 +561,9 @@ export function checkAssets(root, { classes = null, engine = null, limit = 30 } 
             const h = lk[side];
             if (!h) continue;
             counts.hand_checks++;
+            // hand-drawn arms: a held hand mostly hidden (part order / layers), an arm that cannot reach
+            if (gName === std && h.vis !== undefined && h.vis < 0.2) warn({ set: setName, anim, frame: f, hand: side, issue: `hand drawing "${h.pose}" only ${Math.round(h.vis * 100)}% visible (behind the gun or its fore arm: draw a "front" layer, or check the part order)` });
+            if (gName === std && h.clamped) warn({ set: setName, anim, frame: f, hand: side, issue: 'arm cannot reach the anchor (reach clamped)' });
             if (h.miss > 1) { worst.hand_px = Math.max(worst.hand_px, h.miss); bad({ set: setName, anim, frame: f, hand: side, issue: `hand ${h.miss} px off its anchor (reach)` }); continue; }
             if (gName === std) continue;
             // the same anchor drawn by this gun vs the standard gun
@@ -516,9 +621,11 @@ export function checkAssets(root, { classes = null, engine = null, limit = 30 } 
       if (j > lim) bad({ gun: name, anchor: an, issue: `anchor jumps ${j} px between neighbouring cells (limit ${r1(lim)})` });
     }
     try {
-      const def = fpDef(engine, name, 'gun'), so = def.sockets || {};
+      // hand-drawn guns carry their 3D anchors as fitted to the drawings (sockets3d)
+      const two = gd.source === '2d';
+      const def = two ? null : fpDef(engine, name, 'gun'), so = two ? Object.fromEntries(Object.entries(gd.sockets3d || {}).map(([k, v]) => [k, { at: v }])) : def.sockets || {};
       const pt = (k) => (so[k] ? [-so[k].at[2], -so[k].at[1], so[k].at[0]] : undefined); // along (fwd), across (down), lateral
-      const kind = def.fp?.class === 'pistol' ? 'pistol' : 'long';
+      const kind = (two ? gd.class : def.fp?.class) === 'pistol' ? 'pistol' : 'long';
       const c = conform(gd.class, { grip_main: pt('grip'), grip_support: kind === 'pistol' ? undefined : pt('support'), stock: pt('stock') }, { unit: FP_UNIT[kind] });
       if (!c.pass) bad({ gun: name, issue: `grip geometry does not conform to class ${gd.class}: ${c.checks.filter((x) => !x.ok).map((x) => `${x.point} off by [${x.along}, ${x.across}] cm`).join('; ')}` });
     } catch (e) { bad({ gun: name, issue: e.message }); }
@@ -535,9 +642,19 @@ export function checkAssets(root, { classes = null, engine = null, limit = 30 } 
       else if (gd.anchors[anchor].length !== steps(gd.yaw) * steps(gd.pitch)) bad({ attachment: key, gun: gName, issue: `${anchor} not listed for every cell` });
     }
   }
-  void mm; void RENDER_ORDER;
+  // hand-drawn sources: what fp2d found at sweep time (anchor consistency across keys, anchors off the art, palette)
+  for (const [group, m] of [['fp_guns', gm], ['fp_mags', mm], ['fp_attach', am]]) {
+    for (const [name, d] of Object.entries(m.sweeps || {})) {
+      if (d.source !== '2d' || !d.check2d) continue;
+      if (classes && d.class && !classes.includes(d.class)) continue;
+      counts.sources_2d = (counts.sources_2d || 0) + 1;
+      for (const w of d.check2d.warnings || []) warn({ sweep: name, group, ...w });
+      if (d.check2d.palette_ok === false) bad({ sweep: name, group, issue: `cells hold ${d.check2d.foreign_colors} colour(s) that are not in the drawings` });
+    }
+  }
+  void RENDER_ORDER;
   const pass = !counts.failed;
-  return { pass, root, ...counts, worst: Object.fromEntries(Object.entries(worst).map(([k, v]) => [k, r1(v)])), summary: pass ? `PASS: ${counts.frames} frames, ${counts.hand_checks} hand locks, ${counts.guns} guns, ${counts.attachment_pairs} attachment fits` : `FAIL: ${counts.failed} issues (first: ${JSON.stringify(issues[0])})`, ...(issues.length ? { issues } : {}), ms: Math.round(performance.now() - t0) };
+  return { pass, root, ...counts, worst: Object.fromEntries(Object.entries(worst).map(([k, v]) => [k, r1(v)])), summary: pass ? `PASS: ${counts.frames} frames, ${counts.hand_checks} hand locks, ${counts.guns} guns, ${counts.attachment_pairs} attachment fits` : `FAIL: ${counts.failed} issues (first: ${JSON.stringify(issues[0])})`, ...(issues.length ? { issues } : {}), ...(warnings.length ? { warnings } : {}), ms: Math.round(performance.now() - t0) };
 }
 
 /** Contact sheet of RGBA frames (for demos / replies). */

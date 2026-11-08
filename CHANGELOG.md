@@ -38,6 +38,18 @@
 - Arms: an eye-space skeleton with finger chains and two-bone IK onto the drawn anchors. Bones are part sprites per view bucket with RotSprite rotation. Arm pixels behind a prop go to the back layer.
 - `art_model` keeps an `fp` key on models (kit metadata). Help topic `fp`.
 
+### Hand-drawn first person (`art_fp` 2D sources)
+
+- The fp v2 contract from pure 2D art; `fpv2.ts`, `composite` and `check` are unchanged.
+- `template`: blank key canvases for guns, magazines, attachments and items (named views hip, ads, reload, side, rear, top and others, or yaw / pitch / roll), with a guides layer showing the class anchors in that view. Arm part canvases (upper arm and forearm per view bucket, hand per pose with back / front layers) with joint / wrist / grip guides.
+- `anchors`: place, move and remove anchors in the canvas meta; suggestions from the silhouette with a confidence; warnings for anchors off the opaque pixels or inconsistent between keys.
+- `sweep2d`: a few key drawings -> the full yaw × pitch sweep in the same files and manifests as `sweep`. Nearest key, card-plane perspective warp plus a correction field through the anchors, nearest sampling from a Scale2x upscale and re-outlining: source palette only, hard alpha, deterministic; anchors take the same warp and are exact at the keys. Painted cells (`paint` import) are kept as override canvases.
+- 2D arms skins: `batch {skins:[...]}` resolves a skin to its drawings, driven by the same `classClips` / `solveClip`; the hand pose drawing is picked per frame from the finger preset. Locks carry per-hand `pose`, `vis` and `clamped` for 2D skins; `check` warns on hidden hands and clamped reach. `setDeformer(skin, fn)` is the seam for a mesh deformer.
+- `trace`: a 3D arms skin exported as an editable 2D skin.
+- Mixed sources: 2D gun + 3D arms, 3D gun + 2D arms, all 2D.
+- `fpclips` hands carry the finger preset name (`pose`), additive. #16's 3D outputs are byte-identical (tested).
+- Demos in `docs/fp2d/` (`scripts/fp2d-demos.js`), drawn with Agent Art's own drawing ops (`scripts/fp2d-art.js`).
+
 ### Planets and space (`art_planet`)
 
 - New tool `art_planet`: `planet` (presets ice, toxic, bloom, lava, desert, gas, barren; biome rules, fbm / ridged / billow noise with domain warp, continents, craters, canyons, emissive seams, night lights, clouds, rings, atmosphere) writes equirect and cube-face maps (albedo, height, height16, normal, roughness, emissive, night, clouds), a cube-sphere `.glb` with LODs, a cloud shell, an atmosphere shell with shader parameters and a ring annulus, quadtree tiles with a `.tiles.json` index, an octahedral impostor and a disc sprite. All textures are pixel-art palette ramps with ordered dither and at most 1024 px.
