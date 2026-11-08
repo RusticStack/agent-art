@@ -473,3 +473,23 @@ test('terrain props: clustered (not uniform), deterministic, horizon ring meets 
   assert.ok(g.tex.width <= 1024 && g.tex.height <= 1024);
   assert.ok(A.fog.density > 0 && A.fog.far > t.size);
 });
+
+test('terrain cameras: names are file-safe, positions finite, fov sane, count capped', () => {
+  const home = tmp(), e = new Engine({ home });
+  const base = { planet: { name: 'p', seed: 3 }, name: 'camtest', ...SMALL, preview_size: 24 };
+  const bad = [
+    [{ '../../../../ESCAPED': { pos: [0, 50, 50], look: [0, 0, 0] } }, /camera name/],
+    [{ a: 5 }, /cameras\.a must be/],
+    [{ a: { pos: ['x', 1, 2], look: [0, 0, 0] } }, /cameras\.a\.pos/],
+    [{ a: { pos: [0, 1, 2], look: [0, NaN, 0] } }, /cameras\.a\.look/],
+    [{ a: { pos: [0, 50, 50], look: [0, 0, 0], fov: 0 } }, /fov/],
+    [{ a: { pos: [0, 50, 50], look: [0, 50, 50] } }, /differ/],
+    [Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`c${i}`, { pos: [0, 50, 50], look: [0, 0, 0] }])), /at most 8/],
+    [[1, 2], /cameras must be/],
+  ];
+  for (const [cameras, re] of bad) assert.throws(() => e.run('planet_terrain', { ...base, cameras }), re, JSON.stringify(cameras).slice(0, 60));
+  assert.ok(!fs.existsSync(path.join(home, '..', 'ESCAPED.png')));
+  const r = e.run('planet_terrain', { ...base, cameras: { top: { pos: [0, 120, 40], look: [0, 0, 0], fov: 50 } } });
+  assert.deepEqual(r.renders, ['top']);
+  assert.ok(fs.existsSync(path.join(r.dir, 'camtest_top.png')));
+});

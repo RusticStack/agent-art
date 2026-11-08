@@ -505,11 +505,39 @@ export function lzCameras(heightAt, anchors = []) {
 }
 const quatM = (q, s, p) => { const [x, y, z, w] = q; return [(1 - 2 * (y * y + z * z)) * s, 2 * (x * y - z * w) * s, 2 * (x * z + y * w) * s, p[0], 2 * (x * y + z * w) * s, (1 - 2 * (x * x + z * z)) * s, 2 * (y * z - x * w) * s, p[1], 2 * (x * z - y * w) * s, 2 * (y * z + x * w) * s, (1 - 2 * (x * x + y * y)) * s, p[2]]; };
 
+/** terrain cameras: {<name>: {pos:[x,y,z], look:[x,y,z], fov?}} (metres); names become file names. */
+const MAX_TERRAIN_CAMERAS = 8;
+function normTerrainCameras(c) {
+  if (c === undefined || c === null) return null;
+  if (typeof c !== 'object' || Array.isArray(c)) throw new Error('cameras must be {<name>: {pos:[x,y,z], look:[x,y,z], fov?}}');
+  const ks = Object.keys(c);
+  if (!ks.length) throw new Error('cameras is empty: omit it for the standard overview / eye / wide cameras');
+  if (ks.length > MAX_TERRAIN_CAMERAS) throw new Error(`cameras: at most ${MAX_TERRAIN_CAMERAS} (got ${ks.length})`);
+  const vec3 = (v, what) => {
+    if (!Array.isArray(v) || v.length !== 3 || !v.every((x) => typeof x === 'number' && Number.isFinite(x))) throw new Error(`${what} must be [x, y, z] finite numbers (metres; got ${JSON.stringify(v)})`);
+    return v.slice();
+  };
+  const out = {};
+  for (const k of ks) {
+    if (!NAME_RE.test(k)) throw new Error(`camera name ${JSON.stringify(k)} must be 1-64 chars of letters, digits, _ - . (it becomes a file name)`);
+    const cam = c[k];
+    if (!cam || typeof cam !== 'object' || Array.isArray(cam)) throw new Error(`cameras.${k} must be {pos:[x,y,z], look:[x,y,z], fov?}`);
+    const pos = vec3(cam.pos, `cameras.${k}.pos`), look = vec3(cam.look, `cameras.${k}.look`);
+    if (pos.every((v, i) => v === look[i])) throw new Error(`cameras.${k}: look must differ from pos`);
+    const fov = cam.fov === undefined ? 60 : Number(cam.fov);
+    if (typeof cam.fov !== 'undefined' && typeof cam.fov !== 'number') throw new Error(`cameras.${k}.fov must be a number of degrees (got ${JSON.stringify(cam.fov)})`);
+    if (!Number.isFinite(fov) || fov < 5 || fov > 170) throw new Error(`cameras.${k}.fov must be 5..170 degrees (got ${JSON.stringify(cam.fov)})`);
+    out[k] = { pos, look, fov };
+  }
+  return out;
+}
+
 function planetTerrain(a, source) {
   const T = timer();
   const ps = previewSize(a.preview_size, 512);
   const { P } = loadPlanet(this, a.planet);
   const t = normTerrain(P, a);
+  const userCams = normTerrainCameras(a.cameras);
   const name = a.name || `${typeof a.planet === 'string' ? a.planet : 'planet'}_lz`;
   if (!NAME_RE.test(name)) throw new Error('"name" must be 1-64 chars of letters, digits, _ - .');
   const B = buildTerrain(P, t);
@@ -631,7 +659,7 @@ function planetTerrain(a, source) {
     for (const m of formMeshes) scene.push(...groups(m));
     const light = { light: [-0.45, 0.8, 0.35].map((v, i, A) => v / Math.hypot(...A)), ambient: 0.42 };
     const cams = lzCameras((x, z) => (Math.max(Math.abs(x), Math.abs(z)) <= t.size / 2 ? B.heightAt(x, z) : B.H.at(x, z)), B.anchors);
-    camsUsed = a.cameras ?? cams;
+    camsUsed = userCams ?? cams;
     for (const [k, cam] of Object.entries(camsUsed)) {
       const im = fogRender(scene, cam, ps, B.fog, light);
       renders[k] = W.png(`${name}_${k}.png`, ps, ps, im.data);
