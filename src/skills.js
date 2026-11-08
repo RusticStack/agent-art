@@ -117,6 +117,17 @@ For 8+ frames or several directions use the rig skill.`,
 Props: extrude ${J({ type: 'extrude', canvas: 'barrel', depth: 6 })}; relief: depth_map:"<height canvas>"; lathe ${J({ type: 'lathe', canvas: 'candle', segments: 12 })} (draw the RIGHT half from x=0; flame on an "emissive" layer).
 Keep pieces light (< 500 tris), reuse a few textures, characters stay 2D billboards.`,
   },
+  'fp-weapon': {
+    title: 'First-person weapon + arms: 3D rig with clips (.glb) or pre-rendered pixel sprites',
+    when: 'FPS viewmodels: a gun with moving parts (magazine, bolt, slide) and separate arms, either shipped as true 3D (glTF animations, Roblox Motor6D) or rendered to 2D sprite layers with per-frame hand anchors.',
+    body: `1. Textures first (metal, polymer, sleeve, glove canvases; small, tileable; 32 px = 1 m).
+2. Gun rig from a template (view space: origin = eye, -Z forward): art_model ${J({ action: 'create', name: 'ar', template: 'fp_rifle', textures: { metal: 'gun_metal', polymer: 'gun_poly' } })}
+   Change parts by name: update ${J({ action: 'update', name: 'ar', set: { magazine: { h: 5 } } })}. Arms: create ${J({ action: 'create', name: 'arms', template: 'fp_arms', textures: { sleeve: 'sleeve', glove: 'glove' } })}
+3. Clips: the template has fire, reload_tactical, reload_empty; add your own: pose ${J({ action: 'pose', name: 'ar', pose: 'inspect', parts: { receiver: { rot: [0, 25, -30] } } })} then animate ${J({ action: 'animate', name: 'ar', clip: 'inspect', keys: [{ t: 0, pose: 'rest' }, { t: 0.6, pose: 'inspect', ease: 'smooth' }, { t: 1.4, pose: 'rest', ease: 'smooth' }], events: [{ t: 0.6, name: 'cloth' }] })}
+4. Check by eye: preview ${J({ action: 'preview', name: 'ar', clip: 'reload_empty', frames: 8, view: 'side' })} and ${J({ action: 'preview', name: 'arms', pose: 'grip_rifle', views: ['fp', 'side'] })}
+5a. True 3D: export {name:"ar"} / {name:"arms"} -> one node per part, sockets socket_muzzle/sight/grip_r/grip_l/mag_well, one glTF animation per clip (events in extras).
+5b. 2D sprites (PS1 technique): render ${J({ action: 'render', name: 'ar', canvas: 'ar_reload', clip: 'reload_empty', fps: 12, size: [160, 120], camera: 'fp', hide: ['magazine'], quantize: { colors: 16, dither: true }, outline: '#14141a' })}, the magazine layer with only:["magazine"], sway frames with sweep:{yaw:[-6,6,3], pitch:[-4,4,2]}. Arms as a separate art_rig layer: animate {..., ik_from:{canvas:"ar_reload", animation:"reload_empty", map:{hand_f:"socket_grip_r", hand_b:"socket_grip_l"}}}. Paint over frames, then art_animation export spritesheet (json frames[].anchors).`,
+  },
   'ui-icons': {
     title: 'UI icons / item icons set',
     when: 'Inventory icons, ability icons, HUD elements.',

@@ -249,9 +249,25 @@ export const RIG_OPS = {
     }
     if (!/^[\w.-]+$/.test(a.animation || '')) throw new Error('animate needs an "animation" name (e.g. "walk_side")');
     const view = a.view || rig.views[0];
+    // ik_from: per-frame IK targets from another canvas's anchors (a pre-rendered gun clip's
+    // socket_grip_r / socket_grip_l), same frame count and timing as that animation
+    const follow = a.ik_from ? ikFromAnchors(this, rig, a.ik_from, view) : null;
+    if (follow) {
+      a = { ...a, frames: follow.targets.length };
+      if (a.duration === undefined && a.fps === undefined) a.duration = follow.duration;
+      if (a.loop === undefined) a.loop = follow.loop;
+      if (!a.keys) a.keys = [{ parts: {} }];
+    }
     const loop = a.loop !== false;
     let poses = animatePoses(rig, { keys: a.keys, frames: a.frames, loop });
-    const notes = [];
+    if (follow) poses = poses.map((P, f) => {
+      const Q = structuredClone(P);
+      Q.views = Q.views || {};
+      Q.views[follow.src] = Q.views[follow.src] || {};
+      Q.views[follow.src].ik = { ...(Q.views[follow.src].ik || {}), ...follow.targets[f] };
+      return Q;
+    });
+    const notes = follow?.notes || [];
     // plant / ik_feet: pin stance feet with leg IK on contact frames (true = rig feet, or [parts])
     const plant = a.plant ?? a.ik_feet;
     if (plant) {
@@ -339,6 +355,48 @@ export const RIG_OPS = {
     out.meta = { ...(out.meta || {}), anchors: { ...(out.meta?.anchors || {}), [a.animation]: anchors } };
     out.touch?.();
     this.changed(out, { op: 'rig', source, label: `rig ${a.name}: ${a.animation} (${n} frames, ${view})`, structural: true });
-    return { canvas: outName, animation: a.animation, view, frames: [start, start + n - 1], fps: Math.round(fps * 10) / 10, total_frames: out.frames, anchors: 'per-frame part anchors saved (spritesheet json frames[].anchors)', ...(notes.length ? { notes } : {}) };
+    return { canvas: outName, animation: a.animation, view, frames: [start, start + n - 1], fps: Math.round(fps * 10) / 10, total_frames: out.frames, anchors: 'per-frame part anchors saved (spritesheet json frames[].anchors)', ...(follow ? { ik_from: `${follow.canvas}/${follow.animation} (${follow.targets.length} frames)` } : {}), ...(notes.length ? { notes } : {}) };
   },
 };
+
+/**
+ * ik_from {canvas, animation?, map:{<end part>: "<anchor>" | {anchor, bend?, rot?:true|deg, rot_offset?, at?:[dx,dy]}}, offset?:[dx,dy]}
+ * -> per-frame IK specs for the drawn source view (anchors are frame px of the other canvas; a
+ * mirror view flips them back into the drawn view).
+ */
+function ikFromAnchors(engine, rig, spec, view) {
+  if (!spec || typeof spec !== 'object' || !spec.canvas) throw new Error('ik_from needs {canvas, animation?, map:{hand_f:"socket_grip_r", ...}}');
+  const d = engine.get(spec.canvas);
+  const all = d.meta?.anchors || {};
+  const animation = spec.animation ?? Object.keys(all)[0];
+  const A = all[animation];
+  if (!A || !A.length) throw new Error(`ik_from: canvas "${d.name}" has no anchors for animation "${animation}" (anchored animations: ${Object.keys(all).join(', ') || 'none'}; art_model render / art_rig animate save them)`);
+  if (!spec.map || typeof spec.map !== 'object' || !Object.keys(spec.map).length) throw new Error('ik_from.map must be {<end part>: "<anchor name>"}, e.g. {hand_f:"socket_grip_r", hand_b:"socket_grip_l"}');
+  const src = rig.mirror[view] || view, flip = !!rig.mirror[view];
+  const off = (spec.offset || [0, 0]).map(Number);
+  const ends = Object.entries(spec.map).map(([end, m]) => {
+    const o = typeof m === 'string' ? { anchor: m } : { ...m };
+    if (!o.anchor) throw new Error(`ik_from.map.${end} needs an anchor name`);
+    ikChain(rig, end);
+    return [end, o];
+  });
+  const notes = [];
+  const missing = new Set();
+  const targets = A.map((an) => {
+    const ik = {};
+    for (const [end, o] of ends) {
+      const p = an?.[o.anchor];
+      if (!p) { missing.add(o.anchor); continue; }
+      const at = (o.at || [0, 0]).map(Number);
+      let x = Number(p[0]) + off[0] + at[0];
+      const y = Number(p[1]) + off[1] + at[1];
+      let rot = o.rot === true ? Number(p[2] ?? 0) + Number(o.rot_offset ?? 0) : typeof o.rot === 'number' ? o.rot : undefined;
+      if (flip) { x = 2 * rig.root[0] - 1 - x; if (rot !== undefined) rot = -rot; }
+      ik[end] = { target: [x, y], ...(o.bend !== undefined ? { bend: o.bend } : {}), ...(rot !== undefined ? { rot } : {}), ...(o.weight !== undefined ? { weight: o.weight } : {}) };
+    }
+    return ik;
+  });
+  if (missing.size) notes.push(`ik_from: anchors ${[...missing].join(', ')} missing on some frames of ${d.name}/${animation} (those frames keep FK)`);
+  const tag = d.animations[animation];
+  return { canvas: d.name, animation, targets, src, notes, duration: tag ? tag.durations[0] : undefined, loop: tag ? tag.loop : undefined };
+}

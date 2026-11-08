@@ -127,9 +127,31 @@ function instanceExtras(M, scale, info) {
   return { ...(typeof info === 'object' ? info : {}), world_offset: [M[3], M[7], M[11]].map((v) => f(v / scale)), world_rotation: q.map(f), world_scale: [sx, sy, sz].map(f), px_per_unit: scale };
 }
 
+/** 3x4 (px) local matrix of a TRS node: translation px, rotation quaternion [x,y,z,w], scale. */
+export function trsMatrix(t = [0, 0, 0], q = [0, 0, 0, 1], s = [1, 1, 1]) {
+  const [x, y, z, w] = q;
+  const r = [
+    1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w),
+    2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w),
+    2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y),
+  ];
+  return [r[0] * s[0], r[1] * s[1], r[2] * s[2], t[0], r[3] * s[0], r[4] * s[1], r[5] * s[2], t[1], r[6] * s[0], r[7] * s[1], r[8] * s[2], t[2]];
+}
+const mul34 = (A, B) => {
+  const r = new Array(12);
+  for (let i = 0; i < 3; i++) {
+    for (let j = 0; j < 3; j++) r[i * 4 + j] = A[i * 4] * B[j] + A[i * 4 + 1] * B[4 + j] + A[i * 4 + 2] * B[8 + j];
+    r[i * 4 + 3] = A[i * 4] * B[3] + A[i * 4 + 1] * B[7] + A[i * 4 + 2] * B[11] + A[i * 4 + 3];
+  }
+  return r;
+};
+
 /**
- * scene: { meshes: [{ name, groups: Iterable<group> (px) }], nodes: [{ name, mesh, matrix? (3x4, px) }] }
- * opts: { scale = 32 (px per unit), up = 'y'|'z', atlas = false, name, extras }
+ * scene: { meshes: [{ name, groups: Iterable<group> (px) }], nodes: [{ name, mesh?, matrix? (3x4,
+ * px) | translation? (px) + rotation? [x,y,z,w] + scale?, children?: [node indices], extras? }],
+ * animations?: [{ name, channels: [{ node, path: translation|rotation|scale, interpolation:
+ * LINEAR|STEP, times: seconds, values: flat (translation px) }], extras? }] }. Nodes that are no
+ * one's child are scene roots. opts: { scale = 32 (px per unit), up = 'y'|'z', atlas = false, name, extras }
  * -> { glb: Buffer, stats }
  */
 export function writeGLB(scene, opts = {}) {
@@ -232,23 +254,67 @@ export function writeGLB(scene, opts = {}) {
     json.meshes.push({ name: m.name, primitives: prims });
     meshTris.push(mt);
   }
-  // nodes (instances share meshes)
+  // nodes (instances share meshes; rigs nest children with TRS)
   const bmin = [Infinity, Infinity, Infinity], bmax = [-Infinity, -Infinity, -Infinity];
+  const isChild = new Set(), parentOf = new Map();
+  for (const [i, n] of scene.nodes.entries()) for (const c of n.children || []) { isChild.add(c); parentOf.set(c, i); }
   const top = [];
-  for (const n of scene.nodes) {
-    const node = { name: n.name, mesh: n.mesh };
+  const f6 = (v) => +(+v).toFixed(6);
+  const localM = (n) => (n.matrix ? n.matrix : n.translation || n.rotation || n.scale ? trsMatrix(n.translation, n.rotation, n.scale) : null);
+  const worldM = new Map();
+  const worldOf = (i) => {
+    if (worldM.has(i)) return worldM.get(i);
+    const L = localM(scene.nodes[i]), P = parentOf.has(i) ? worldOf(parentOf.get(i)) : null;
+    const W = P ? (L ? mul34(P, L) : P) : L;
+    worldM.set(i, W);
+    return W;
+  };
+  for (const [ni, n] of scene.nodes.entries()) {
+    const node = { name: n.name };
+    if (n.mesh !== undefined && n.mesh !== null) node.mesh = n.mesh;
     const M = n.matrix;
     if (M && M.some((v, i) => v !== [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0][i])) {
       node.matrix = [M[0], M[4], M[8], 0, M[1], M[5], M[9], 0, M[2], M[6], M[10], 0, M[3] / scale, M[7] / scale, M[11] / scale, 1];
     }
+    if (n.translation && n.translation.some((v) => Math.abs(v) > 1e-9)) node.translation = n.translation.map((v) => f6(v / scale));
+    if (n.rotation && Math.abs(n.rotation[3]) < 1 - 1e-12) node.rotation = n.rotation.map(f6);
+    if (n.scale && n.scale.some((v) => v !== 1)) node.scale = n.scale.map(f6);
+    if (n.children && n.children.length) node.children = [...n.children];
     if (n.instance) node.extras = instanceExtras(M || [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0], scale, n.instance);
-    triangles += meshTris[n.mesh];
-    for (const p of meshes[n.mesh].prims) for (let i = 0; i < p.pos.length; i += 3) {
-      const q = M ? applyP(M, [p.pos[i], p.pos[i + 1], p.pos[i + 2]]) : [p.pos[i], p.pos[i + 1], p.pos[i + 2]];
-      for (let k = 0; k < 3; k++) { const v = q[k] / scale; if (v < bmin[k]) bmin[k] = v; if (v > bmax[k]) bmax[k] = v; }
+    else if (n.extras) node.extras = n.extras;
+    if (node.mesh !== undefined) {
+      triangles += meshTris[n.mesh];
+      const W = worldOf(ni);
+      for (const p of meshes[n.mesh].prims) for (let i = 0; i < p.pos.length; i += 3) {
+        const q = W ? applyP(W, [p.pos[i], p.pos[i + 1], p.pos[i + 2]]) : [p.pos[i], p.pos[i + 1], p.pos[i + 2]];
+        for (let k = 0; k < 3; k++) { const v = q[k] / scale; if (v < bmin[k]) bmin[k] = v; if (v > bmax[k]) bmax[k] = v; }
+      }
     }
     json.nodes.push(node);
-    top.push(json.nodes.length - 1);
+    if (!isChild.has(ni)) top.push(json.nodes.length - 1);
+  }
+  // animations: one sampler per channel; inputs = seconds (min/max), outputs = translation (units) / rotation / scale
+  if (scene.animations && scene.animations.length) {
+    json.animations = [];
+    const accF = (arr, type, extra = {}) => {
+      const F = Float32Array.from(arr);
+      json.accessors.push({ bufferView: view(F), componentType: FLOAT, count: F.length / ({ SCALAR: 1, VEC3: 3, VEC4: 4 })[type], type, ...extra });
+      return json.accessors.length - 1;
+    };
+    for (const an of scene.animations) {
+      const samplers = [], channels = [];
+      for (const ch of an.channels) {
+        const times = Array.from(ch.times, (t) => Math.fround(t));
+        const vals = ch.path === 'translation' ? Array.from(ch.values, (v) => v / scale) : Array.from(ch.values);
+        const input = accF(times, 'SCALAR', { min: [times[0]], max: [times[times.length - 1]] });
+        const output = accF(vals, ch.path === 'rotation' ? 'VEC4' : 'VEC3');
+        samplers.push({ input, output, interpolation: ch.interpolation || 'LINEAR' });
+        channels.push({ sampler: samplers.length - 1, target: { node: ch.node, path: ch.path } });
+      }
+      const a = { name: an.name, channels, samplers };
+      if (an.extras) a.extras = an.extras;
+      json.animations.push(a);
+    }
   }
   if (opts.up === 'z') {
     json.nodes.push({ name: 'z_up', rotation: [Math.SQRT1_2, 0, 0, Math.SQRT1_2], children: top });
@@ -269,6 +335,7 @@ export function writeGLB(scene, opts = {}) {
     glb,
     stats: {
       bytes: glb.length, triangles, vertices, meshes: json.meshes.length, nodes: scene.nodes.length, materials: json.materials.length, textures: json.textures.length,
+      animations: json.animations ? json.animations.length : undefined,
       atlased: atlased || undefined, bounds: { min: bmin.map(fin), max: bmax.map(fin), size: bmax.map((v, i) => fin(v - bmin[i])) },
     },
   };

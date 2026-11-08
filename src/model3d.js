@@ -132,8 +132,13 @@ export class Mesh {
       for (const v of o.nrm) g.nrm.push(v);
       for (const v of o.uv) g.uv.push(v);
       for (const i of o.idx) g.idx.push(base + i);
-      if (o.overlay) { for (const v of o.uv0) g.uv0.push(v); for (const v of o.alpha) g.alpha.push(v); }
-      else for (const f of o.faces) g.faces.push({ ...f, n: f.n.slice(), v: f.v + base, i: f.i + i0 });
+      if (o.overlay) {
+        for (const v of o.uv0) g.uv0.push(v);
+        for (const v of o.alpha) g.alpha.push(v);
+        // rig node per vertex (overlay shells have no face records)
+        if (o.vnode) { if (!g.vnode) g.vnode = new Array(base).fill(null); for (const v of o.vnode) g.vnode.push(v); }
+        else if (g.vnode) for (let k = 0; k < o.pos.length / 3; k++) g.vnode.push(null);
+      } else for (const f of o.faces) g.faces.push({ ...f, n: f.n.slice(), v: f.v + base, i: f.i + i0 });
     }
     return this;
   }
@@ -1233,6 +1238,7 @@ function applyOverlays(mesh, ctx) {
           og.pos.push(v.p[0] + f.n[0] * lift, v.p[1] + f.n[1] * lift, v.p[2] + f.n[2] * lift);
           og.nrm.push(...f.n);
           og.uv.push(...ouv(v.p)); og.uv0.push(...v.uv); og.alpha.push(al[k]);
+          (og.vnode || (og.vnode = [])).push(f.node ?? null);
         });
         og.idx.push(base, base + 1, base + 2);
       };
@@ -1276,6 +1282,7 @@ function applyOverlays(mesh, ctx) {
         poly.forEach(([s, q, u0, v0]) => {
           og.pos.push(P.t[0] * s - P.b[0] * q + P.n[0] * (P.off + lift), P.t[1] * s - P.b[1] * q + P.n[1] * (P.off + lift), P.t[2] * s - P.b[2] * q + P.n[2] * (P.off + lift));
           og.nrm.push(...P.n); og.uv.push(...tileUV(it.ot.ctm, it.ot, k, s - c.cu * T, q - c.cv * T)); og.uv0.push(u0, v0); og.alpha.push(1);
+          (og.vnode || (og.vnode = [])).push(it.f.node ?? null);
         });
         for (let i = 1; i + 1 < poly.length; i++) {
           const A = poly[0], B = poly[i], C = poly[i + 1];
@@ -1316,7 +1323,7 @@ function finalizeAt(mesh, ctx) {
 function applyCTMEmit(mesh, add) {
   return applyCTM(mesh, (tex, P, n, UV, src) => {
     const f = add.face(tex, P, n, UV, n, 0);
-    for (const k of ['pid', 'tag', 'ov', 'mat']) if (src[k] !== undefined) f[k] = src[k];
+    for (const k of ['pid', 'tag', 'ov', 'mat', 'node']) if (src[k] !== undefined) f[k] = src[k];
     f.ctm = true;
   });
 }
@@ -1450,6 +1457,8 @@ export function buildModel(def, ctx) {
   const ids = ctx.ids || (ctx.ids = { n: 0 });
   const mesh = new Mesh(), parts = [], instances = [], instMeshes = new Map();
   const modelOv = (def.overlays || []).map(normOverlay);
+  // rig: named parts (or rig.merge:false) become glTF nodes; faces remember their node
+  const layout = ctx.nested ? null : rigLayout(def);
   let firstTex = null;
   def.parts.forEach((p, i) => {
     const type = p.type;
@@ -1465,7 +1474,7 @@ export function buildModel(def, ctx) {
         if (p.model === def.name || stack.includes(p.model)) throw new Error(`model "${p.model}" includes itself (${[...stack, p.model].join(' > ')})`);
         const sub = ctx.getModel(p.model);
         const subCtx = { ...ctx, stack: [...stack, def.name, p.model], instances: false, nested: true };
-        if (ctx.instances && !ctx.nested) {
+        if (ctx.instances && !ctx.nested && !(layout && layout.nodeOf[i] !== null)) {
           if (!instMeshes.has(p.model)) {
             const built = buildModel(sub, subCtx).mesh;
             built.tagFaces({ ov: partOv.length || modelOv.length ? [...partOv, ...modelOv] : undefined });
@@ -1487,6 +1496,7 @@ export function buildModel(def, ctx) {
         local.tagFaces({ pid: ids.n++, tag: p.ctm_tag ?? p.tag, ov: partOv.length ? partOv : undefined });
         if (!firstTex && (type === 'extrude' || type === 'lathe')) firstTex = ctx.tex(p.canvas ? imageRef(p) : p.profile ?? p.texture);
       }
+      if (layout && layout.nodeOf[i] !== null) for (const { f } of local.faces) f.node = layout.nodeOf[i];
       for (const [k, mm] of mats.entries()) {
         const c = mats.length > 1 ? local.clone() : local;
         if (k > 0 && type !== 'model') for (const { f } of c.faces) f.pid = ids.n++;
@@ -1508,6 +1518,76 @@ export function buildModel(def, ctx) {
   const all = instances.length ? instances.reduce((acc, it) => acc.add(it.mesh.clone().transform(it.matrix)), mesh.clone()) : mesh;
   const { mode, shift } = originShift(def, all, firstTex);
   if (shift.some((v) => v)) { mesh.transform(mT(...shift)); for (const it of instances) it.matrix = matMul(mT(...shift), it.matrix); }
-  return { mesh, parts, origin: mode, instances, grid, baked };
+  return { mesh, parts, origin: mode, instances, grid, baked, shift, layout };
+}
+
+// ---------- rigs: named parts = nodes (joint = pivot), parent links ----------
+const NODE_RE = /^[A-Za-z0-9_.-]{1,64}$/;
+/**
+ * Node layout of a model: null unless a part has a name (or rig:{merge:false}). nodes = [{name,
+ * i (part index), parent (node name | null = model root)}]; nodeOf[i] = node that part i's faces
+ * go to (its own name, its named parent for unnamed parts, null = the model root mesh).
+ */
+export function rigLayout(def) {
+  const parts = def.parts || [];
+  const merge = def.rig?.merge !== false;
+  if (merge && !parts.some((p) => p && p.name !== undefined && p.name !== null)) return null;
+  const nodes = [], byName = new Map();
+  parts.forEach((p, i) => {
+    if (!p) return;
+    let n = p.name;
+    if (n !== undefined && n !== null) {
+      if (typeof n !== 'string' || !NODE_RE.test(n)) throw new Error(`part ${i}: name must be 1-64 chars of letters, digits, _ - . (got ${JSON.stringify(n)})`);
+      if (byName.has(n)) throw new Error(`part ${i}: name "${n}" is used twice (part ${byName.get(n).i})`);
+      if (n === def.name) throw new Error(`part ${i}: name "${n}" is the model's own name (the root node)`);
+    } else if (!merge) {
+      n = `${p.type || 'part'}_${i}`;
+      while (byName.has(n)) n += '_';
+    } else return;
+    const node = { name: n, i, parent: p.parent ?? null };
+    byName.set(n, node);
+    nodes.push(node);
+  });
+  const known = () => [...byName.keys()].join(', ');
+  for (const nd of nodes) {
+    if (nd.parent === null) continue;
+    if (!byName.has(nd.parent)) throw new Error(`part ${nd.i} (${nd.name}): parent "${nd.parent}" is not a named part (names: ${known()})`);
+    for (let k = 0, q = nd; q.parent !== null; k++) {
+      q = byName.get(q.parent);
+      if (q === nd || k > nodes.length) throw new Error(`part ${nd.i} (${nd.name}): parent chain loops back to itself`);
+    }
+  }
+  const own = new Map(nodes.map((nd) => [nd.i, nd.name]));
+  const nodeOf = parts.map((p, i) => {
+    if (!p) return null;
+    if (own.has(i)) return own.get(i);
+    if (p.parent === undefined || p.parent === null) return null;
+    if (!byName.has(p.parent)) throw new Error(`part ${i} (${p.type}): parent "${p.parent}" is not a named part (names: ${known()})`);
+    return p.parent;
+  });
+  return { nodes, byName, nodeOf, merge };
+}
+
+/** Rotation-only matrix of a part (rotate X, Y, Z then turn), no scale or translation. */
+export function partRotation(p) {
+  const t = p.transform || {};
+  const rot = vec3(t.rotate ?? p.rotate), turn = Number(t.turn ?? p.turn ?? 0);
+  let R = matMul(mRZ(rot[2]), matMul(mRY(rot[1]), mRX(rot[0])));
+  if (turn) R = matMul(mRY(turn * 90), R);
+  return R;
+}
+/**
+ * Rest-pose joints of a rig (model px, origin shift applied): name -> {joint:[x,y,z] = the part's
+ * pivot (local [0,0,0] without one) after placement, R: 3x4 rotation of the part}.
+ */
+export function rigJoints(def, layout, shift = [0, 0, 0]) {
+  const grid = Number(def.grid ?? 32), out = new Map();
+  for (const nd of layout.nodes) {
+    const p = def.parts[nd.i];
+    const pv = rotPivot(p) || [0, 0, 0];
+    const J = applyP(partMatrix(p, grid), pv);
+    out.set(nd.name, { joint: [J[0] + shift[0], J[1] + shift[1], J[2] + shift[2]], R: partRotation(p) });
+  }
+  return out;
 }
 export { normOverlay };
