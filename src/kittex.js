@@ -52,6 +52,22 @@ const panel = (base, seed, { pw = 32, ph = 16, chips = 0.5, dirt = 0.5, hatch = 
 const PAINTERS = {
   hull: { w: 64, h: 64, base: 'hull', fn: (b, s) => panel(b, s, { pw: 32, ph: 16 }) },
   armor: { w: 64, h: 64, base: 'hull', fn: (b, s) => panel(b, s + 3, { pw: 64, ph: 32, chips: 0.25, dirt: 0.35, hatch: 0.12 }) },
+  // one armour slab fitted per face (tile:false): worn bare-metal edges along the border (chamfers
+  // read as edge wear), a lit inner lip, a calm painted field with faint scuffs, corner bolts
+  slab: {
+    w: 32, h: 32, base: 'hull',
+    fn: (b, s) => (x, y) => {
+      const N = (a, c, k) => hash3(a, c, s * 97 + k);
+      const e = Math.min(x, y, 31 - x, 31 - y);
+      const tone = 0.95 + N(x >> 3, y >> 3, 1) * 0.07 + dith(x, y) - (y / 31) * 0.06;
+      if (e === 0) return { c: shade(hex('#a2a6aa'), 0.85 + N(x, y, 2) * 0.25), h: 0.5, metal: 0.9, rough: 0.35 };
+      if (e === 1) return N(x, y, 3) < 0.45 ? { c: shade(hex('#8e9296'), 0.9 + N(x, y, 4) * 0.2), h: 0.6, metal: 0.85, rough: 0.4 } : { c: shade(hex(b), 1.16), h: 0.7 };
+      if (e === 2 && N(x >> 1, y >> 1, 5) < 0.18) return { c: shade(hex('#7c8084'), 1), h: 0.6, metal: 0.8, rough: 0.45 };
+      if ((x === 4 || x === 27) && (y === 4 || y === 27)) return { c: shade(hex(b), 0.55), h: 0.3 };
+      const scuff = N(x, y, 6) < 0.012 ? 1.25 : 1;
+      return { c: shade(hex(b), tone * scuff), h: 0.62, metal: 0.25, rough: 0.5 };
+    },
+  },
   hull_dark: { w: 64, h: 64, base: 'hull_dark', fn: (b, s) => panel(b, s + 1, { pw: 32, ph: 16, chips: 0.7, dirt: 0.7 }) },
   accent: { w: 32, h: 32, base: 'accent', fn: (b, s) => panel(b, s + 2, { pw: 32, ph: 16, hatch: 0, chips: 0.8 }) },
   metal: {

@@ -2,12 +2,14 @@
 // gunship at true scale (32 px = 1 m, 25 m long), exterior and walkable interior in ONE model.
 // Brand and names are original to this universe: maker "ORVANE", class "TERN", serial OV-TN-####.
 //
-// Exterior: tiered angular armour (stepped plates, recessed channels), two articulated nacelle
-// booms with hard pivots and VTOL thruster pods (blue glow rings, intake grilles, vent banks,
-// hazard-striped tips with nav lights), a big multi-pane glazed cockpit set into the armour, a
-// round side airlock with a boarding ladder, underslung guns, missile rails, a nose sensor cage,
-// chunky landing gear, livery decals (gunmetal + one yellow accent, stencils, serials, logotype,
-// chevrons).
+// Exterior, big masses first: a faceted chined fuselage wedge (linear loft of polygon sections:
+// flat upper deck stepping down to a wrap canopy and a blunt armoured nose), a raised dorsal spine,
+// side sponsons that carry thick armoured wing pylons (truss keels underneath), a heavy chin block;
+// then medium forms: faceted VTOL nacelles (intake lip, hazard band, exhaust bell, blue glow ring),
+// gun pods, missile rails, deep intakes, the round airlock + boarding ladder, chunky gear; then
+// separate bevelled armour slabs with shadow gaps (worn edges), vents and greebles only in the
+// recessed chine channel. Livery: two-tone (light deck, gunmetal sides, dark belly) + one yellow
+// accent block, stencils, serials, logotype, chevrons.
 // Interior (player metrics, walk_check clean): corridor with chamfered octagonal portal arches,
 // grating floor with blue edge strips, wall modules (weapon rack, personal storage, component bay),
 // terminals on arms, the airlock vestibule with a door panel, a cargo hold, and the cockpit with a
@@ -34,74 +36,120 @@ export function gunshipTemplate(o = {}) {
   const accent = o.accent ?? '#d0a020', hullC = o.color ?? '#454b54', glowC = o.glow ?? '#4cc8ff';
   const hx = (c) => c.slice(1).toLowerCase();
   const HULL = `kit_armor_${hx(hullC)}`, HULL2 = 'kit_hull_dark', ACC = `kit_accent_${hx(accent)}`, DARK = 'kit_metal_dark', MET = 'kit_metal';
+  // two-tone livery: light upper deck / spine / sponson tops, gunmetal sides, dark underbelly
+  const topC = o.color2 ?? '#6a7078', TOP = `kit_armor_${hx(topC)}`, BELLY = 'kit_armor_2c3036';
+  const SLAB_TOP = `kit_slab_${hx(topC)}`, SLAB_SIDE = `kit_slab_${hx(hullC)}`, SLAB_DARK = 'kit_slab_30343a', SLAB_ACC = `kit_slab_${hx(accent)}`;
   const L = 800, clear = 48, Y = (yl) => clear + yl; // local hull height -> world
   const floorL = 30, FY = Y(floorL), CH = 88; // corridor floor (world) and clear height (2.75 m)
   const zt = (t) => r2((t - 0.5) * L);
   const P = rig ? { parent: 'hull' } : {};
   const named = (n) => (rig ? { name: n } : {});
-  // ---------- primary form: the armoured body ----------
+  // ---------- primary mass: a faceted, chined fuselage wedge (linear loft of polygon sections) ----------
+  // Main section: flat upper deck, shoulder bevel, tumblehome upper side, hard chine, vertical side,
+  // lower bevel, flat belly. Nose section: narrower deck, deeper shoulder, keel-ish chin.
+  const mir = (h) => [...h, ...h.slice(1).reverse().map(([x, y]) => [-x, y])];
+  const MAIN = { points: mir([[0, 1], [0.6, 1], [0.84, 0.72], [1, 0.3], [1, -0.6], [0.78, -0.86], [0.55, -1]]), chamfer: 0.02 };
+  const NOSE = { points: mir([[0, 1], [0.42, 1], [0.8, 0.52], [1, 0.05], [0.9, -0.45], [0.55, -1]]), chamfer: 0.02 };
+  // facet u ranges of MAIN on the +x side (polygon corners): deck | shoulder | upper side | side | lower side | belly
+  const FU = { deck: [0, 0.0863], shoulder: [0.0863, 0.1393], upper: [0.1393, 0.2039], side: [0.2039, 0.3333], lower: [0.3333, 0.3822] };
   const body = {
-    type: 'hull', id: 'body', ...named('hull'), length: L, width: 224, height: 160, at: [0, clear, 0],
-    plan: [[0, 70], [0.1, 96], [0.3, 112], [0.64, 112], [0.78, 100], [0.9, 72], [1, 18]],
-    profile: [[0, 120, 26], [0.1, 150, 6], [0.3, 160, 0], [0.64, 160, 0], [0.78, 146, 6], [0.9, 112, 14], [0.97, 74, 30], [1, 56, 40]],
-    sections: [[0, { points: [[0, 1], [0.6, 1], [0.92, 0.62], [1, 0.25], [1, -0.62], [0.75, -1], [-0.75, -1], [-1, -0.62], [-1, 0.25], [-0.92, 0.62], [-0.6, 1]], chamfer: 0.03 }], [0.94, { points: [[0, 1], [0.5, 1], [1, 0.3], [0.9, -0.6], [0.5, -1], [-0.5, -1], [-0.9, -0.6], [-1, 0.3], [-0.5, 1]], chamfer: 0.04 }]],
-    rings: 20, segments: 18, crease: 28, shell: 6, inner: 'kit_metal_dark', rim: DARK,
-    panel_lines: { every: 128, seams: [0.06, 0.2], width: 2.2, depth: 1.8 },
+    type: 'hull', id: 'body', ...named('hull'), length: L, width: 224, height: 164, at: [0, clear, 0], interp: 'linear',
+    plan: [[0, 92], [0.06, 108], [0.12, 112], [0.6, 112], [0.7, 108], [0.8, 96], [0.9, 72], [0.97, 44], [1, 30]],
+    // flat upper deck, a hard step down at t 0.6, the second deck, then the canopy slope into a blunt armoured nose
+    profile: [[0, 132, 26], [0.05, 158, 6], [0.1, 164, 0], [0.6, 164, 0], [0.63, 146, 0], [0.76, 146, 0], [0.86, 118, 8], [0.95, 84, 24], [1, 66, 40]],
+    sections: [[0, MAIN], [0.7, MAIN], [0.88, NOSE]],
+    rings: 14, segments: 16, crease: 20, shell: 6, inner: 'kit_metal_dark', rim: DARK,
+    panel_lines: { rings: [0.1, 0.6, 0.76], seams: [FU.side[1]], width: 2.4, depth: 2 },
     plates: [
-      // tiered side armour: two stepped layers + a third small cap, recessed channels between
-      { t: [0.12, 0.38], u: [0.21, 0.33], lift: 2.5 }, { t: [0.15, 0.35], u: [0.23, 0.31], lift: 5 },
-      { t: [0.52, 0.76], u: [0.21, 0.33], lift: 2.5 }, { t: [0.55, 0.72], u: [0.23, 0.31], lift: 5 },
-      // dorsal spine plates
-      { t: [0.12, 0.7], u: [0.965, 0.035], lift: 2.5 }, { t: [0.16, 0.42], u: [0.975, 0.025], lift: 5 },
-      // the one accent colour: shoulder panels
-      { t: [0.38, 0.52], u: [0.08, 0.19], lift: 3, texture: ACC },
-      // belly armour
-      { t: [0.18, 0.7], u: [0.44, 0.56], lift: 2.5 },
+      // two-tone paint blocks: light upper deck + shoulders, gunmetal sides, dark underbelly
+      { t: [0.02, 0.99], u: [1 - FU.shoulder[1], FU.shoulder[1]], lift: 0.6, texture: TOP, mirror: false },
+      { t: [0.02, 0.99], u: [FU.side[1], 1 - FU.side[1]], lift: 0.6, texture: BELLY, mirror: false },
     ],
     texture: HULL, groove: DARK, plate_texture: HULL2, material: 'painted_metal',
     openings: [],
   };
   const S = hullSurface(body);
-  // openings: cockpit glazing (top + upper sides of the nose) and the round airlock on the -x side
-  const glz = { t: [0.785, 0.972], u: [0.69, 0.31] };
+  // armour slabs: separate bevelled boxes with real thickness on the flat facets, shadow gaps between
+  // them, an optional smaller second layer; fitted kit_slab texture = worn bare-metal edges
+  const slab = (hid, Sh, t0, t1, ua, ub, { h = 4, m = 3, tex = SLAB_SIDE, stack = 0, mirror = true, parent = P } = {}) => {
+    const tc = (t0 + t1) / 2, uc = (ua + ub) / 2, pa = Sh.point(tc, ua), pb = Sh.point(tc, ub);
+    const w = r2(Math.hypot(pa[0] - pb[0], pa[1] - pb[1], pa[2] - pb[2]) - 2 * m), d = r2(Math.abs(Sh.z(t1) - Sh.z(t0)) - 2 * m);
+    if (w < 6 || d < 6) return;
+    const q = { type: 'box', w, h, d, bevel: r2(Math.min(1.8, h * 0.42)), tile: false, texture: tex, material: 'painted_metal', ...parent };
+    parts.push({ ...q, on_hull: { hull: hid, t: tc, u: uc, lift: -0.6, mirror } });
+    if (stack) parts.push({ ...q, w: r2(w * 0.72), d: r2(d * 0.8), h: stack, bevel: r2(Math.min(1.4, stack * 0.42)), on_hull: { hull: hid, t: tc, u: uc, lift: h - 0.8, mirror } });
+  };
+  // openings: cockpit wrap canopy (deck + shoulders + upper sides of the nose) and the round airlock on -x
+  const glz = { t: [0.79, 0.945], u: [0.8, 0.2] };
   const zDoor = -40, tDoor = 0.5 + zDoor / L, R = 36, doorC = floorL + R + 2; // door centre (local y)
   const tD = [0.5 + (zDoor - R - 8) / L, 0.5 + (zDoor + R + 8) / L];
   const uD = [uAtY(S, tDoor, doorC + R + 8), uAtY(S, tDoor, doorC - R - 8)].sort((a, b) => a - b);
   body.openings = [{ ...glz, id: 'glazing' }, { t: tD, u: uD, id: 'airlock' }];
   const parts = [body];
   const Sx = (t, yl) => S.halfWidthAt(t, yl); // outer half width at local height
+  // body slabs (t ranges avoid the sponsons, the airlock band t 0.39..0.51 and the canopy)
+  for (const [a, b] of [[0.12, 0.24], [0.25, 0.37], [0.48, 0.6]]) slab('body', S, a, b, 0.052, FU.deck[1], { tex: SLAB_TOP, h: 3 });
+  for (const [a, b] of [[0.11, 0.25], [0.64, 0.76]]) slab('body', S, a, b, ...FU.shoulder, { tex: SLAB_TOP, h: 3.5 });
+  for (const [a, b] of [[0.07, 0.2], [0.64, 0.76]]) slab('body', S, a, b, ...FU.upper, { h: 4 });
+  for (const [a, b, st] of [[0.06, 0.2, 3], [0.21, 0.35, 3], [0.52, 0.63, 3], [0.64, 0.75, 0]]) slab('body', S, a, b, ...FU.side, { h: 5, stack: st });
+  slab('body', S, 0.38, 0.5, ...FU.side, { h: 5, stack: 3, tex: SLAB_ACC, mirror: false }); // the one accent block (+x side; the airlock is on -x)
+  for (const [a, b] of [[0.1, 0.37], [0.52, 0.74]]) slab('body', S, a, b, ...FU.lower, { h: 4, tex: SLAB_DARK });
+  // ---------- dorsal spine block (raised, faceted) ----------
+  const spine = { type: 'hull', id: 'spine', length: 384, width: 76, height: 24, at: [0, Y(162), zt(0.36)], interp: 'linear', plan: [[0, 20], [0.12, 38], [0.86, 38], [1, 22]], profile: [[0, 10, 0], [0.12, 24, 0], [0.86, 24, 0], [1, 12, 0]], section: { points: mir([[0, 1], [0.62, 1], [1, 0.1], [1, -1]]), chamfer: 0.04 }, rings: 6, segments: 8, crease: 20, texture: TOP, groove: DARK, material: 'painted_metal', ...P };
+  parts.push(spine);
+  const SP = hullSurface(spine);
+  for (const [a, b] of [[0.14, 0.4], [0.42, 0.62], [0.64, 0.84]]) slab('spine', SP, a, b, 0.92, 0.08, { tex: SLAB_TOP, h: 3, m: 4, mirror: false });
+  // ---------- side sponsons (the boom roots), heavy and wedge-ended ----------
+  const tB = 0.42, zB = zt(tB), yBl = 146, yB = Y(yBl), xS = Sx(tB, yBl);
+  const SPON = { points: mir([[0, 1], [0.55, 1], [1, 0.4], [1, -0.3], [0.6, -1]]), chamfer: 0.04 };
+  for (const s of [1, -1]) {
+    const sp = { type: 'hull', id: `spon_${s > 0 ? 'l' : 'r'}`, length: 288, width: 64, height: 58, at: [r2(s * (xS + 14)), Y(118), zB + 14], interp: 'linear', plan: [[0, 14], [0.2, 32], [0.74, 32], [1, 16]], profile: [[0, 30, 16], [0.2, 58, 0], [0.74, 58, 0], [1, 38, 8]], section: SPON, rings: 6, segments: 10, crease: 20, panel_lines: { rings: [0.2, 0.74], width: 2, depth: 1.6 }, texture: HULL, groove: DARK, material: 'painted_metal', ...P };
+    parts.push(sp);
+    const SS = hullSurface(sp);
+    for (const [a, b] of [[0.22, 0.46], [0.5, 0.72]]) slab(sp.id, SS, a, b, 0.92, 0.08, { tex: SLAB_TOP, h: 3.5, stack: 2.5, mirror: false });
+  }
+  // ---------- heavy chin block under the nose (chin turret housing, nose gear bay) ----------
+  const chin = { type: 'hull', id: 'chin', length: 230, width: 124, height: 36, at: [0, clear - 14, zt(0.88)], interp: 'linear', plan: [[0, 36], [0.25, 60], [0.7, 52], [1, 28]], profile: [[0, 20, 6], [0.25, 36, 0], [0.7, 34, 0], [1, 28, 10]], section: { points: mir([[0, 1], [0.7, 1], [1, 0.4], [0.85, -0.6], [0.5, -1]]), chamfer: 0.04 }, rings: 6, segments: 10, crease: 20, panel_lines: { rings: [0.25, 0.7], width: 2, depth: 1.6 }, texture: BELLY, groove: DARK, material: 'painted_metal', ...P };
+  parts.push(chin);
+  const CS = hullSurface(chin);
+  slab('chin', CS, 0.28, 0.68, 0.17, 0.27, { h: 3.5, tex: SLAB_DARK });
   // ---------- glazing + nose sensor cage ----------
-  parts.push({ type: 'glazing', hull: 'body', t: glz.t, u: glz.u, cols: 6, rows: 2, mullion: 5, frame: 9, inset: 3, opacity: 0.2, textures: { glass: '#8ec4dc', frame: DARK }, ...P });
+  parts.push({ type: 'glazing', hull: 'body', t: glz.t, u: glz.u, cols: 5, rows: 2, mullion: 7, frame: 12, inset: 4, opacity: 0.2, textures: { glass: '#8ec4dc', frame: DARK }, ...P });
   const nz = zt(1);
-  parts.push({ type: 'truss', from: [0, Y(48), nz - 6], to: [0, Y(48), nz + 54], w: 26, h: 22, bay: 18, style: 'x', chord: 1.6, brace: 0.9, texture: DARK, ...P });
-  parts.push({ type: 'sensor_dome', at: [0, Y(42), nz + 30], r: 7, ...P });
-  for (const s of [1, -1]) parts.push({ type: 'antenna', at: [s * 11, Y(59), nz + 40], h: 26, style: 'whip', texture: DARK, ...P });
-  parts.push({ type: 'light', at: [0, Y(36), nz + 56], color: '#fff2d8', kind: 'spot', dir: [0, -0.2, 1], intensity: 1.2, range: 420, bulb: 1.5, ...P });
+  parts.push({ type: 'truss', from: [0, Y(50), nz - 6], to: [0, Y(50), nz + 50], w: 26, h: 22, bay: 18, style: 'x', chord: 1.6, brace: 0.9, texture: DARK, ...P });
+  parts.push({ type: 'sensor_dome', at: [0, Y(44), nz + 28], r: 7, ...P });
+  for (const s of [1, -1]) parts.push({ type: 'antenna', at: [s * 11, Y(61), nz + 38], h: 26, style: 'whip', texture: DARK, ...P });
+  parts.push({ type: 'light', at: [0, Y(38), nz + 52], color: '#fff2d8', kind: 'spot', dir: [0, -0.2, 1], intensity: 1.2, range: 420, bulb: 1.5, ...P });
   // ---------- airlock (round door, outside) + boarding ladder ----------
   const xDoor = -Sx(tDoor, doorC);
   parts.push({ type: 'ring_door', ...(rig ? { name: 'airlock' } : { open: o.airlock === 'open' ? 1 : 0 }), r: R, at: [r2(xDoor - 1), Y(doorC), zDoor], rotate: [0, 0, 90], glow: glowC, ...P });
-  parts.push({ type: 'ladder', at: [r2(xDoor - 8), 0, zDoor], rotate: [0, 90, 0], h: FY, w: 18, ...P });
+  if (rig || o.gear !== 'up') parts.push({ type: 'ladder', at: [r2(xDoor - 8), 0, zDoor], rotate: [0, 90, 0], h: FY, w: 18, ...P });
   parts.push({ type: 'decal', text: 'AIRLOCK', font: '5x7', px: 1, color: '#e8e4d8', at: [r2(xDoor - 1.4), Y(doorC + R + 13), zDoor], rotate: [0, -90, 0], ...P });
   for (const s of [1, -1]) parts.push({ type: 'decal', kind: 'chevrons', count: 3, px: 1.2, color: accent, at: [r2(xDoor - 1.4), Y(doorC), zDoor + s * (R + 18)], rotate: [0, -90, s > 0 ? 0 : 180], ...P });
   parts.push({ type: 'marker', kind: 'spawn', at: [r2(xDoor - 60), 0, zDoor], dir: [1, 0, 0], data: { spawn: 'boarding' } });
-  // ---------- booms with VTOL thruster pods ----------
-  const tB = 0.42, zB = zt(tB), yB = Y(132), xS = Sx(tB, 132);
-  const boomLen = 230, podX = xS + boomLen + 18;
+  // ---------- armoured wing pylons from the sponsons, VTOL nacelles at the tips ----------
+  const boomLen = 200, root = xS + 40, podR = 41, podX = root + boomLen + 30;
+  const WING = { points: mir([[0, 1], [0.62, 1], [1, 0.25], [1, -0.25], [0.8, -1]]), chamfer: 0.03 };
   for (const s of [1, -1]) {
     const sfx = s > 0 ? 'l' : 'r', boomN = rig ? `boom_${sfx}` : undefined, podN = rig ? `pod_${sfx}` : undefined;
     const PB = rig ? { parent: boomN } : {}, PP = rig ? { parent: podN } : {};
-    // shoulder pivot: exposed knuckles + collar
-    parts.push({ type: 'cylinder', r: 20, h: 16, segments: 12, rotate: [0, 0, 90], at: [r2(s * (xS + (s > 0 ? 14 : -2))), yB, zB], texture: DARK, material: 'bare_metal', ...P });
-    parts.push({ type: 'hinge', len: 30, r: 9, count: 4, at: [r2(s * (xS + 8)), yB + 14, zB], ...P });
-    parts.push({ type: 'hull', ...(rig ? { name: boomN, parent: 'hull' } : {}), id: `boom_${sfx}`, length: boomLen, width: 40, height: 30, at: [r2(s * (xS + 12 + boomLen / 2)), yB - 15, zB], rotate: [0, s * 90, 0], plan: [[0, 20], [0.85, 16], [1, 12]], profile: [[0, 30, 0], [0.8, 26, 3], [1, 22, 6]], section: { points: [[0, 1], [0.6, 1], [1, 0.4], [1, -0.4], [0.6, -1], [-0.6, -1], [-1, -0.4], [-1, 0.4], [-0.6, 1]] }, rings: 8, segments: 12, panel_lines: { every: 48, seams: [0.25], width: 1.5, depth: 1.2 }, plates: [{ t: [0.15, 0.7], u: [0.92, 0.08], lift: 2 }], texture: HULL, groove: DARK, plate_texture: HULL2, material: 'painted_metal' });
-    // underslung gun pod near the root, missile rail outboard
-    parts.push({ type: 'gun_pod', at: [r2(s * (xS + 70)), yB - 16, zB + 6], len: 96, r: 9, barrels: 6, ...PB });
-    for (const k2 of [0, 1]) parts.push({ type: 'hardpoint', at: [r2(s * (xS + 140 + k2 * 40)), yB - 16, zB], len: 60, missile_r: 4, textures: { texture: MET, dark: DARK }, ...PB });
-    // the pod: housing, thruster with a blue glow ring, intake grille, vent banks, hazard tip + nav light
-    const pod = { type: 'hull', id: `pod_${sfx}`, ...(rig ? { name: podN, parent: boomN } : {}), length: 150, width: 64, height: 64, at: [r2(s * podX), yB - 32, zB], plan: [[0, 28], [0.15, 32], [0.85, 32], [1, 24]], profile: [[0, 58, 6], [0.15, 64, 0], [0.85, 64, 0], [1, 54, 10]], section: { points: [[0, 1], [0.7, 1], [1, 0.7], [1, -0.7], [0.7, -1], [-0.7, -1], [-1, -0.7], [-1, 0.7], [-0.7, 1]] }, rings: 8, segments: 12, panel_lines: { rings: [0.3, 0.7], seams: [0.25, 0.75], width: 1.5, depth: 1.2 }, plates: [{ t: [0.32, 0.68], u: [0.9, 0.1], lift: 2 }], texture: HULL, groove: DARK, plate_texture: HULL2, material: 'painted_metal', pivot: [0, 32, 0] };
+    // shoulder pivot: exposed knuckles + collar on the sponson flank
+    parts.push({ type: 'cylinder', r: 22, h: 14, segments: 10, rotate: [0, 0, 90], at: [r2(s * (root - (s > 0 ? 0 : 14))), yB, zB], texture: DARK, material: 'bare_metal', ...P });
+    parts.push({ type: 'hinge', len: 30, r: 9, count: 4, at: [r2(s * (root - 2)), yB + 18, zB - 24], ...P });
+    // the wing: thick tapered armoured pylon (faceted), top slabs, an exposed truss keel underneath
+    parts.push({ type: 'hull', ...(rig ? { name: boomN, parent: 'hull' } : {}), id: `boom_${sfx}`, length: boomLen + 16, width: 128, height: 30, at: [r2(s * (root - 8 + (boomLen + 16) / 2)), yB - 15, zB], rotate: [0, s * 90, 0], interp: 'linear', plan: [[0, 64], [0.85, 48], [1, 42]], profile: [[0, 30, 0], [0.85, 26, 2], [1, 24, 3]], section: WING, rings: 6, segments: 10, crease: 20, panel_lines: { rings: [0.5], width: 2, depth: 1.5 }, texture: HULL, groove: DARK, material: 'painted_metal' });
+    for (const [a, b] of [[0.06, 0.48], [0.52, 0.92]]) {
+      const x0 = root + a * boomLen, x1 = root + b * boomLen, f = Math.min(1, ((x0 + x1) / 2 - root + 8) / (boomLen + 16) / 0.85);
+      const hw = 64 - 16 * f, top = 30 - 4 * f;
+      parts.push({ type: 'box', w: r2(x1 - x0), h: 3.5, d: r2(2 * 0.62 * hw - 8), at: [r2((s * (x0 + x1)) / 2), r2(yB - 15 + top - 0.8), zB], bevel: 1.4, tile: false, texture: SLAB_TOP, material: 'painted_metal', ...PB });
+    }
+    parts.push({ type: 'truss', from: [r2(s * (root + 8)), yB - 26, zB - 6], to: [r2(s * (podX - podR - 4)), yB - 23, zB - 6], w: 30, h: 14, bay: 26, style: 'warren', chord: 1.8, brace: 1.1, texture: DARK, ...PB });
+    // underslung gun pod near the root, missile rails outboard
+    parts.push({ type: 'gun_pod', at: [r2(s * (root + 46)), yB - 24, zB + 16], len: 100, r: 10, barrels: 6, ...PB });
+    for (const k2 of [0, 1]) parts.push({ type: 'hardpoint', at: [r2(s * (root + 110 + k2 * 40)), yB - 15, zB + 10], len: 64, missile_r: 4, textures: { texture: MET, dark: DARK }, ...PB });
+    // the nacelle: a faceted revolve (intake lip at the front, swelling body, exhaust bell at the back)
     const vt = o.vtol === 'flight' ? 0 : -90;
-    if (!rig && vt) pod.rotate = [vt, 0, 0];
-    parts.push(pod);
+    if (rig) parts.push({ type: 'box', name: podN, parent: boomN, w: 20, h: 30, d: 40, at: [r2(s * podX), yB - 15, zB], pivot: [0, 15, 0], texture: DARK });
     const inPod = (q, local) => {
       // a part in the pod's frame (offset from the pod centre); static VTOL turns origin + part about x with the pod
       const c = [s * podX, yB, zB], a = (vt * Math.PI) / 180, ca = Math.cos(a), sa = Math.sin(a);
@@ -110,42 +158,47 @@ export function gunshipTemplate(o = {}) {
       if (rig || !vt) return { ...q, at, ...PP };
       return { ...q, at, rotate: [vt + (q.rotate?.[0] ?? 0), q.rotate?.[1] ?? 0, q.rotate?.[2] ?? 0] };
     };
-    parts.push(inPod({ type: 'engine', id: `vtol_${sfx}`, r: 24, len: 50, nozzle_len: 16, petals: 12, glow: glowC, textures: { housing: HULL2, nozzle: MET, dark: DARK } }, [0, 0, -88]));
-    parts.push(inPod({ type: 'intake', w: 40, h: 28, d: 30, depth: 24, textures: { texture: HULL2, side: DARK } }, [0, -14, 62]));
-    for (const yy of [16, -16]) parts.push(inPod({ type: 'box', w: 2, h: 10, d: 60, rotate: [0, 0, 0], texture: DARK, insets: [{ face: s > 0 ? 'right' : 'left', rect: [4, 2, 52, 6], depth: 0.6 }] }, [s * 33, yy - 5, 0]));
-    parts.push(inPod({ type: 'box', w: 6, h: 66, d: 40, texture: 'kit_hazard', bevel: 1 }, [s * 34, -33, -20]));
-    parts.push(inPod({ type: 'light', color: s > 0 ? '#ff3030' : '#30ff60', intensity: 0.7, range: 80, bulb: 2.2 }, [s * 38, 30, -20]));
-    parts.push(inPod({ type: 'decal', text: 'NO STEP', px: 0.8, color: '#e8e4d8', rotate: [-90, 0, 0] }, [0, 32.4, 30]));
-    // logotype on the boom side (original maker mark)
-    parts.push({ type: 'decal', kind: 'logo', text: 'ORVANE', px: 1.1, color: '#e8e4d8', at: [r2(s * (xS + 110)), yB - 4, r2(zB + 20.6)], ...PB });
-    parts.push({ type: 'decal', kind: 'stripes', len: 40, px: 1, color: accent, at: [r2(s * (xS + 110)), yB - 13, r2(zB + 20.6)], ...PB });
+    parts.push(inPod({ type: 'revolve', id: `pod_${sfx}`, profile: [[20, -80], [27, -92], [31, -91], [35, -74], [podR, -52], [podR, 14], [38, 50], [35, 70], [37.5, 78], [36, 88], [29, 89], [26, 80], [22, 62]], segments: 10, smooth: false, rotate: [90, 0, 0], texture: HULL, material: 'painted_metal' }, [0, 0, 0]));
+    parts.push(inPod({ type: 'engine', id: `vtol_${sfx}`, r: 22, len: 30, nozzle_len: 14, petals: 12, glow: glowC, textures: { housing: HULL2, nozzle: MET, dark: DARK } }, [0, 0, -78]));
+    // intake: dark fan face + cross grille + hazard-striped lip band
+    parts.push(inPod({ type: 'cylinder', r: 23, h: 3, segments: 10, rotate: [90, 0, 0], texture: 'kit_grate', material: 'bare_metal' }, [0, 0, 64]));
+    for (const rz of [0, 90]) parts.push(inPod({ type: 'box', w: 50, h: 2.4, d: 2.4, rotate: [0, 0, rz], texture: DARK }, [0, -1.2, 84]));
+    parts.push(inPod({ type: 'revolve', profile: [[38.4, -3.5], [38.4, 3.5]], segments: 10, smooth: false, rotate: [90, 0, 0], texture: 'kit_hazard' }, [0, 0, 74]));
+    // top armour slab band, vent banks on the flanks, nav light
+    parts.push(inPod({ type: 'box', w: 30, h: 3.5, d: 64, bevel: 1.4, tile: false, texture: SLAB_TOP, material: 'painted_metal' }, [0, podR - 1.2, -14]));
+    for (const yy of [12, -12]) parts.push(inPod({ type: 'box', w: 2, h: 9, d: 52, texture: DARK, insets: [{ face: s > 0 ? 'right' : 'left', rect: [4, 2, 44, 5], depth: 0.6 }] }, [s * (podR - 0.6), yy - 4.5, -16]));
+    parts.push(inPod({ type: 'light', color: s > 0 ? '#ff3030' : '#30ff60', intensity: 0.7, range: 80, bulb: 2.2 }, [s * (podR + 1), 8, 40]));
+    parts.push(inPod({ type: 'decal', text: 'NO STEP', px: 0.8, color: '#e8e4d8', rotate: [-90, 0, 0] }, [0, podR + 2.6, -14]));
+    // logotype + stripes on the wing's leading face
+    parts.push({ type: 'decal', kind: 'logo', text: 'ORVANE', px: 1.1, color: '#e8e4d8', at: [r2(s * (root + 100)), yB - 2, r2(zB + 64.6)], ...PB });
+    parts.push({ type: 'decal', kind: 'stripes', len: 40, px: 1, color: accent, at: [r2(s * (root + 100)), yB - 10, r2(zB + 64.6)], ...PB });
   }
-  // ---------- tail: main engines, fin, strakes, vents ----------
+  // ---------- tail: main engines, fin on the spine, strakes, vents ----------
   for (const s of [1, -1]) {
-    parts.push({ type: 'engine', id: `main_${s > 0 ? 'l' : 'r'}`, at: [s * 42, Y(74), zt(0) - 26], r: 26, len: 60, nozzle_len: 20, petals: 12, glow: glowC, textures: { housing: HULL2, nozzle: MET, dark: DARK }, ...P });
-    parts.push({ type: 'decal', kind: 'chevrons', count: 4, px: 1.2, color: accent, at: [s * 42, Y(108), zt(0) - 0.6], rotate: [0, 180, 0], ...P });
-    parts.push({ type: 'wing_panel', span: 60, root: 120, tip: 50, sweep: 50, thick: 5, dihedral: s > 0 ? -35 : 215, at: [s * 50, Y(16), zt(0.12)], texture: HULL2, ...P });
+    parts.push({ type: 'engine', id: `main_${s > 0 ? 'l' : 'r'}`, at: [s * 42, Y(76), zt(0) - 26], r: 26, len: 60, nozzle_len: 20, petals: 12, glow: glowC, textures: { housing: HULL2, nozzle: MET, dark: DARK }, ...P });
+    parts.push({ type: 'decal', kind: 'chevrons', count: 4, px: 1.2, color: accent, at: [s * 42, Y(110), zt(0) - 0.6], rotate: [0, 180, 0], ...P });
+    parts.push({ type: 'wing_panel', span: 60, root: 120, tip: 50, sweep: 50, thick: 6, dihedral: s > 0 ? -35 : 215, at: [s * 54, Y(18), zt(0.12)], texture: HULL2, ...P });
   }
-  parts.push({ type: 'wing_panel', span: 90, root: 170, tip: 60, sweep: 90, thick: 6, dihedral: 90, at: [0, Y(150), zt(0.14)], texture: HULL2, ...P });
-  parts.push({ type: 'decal', text: 'CAUTION JET BLAST', px: 0.7, color: '#1c1d20', bg: accent, at: [0, Y(100), zt(0) - 0.6], rotate: [0, 180, 0], ...P });
-  // vent banks on the spine (in the recessed channel) + intake grilles behind the canopy
-  for (const s of [1, -1]) for (let i = 0; i < 4; i++) parts.push({ type: 'vent', on_hull: { hull: 'body', t: 0.16 + i * 0.045, u: s > 0 ? 0.06 : 0.94, lift: 0.2 }, w: 18, d: 26, slats: 5, texture: DARK, ...P });
-  for (const s of [1, -1]) parts.push({ type: 'intake', on_hull: { hull: 'body', t: 0.66, u: s > 0 ? 0.12 : 0.88, lift: -0.5 }, w: 36, h: 14, d: 30, depth: 20, textures: { texture: HULL2, side: DARK }, ...P });
-  // fine greebles only inside the recessed seams
-  for (const u of [0.2, 0.8]) parts.push({ type: 'greeble', on_hull: { hull: 'body', t: 0.47, u, lift: -1.5 }, w: 3, d: 420, seed: 5, density: 0.5, size: [2, 6], height: [0.4, 1.2], kinds: ['bolts', 'conduit', 'panel'], texture: DARK, dark: '#18191c', accent: ACC, ...P });
+  parts.push({ type: 'wing_panel', span: 84, root: 150, tip: 56, sweep: 90, thick: 7, dihedral: 90, at: [0, Y(184), zt(0.15)], texture: TOP, ...P });
+  parts.push({ type: 'decal', text: 'CAUTION JET BLAST', px: 0.7, color: '#1c1d20', bg: accent, at: [0, Y(102), zt(0) - 0.6], rotate: [0, 180, 0], ...P });
+  // vent banks on the upper deck beside the spine + deep intakes on the second deck shoulders
+  for (const s of [1, -1]) for (let i = 0; i < 3; i++) parts.push({ type: 'vent', on_hull: { hull: 'body', t: 0.395 + i * 0.04, u: s > 0 ? 0.068 : 0.932, lift: 0.2 }, w: 18, d: 24, slats: 5, texture: DARK, ...P });
+  for (const s of [1, -1]) parts.push({ type: 'intake', on_hull: { hull: 'body', t: 0.7, u: s > 0 ? 0.115 : 0.885, lift: -0.5 }, w: 30, h: 14, d: 30, depth: 20, textures: { texture: HULL2, side: DARK }, ...P });
+  // fine greebles only inside the recessed chine channel
+  for (const u of [FU.side[1], 1 - FU.side[1]]) parts.push({ type: 'greeble', on_hull: { hull: 'body', t: 0.45, u, lift: -1.8 }, w: 3, d: 520, seed: 5, density: 0.5, size: [2, 6], height: [0.4, 1.2], kinds: ['bolts', 'conduit', 'panel'], texture: DARK, dark: '#18191c', accent: ACC, ...P });
   // ---------- underslung chin guns ----------
-  parts.push({ type: 'turret', ...(rig ? { name: 'chin_turret' } : {}), on_hull: { hull: 'body', t: 0.86, u: 0.5 }, r: 14, h: 6, barrels: 2, barrel_len: 70, textures: { texture: HULL2, dark: DARK, barrel: MET }, ...P });
-  // ---------- livery decals: serial, stencils, logotype ----------
+  parts.push({ type: 'turret', ...(rig ? { name: 'chin_turret' } : {}), on_hull: { hull: 'chin', t: 0.55, u: 0.5 }, r: 14, h: 6, barrels: 2, barrel_len: 70, textures: { texture: HULL2, dark: DARK, barrel: MET }, ...P });
+  // ---------- livery decals: serial, stencils, logotype (on the side slabs) ----------
   for (const s of [1, -1]) {
-    const tS = 0.66, xs = Sx(tS, 70) + 5.6;
-    parts.push({ type: 'decal', text: serial, font: '5x7', px: 1.4, color: '#e8e4d8', at: [r2(s * xs), Y(70), zt(tS)], rotate: [0, s * 90, 0], ...P });
-    parts.push({ type: 'decal', text: 'TERN', font: '7x9', px: 1.6, color: accent, at: [r2(s * xs), Y(52), zt(0.2)], rotate: [0, s * 90, 0], ...P });
-    parts.push({ type: 'decal', text: 'O2 SVC', px: 0.7, color: '#e8e4d8', at: [r2(s * (Sx(0.25, 100) + 0.3)), Y(100), zt(0.25)], rotate: [0, s * 90, 0], ...P });
+    const tS = 0.575, xs = Sx(tS, 80) + 5.6;
+    parts.push({ type: 'decal', text: serial, font: '5x7', px: 1.4, color: '#e8e4d8', at: [r2(s * (xs + 3)), Y(80), zt(tS)], rotate: [0, s * 90, 0], ...P });
+    parts.push({ type: 'decal', text: 'TERN', font: '7x9', px: 1.6, color: accent, at: [r2(s * (Sx(0.28, 80) + 8.6)), Y(80), zt(0.28)], rotate: [0, s * 90, 0], ...P });
+    parts.push({ type: 'decal', text: 'O2 SVC', px: 0.7, color: '#e8e4d8', at: [r2(s * (Sx(0.135, 70) + 5.6)), Y(70), zt(0.135)], rotate: [0, s * 90, 0], ...P });
   }
   // ---------- landing gear (chunky feet, visible pistons) ----------
-  const legs = [[0.8, 0, 'gear_n'], [0.24, 74, 'gear_l'], [0.24, -74, 'gear_r']];
-  for (const [t, x, nm] of legs) {
-    const yb = clear + S.extentAt(t).bottom + 6;
+  const legs = [[0.8, 0, 'gear_n', clear - 14 + CS.extentAt(CS.tOf(zt(0.8) - zt(0.88))).bottom], [0.24, 74, 'gear_l', clear + S.extentAt(0.24).bottom], [0.24, -74, 'gear_r', clear + S.extentAt(0.24).bottom]];
+  for (const [t, x, nm, bot] of legs) {
+    const yb = bot + 6;
     parts.push({ type: 'landing_gear', at: [x, r2(yb), zt(t)], h: r2(yb - 6 * 1.1), r: 6, foot: 'pad', door_w: 30, door_d: 46, textures: { texture: MET, piston: '#c8ccd0', door: HULL2, dark: DARK }, ...(rig ? { name: nm, parent: 'hull' } : { deployed: o.gear !== 'up' }) });
   }
   // ---------- interior (one model with the exterior; parts tagged inside:"body") ----------

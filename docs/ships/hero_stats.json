@@ -3,48 +3,47 @@
     "model": "gunship (ORVANE TERN, original)",
     "length_m": 25,
     "class": "dropship",
-    "triangles": 40528,
+    "triangles": 37760,
     "budget": 45000,
     "verdict": "within budget",
     "lod_estimate": [
-      40528,
-      20263,
-      10132,
-      4051
+      37760,
+      18880,
+      9440,
+      3776
     ],
-    "materials": 75,
+    "materials": 82,
     "draw_calls": {
-      "merged": 75
+      "merged": 82
     },
     "export_static_lods": {
-      "triangles": 40528,
-      "nodes": 69,
-      "bytes": 5117852,
+      "triangles": 37784,
+      "nodes": 66,
+      "bytes": 4781600,
       "lods": [
         {
           "level": 0,
-          "triangles": 40528,
+          "triangles": 37784,
           "distance": 0
         },
         {
           "level": 1,
-          "triangles": 20263,
+          "triangles": 18892,
           "distance": 24.099998
         },
         {
           "level": 2,
-          "triangles": 10132,
-          "distance": 66.571946
+          "triangles": 9446,
+          "distance": 75.387613
         },
         {
           "level": 3,
-          "triangles": 4052,
-          "distance": 507.564234
+          "triangles": 3777,
+          "distance": 644.373082
         }
       ],
       "split": [
-        "tern_rig: 40528 -> 4 meshes",
-        "tern_rig_LOD1: 20263 -> 2 meshes"
+        "tern_rig: 37784 -> 2 meshes"
       ],
       "walk": {
         "navmesh_triangles": 8,
@@ -54,9 +53,9 @@
       }
     },
     "export_atlas": {
-      "triangles": 40528,
-      "materials": 28,
-      "bytes": 2232016
+      "triangles": 37784,
+      "materials": 31,
+      "bytes": 2135116
     },
     "export_rigged": {
       "nodes": 83,
@@ -88,8 +87,8 @@
       },
       "areas": [
         "corridor 3.06x11.88 m",
-        "airlock 1.27x2.25 m",
-        "cockpit 1.84x1.25 m",
+        "airlock 1.34x2.25 m",
+        "cockpit 1.75x1.25 m",
         "hold 1.69x5.5 m"
       ]
     }

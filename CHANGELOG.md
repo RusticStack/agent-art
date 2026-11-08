@@ -8,7 +8,8 @@
 - `hull` gains `shell` (inner skin) and `openings` (cut through both skins, rims show the thickness) and `patch` + `inset` (used by `glazing`).
 - New assemblies: `glazing`, `ring_door`, `portal_arch`, `locker_wall`, `screen_arm`, `pilot_seat`, `terminal`, `stair_run`, `gun_pod`, `fairing`, `hinge`, `crate`, `barrel`, `stool`, `chair`, `figure`; new `decal` part. Engines get exhaust petals and straps; intakes get depth; armour plates step; landing gear shows torque links and braces.
 - Built-in kit textures (`kit_<name>[_<rrggbb>]`) with normal and metal/rough data; kit pieces and templates use them by default.
-- Mood previews light every surface per pixel (normal maps, specular, AO, point lights, key / fill / rim); `preview {ao}` works with poses.
+- Mood previews light every surface per pixel (normal maps, specular, AO, point lights, key / fill / rim) and take `mood.sky` (sky / ground gradient); `preview {ao}` works with poses.
+- Hero exterior pass: the gunship hull is a faceted, chined loft (flat upper deck stepping down to a wrap canopy and a blunt armoured nose), with a dorsal spine, side sponsons, a heavy chin block, separate bevelled armour slabs (`kit_slab`: worn edges), thick armoured wing pylons over truss keels, and faceted nacelles with intake lips and exhaust bells; two-tone paint and a dark underbelly.
 - Class budgets now cover exterior + walkable interior (fighter 14k, dropship 45k, freighter 80k, corvette 120k, capital 200k).
 - `hull` part: lofted from a plan curve, a side profile and cross-section stations. It has hard creases, chamfered polygon sections, panel-line grooves, raised plates, mask carving and `uv:"fit"` livery mapping, and the surface stays closed.
 - `on_hull` places a part on a hull surface. Assemblies expand one part into several, each with sockets, poses and clips.

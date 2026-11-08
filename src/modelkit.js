@@ -255,8 +255,15 @@ const hexRGB = (c) => { const m = /^#?([0-9a-f]{6})/i.exec(String(c)); if (!m) r
  * lamps) as coloured point lights. Every opaque surface is lit per pixel (normal maps, specular
  * highlights of the point lights, baked AO). mood: true | {ambient, ambient_color, key:{dir, color,
  * strength}, fill:false|{dir, color, strength}, rim:false|{dir?, color, strength}, lights:true|false, max_lights?:12 (per material
- * group, strongest first), gain, bg}.
+ * group, strongest first), gain, bg, sky:true|{top, horizon, ground, horizon_y?:0.5} (gradient
+ * background instead of the flat bg)}.
  */
+/** mood.sky: true (default dusk) | {top, horizon, ground, horizon_y?} hex colours -> RGB 0..255. */
+function skyOpts(sk) {
+  const d = { top: '#2a3b5c', horizon: '#9aa8b8', ground: '#3a3a3c', horizon_y: 0.5 }, o = sk === true ? d : { ...d, ...sk };
+  const rgb = (h) => hexRGB(h).map((v) => Math.round(v * 255));
+  return { top: rgb(o.top), horizon: rgb(o.horizon), ground: rgb(o.ground), horizon_y: Number(o.horizon_y) };
+}
 export function moodOpts(markers = [], mood = true) {
   const o = mood === true ? {} : mood;
   const amb = Number(o.ambient ?? 0.3);
@@ -268,5 +275,5 @@ export function moodOpts(markers = [], mood = true) {
   const bg = o.bg ? hexRGB(o.bg).map((v) => Math.round(v * 255)) : [9, 11, 16];
   const r = o.rim === false ? null : { ...(o.rim?.dir ? { dir: o.rim.dir.map(Number) } : {}), color: hexRGB(o.rim?.color ?? '#a8c4ff'), strength: Number(o.rim?.strength ?? 1.1) };
   const f = o.fill === false ? null : { dir: (o.fill?.dir ?? [-kd[0], 0.15, -kd[2]]).map(Number), color: hexRGB(o.fill?.color ?? '#5a78b0'), strength: Number(o.fill?.strength ?? 0.4) };
-  return { mood: true, bg, light: kd, ambient: amb, ambient_color: ac.map((v) => v * amb), color: key.color ? hexRGB(key.color) : [1, 0.94, 0.86], light_strength: Number(key.strength ?? 1.35), lights, ...(r ? { rim: r } : {}), ...(f ? { fill: f } : {}), max_lights: Number(o.max_lights ?? 12) };
+  return { mood: true, bg, light: kd, ambient: amb, ambient_color: ac.map((v) => v * amb), color: key.color ? hexRGB(key.color) : [1, 0.94, 0.86], light_strength: Number(key.strength ?? 1.35), lights, ...(r ? { rim: r } : {}), ...(f ? { fill: f } : {}), max_lights: Number(o.max_lights ?? 12), ...(o.sky ? { sky: skyOpts(o.sky) } : {}) };
 }

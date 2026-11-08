@@ -27,6 +27,8 @@ const sheet = (file, items, columns) => {
   console.log(`${file}: ${img.width}x${img.height}`);
 };
 const AO = { texel: 3, samples: 20 };
+// exterior: brighter key + fill and a sky / ground gradient so the faceted form reads (preview only)
+const EXT = { mood: { sky: true, key: { strength: 1.75 }, ambient: 0.42, fill: { strength: 0.75 } } };
 const shot = (name, view, size = 384, extra = {}) => ({ img: decodePNG(run('model_preview', { name, views: [view], size, mood: true, ao: AO, ...extra }).image) });
 
 // ---------- the ship: landed (pods down, gear down), in flight (pods level, gear up), rigged ----------
@@ -42,23 +44,23 @@ run('model_create', { name: 'tern_interior', parts: [{ type: 'model', model: 'te
 
 // ---------- exterior turntable (6 angles, gear down) ----------
 const orbit = (yaw, r = 1250, h = 300, fov = 40) => { const a = (yaw * Math.PI) / 180; return { pos: [Math.round(Math.sin(a) * r), h, Math.round(Math.cos(a) * r)], look: [0, 110, 0], fov }; };
-const turn = [30, 90, 150, 210, 270, 330].map((yaw) => ({ ...shot('tern_scene', orbit(yaw), 384), label: `yaw ${yaw}` }));
+const turn = [30, 90, 150, 210, 270, 330].map((yaw) => ({ ...shot('tern_scene', orbit(yaw), 384, EXT), label: `yaw ${yaw}` }));
 sheet('hero_turntable.png', turn, 3);
 // ---------- in flight (pods rotated level, gear up) ----------
 sheet('hero_flight.png', [
-  { ...shot('tern_flight', orbit(40, 1150, 420), 384), label: 'in flight: pods level' },
-  { ...shot('tern_flight', { pos: [700, -260, -900], look: [0, 110, 0], fov: 40 }, 384), label: 'from below / behind' },
-  { ...shot('tern_flight', { yaw: 0, pitch: 70, perspective: true, fov: 30 }, 384), label: 'top' },
+  { ...shot('tern_flight', orbit(40, 1150, 420), 384, EXT), label: 'in flight: pods level' },
+  { ...shot('tern_flight', { pos: [700, -260, -900], look: [0, 110, 0], fov: 40 }, 384, EXT), label: 'from below / behind' },
+  { ...shot('tern_flight', { yaw: 0, pitch: 70, perspective: true, fov: 30 }, 384, EXT), label: 'top' },
 ]);
 // ---------- scale + detail ----------
 sheet('hero_scale.png', [
-  { ...shot('tern_scene', { pos: [-1150, 120, -40], look: [0, 110, -40], fov: 42 }, 512), label: 'side, 1.8 m figure at the ladder' },
-  { ...shot('tern_scene', { pos: [-300, 70, 40], look: [-110, 90, -40], fov: 50 }, 512), label: 'airlock + boarding ladder' },
+  { ...shot('tern_scene', { pos: [-1150, 120, -40], look: [0, 110, -40], fov: 42 }, 512, EXT), label: 'side, 1.8 m figure at the ladder' },
+  { ...shot('tern_scene', { pos: [-300, 70, 40], look: [-110, 90, -40], fov: 50 }, 512, EXT), label: 'airlock + boarding ladder' },
 ]);
 sheet('hero_details.png', [
-  { ...shot('tern', { pos: [120, 120, 620], look: [0, 90, 330], fov: 45 }, 384), label: 'glazing, sensor cage, chin guns' },
-  { ...shot('tern', { pos: [520, 260, 140], look: [330, 180, -60], fov: 50 }, 384), label: 'boom pivot, pod, gun pod, rails' },
-  { ...shot('tern', { pos: [160, 110, -720], look: [0, 110, -400], fov: 45 }, 384), label: 'main thrusters, chevrons' },
+  { ...shot('tern', { pos: [120, 120, 620], look: [0, 90, 330], fov: 45 }, 384, EXT), label: 'wrap canopy, sensor cage, chin block + guns' },
+  { ...shot('tern', { pos: [520, 260, 140], look: [330, 180, -60], fov: 50 }, 384, EXT), label: 'sponson, wing pylon, nacelle, gun pod' },
+  { ...shot('tern', { pos: [160, 110, -720], look: [0, 110, -400], fov: 45 }, 384, EXT), label: 'main thrusters, chevrons' },
 ]);
 // ---------- interior, eye height (1.65 m = 52.8 px above the 78 px deck) ----------
 const eye = 78 + 52.8;

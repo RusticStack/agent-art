@@ -67,6 +67,16 @@ export function rasterCore(groups, screen, IW, IH, opts = {}) {
   const L = opts.light || LIGHT, amb = opts.ambient ?? 0.45, lc = opts.color || null;
   const img = new Uint8ClampedArray(IW * IH * 4);
   if (bg) for (let i = 0; i < IW * IH; i++) img.set(bg, i * 4), (img[i * 4 + 3] = 255);
+  // mood sky: vertical gradient top -> horizon (at horizon_y of the height) -> ground (preview only)
+  const sky = bg && opts.sky;
+  if (sky) {
+    const hy = Math.max(0.05, Math.min(0.95, Number(sky.horizon_y ?? 0.55))) * IH;
+    for (let y = 0; y < IH; y++) {
+      const [a, b, f] = y < hy ? [sky.top, sky.horizon, (y / hy) ** 1.4] : [sky.horizon, sky.ground, Math.min(1, ((y - hy) / (IH - hy)) * 3) ** 0.7];
+      const c = [0, 1, 2].map((k) => Math.round(a[k] + (b[k] - a[k]) * f));
+      for (let x = 0; x < IW; x++) img.set(c, (y * IW + x) * 4);
+    }
+  }
   const zbuf = new Float32Array(IW * IH).fill(-Infinity);
   let drawn = 0;
   // coloured point lights (mood previews): per-vertex RGB light, replaces the scalar Lambert term
