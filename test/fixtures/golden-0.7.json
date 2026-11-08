@@ -1,0 +1,14 @@
+[
+ "plain {} e0a8d34d63fc7fb4d3740081ada72c31919dc7137bdd1a693858f82c158b92a8 meta:a4756f020be558c9",
+ "kit {} 85df2fbda48603c320fe9929c493ab62aea97cc799795b8e6592eb785bd51eb1 meta:ab334e6a4fc0d41e",
+ "pair {} 4655a2cd96aa6d500d6455bad9a0eab66f53fceb8c22f4959835ebca8a62b14a meta:79367b7275a0e32a",
+ "pair {\"atlas\":true} 8fbb113f79545ec2c03a50278c7a9170e6ad41429fe429c0bc70701ef587db6c meta:76ca48b5a4a75750",
+ "pbr {} 869afcf1c8fab2688a5055b561055d7bf1cc5ec5420e0b6de56b273d1633de22 meta:9c038ee360726e21",
+ "pbr {\"up\":\"z\"} 4898d0f3cf6dc8efc8680d0fd9e1321912d53c58590d6da9616c8f068b1ce727 meta:8a1dfca34dc431ad",
+ "pbr {\"bake_ao\":{\"samples\":8}} 0a70d438dd439b9898dc3a18ba515a59c00f32f358677de0a7bc8a7521df8863 meta:e2d16d3ccbd04a50",
+ "pbr {\"bake_ao\":{\"mode\":\"vertex\",\"samples\":8}} aabfcfdce057df7ede2886f2d11078fcf9b8939566e53b177e830ee73e1c6d84 meta:2e99d34d69a8117a",
+ "kit {\"lods\":[1,0.5]} a208a8a5ee509480fa0b87e2fc5395f06c9dae195718b4a79c4a01718b82fde2 meta:6759740d3b80b301",
+ "morph {} 7e398180c65d6a767f974f0b31c58bc4c5b2ef1b575938d964c009644888a6ef meta:6cea4cfd69f520be",
+ "rifle {} 1d40e30b6d59badfc913483f5277877fe525b98fe345b394eae6ee17f22fe455 meta:8c40e654b16f04ef",
+ "pbr {\"normal_maps\":false,\"stats\":true} 869afcf1c8fab2688a5055b561055d7bf1cc5ec5420e0b6de56b273d1633de22 meta:73b9710659ace237"
+]
