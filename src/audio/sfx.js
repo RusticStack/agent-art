@@ -2,10 +2,11 @@
 // function (rng, vars) -> layer spec, so a seed gives a repeatable variant and N seeds give N
 // variants. vars: pitch (semitones), length (x), intensity 0..1, variation 0..1, wet 0..1, reverb.
 import { SR, makeRng, db2a, noise, filter, panMono, addInto, lfo, osc, decayEnv, peakOf, a2db, clamp, shape } from './dsp.js';
-import { applyFx, reverbAlgo } from './fx.js';
+import { applyFx, reverbAlgo, FX_TYPES, REVERBS } from './fx.js';
 import { renderVoice, midiToFreq, noteToMidi } from './voice.js';
 import { resolvePatch, merge } from './presets.js';
 import { truePeak } from './analysis.js';
+import { fpsRecipes, FPS_GROUPS } from './recipes_fps.js';
 
 // ---------- sfxr ----------
 export const SFXR_DEFAULTS = { wave: 'square', attack: 0, sustain: 0.3, punch: 0, decay: 0.4, freq: 0.3, freq_limit: 0, slide: 0, delta_slide: 0, vib_strength: 0, vib_speed: 0, arp_mod: 0, arp_speed: 0, duty: 0, duty_sweep: 0, repeat_speed: 0, phaser_offset: 0, phaser_sweep: 0, lpf_freq: 1, lpf_sweep: 0, lpf_resonance: 0, hpf_freq: 0, hpf_sweep: 0, volume: 0.5 };
@@ -126,6 +127,106 @@ function squelch({ dur = 0.4, wet = 0.7, f = 700 }, rng) {
   return out;
 }
 
+/** Tone/noise with a frequency path: {wave|noise, pts:[[t,hz],...], dur, a, r, decay, env:"swell", am:{rate,depth}, vib:{rate,depth(cents)}, lp, bp, q, track}. */
+function renderGlide(L, rng) {
+  const dur = Math.max(0.005, L.dur ?? 0.3), rel = L.r ?? 0.03, att = Math.max(1e-4, L.a ?? 0.003);
+  const n = Math.round((dur + rel) * SR) + 1;
+  const curve = (L.pts && L.pts.length ? L.pts : [[0, L.f ?? 440]]).map(([t, f]) => [t * SR, Math.max(1, f)]);
+  const fAt = (i) => {
+    if (i <= curve[0][0]) return curve[0][1];
+    for (let k = 1; k < curve.length; k++) if (i < curve[k][0]) { const [t0, a] = curve[k - 1], [t1, c] = curve[k]; return a * Math.pow(c / a, (i - t0) / Math.max(1, t1 - t0)); }
+    return curve[curve.length - 1][1];
+  };
+  let sig;
+  if (L.noise) {
+    sig = noise(n, L.color || 'white', rng);
+    if (L.track) filter(sig, 'bp', fAt, L.q ?? 2);
+    else if (L.bp) filter(sig, 'bp', L.bp, L.q ?? 1);
+  } else {
+    const fr = new Float32Array(n), vib = L.vib;
+    for (let i = 0; i < n; i++) fr[i] = fAt(i) * (vib ? Math.pow(2, ((vib.depth ?? 30) / 1200) * Math.sin((2 * Math.PI * (vib.rate ?? 6) * i) / SR)) : 1);
+    sig = osc(n, fr, { wave: L.wave || 'sine', phase: rng.next() });
+  }
+  if (L.lp) filter(sig, 'lp', L.lp, 0.7071);
+  const am = L.am;
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    let e = t < att ? t / att : t < dur ? 1 : Math.max(0, 1 - (t - dur) / Math.max(1e-4, rel));
+    if (L.decay) e *= Math.exp(-t / L.decay);
+    if (L.env === 'swell') e *= Math.sin(Math.PI * Math.min(1, t / dur)) ** 2;
+    if (am) e *= 1 - (am.depth ?? 0.5) * 0.5 * (1 + Math.sin(2 * Math.PI * (am.rate ?? 8) * t));
+    sig[i] *= e;
+  }
+  return sig;
+}
+/** Digital tear: stuttered repeats, square blips, noise shards, sweeps and dropouts. */
+function renderGlitch({ dur = 0.5, density = 0.6, f = 1200 }, rng) {
+  const n = Math.round(dur * SR), out = new Float32Array(n + 64);
+  let pos = 0, prev = null;
+  while (pos < n) {
+    const len = Math.max(64, Math.round((0.006 + rng.next() * 0.045) * SR)), c = rng.next(), g = 0.35 + 0.65 * rng.next();
+    let seg;
+    if (prev && c < 0.25 + 0.2 * density) {
+      const reps = 2 + rng.int(0, 3), sl = Math.max(32, Math.round(prev.length * (0.2 + rng.next() * 0.5)));
+      seg = new Float32Array(sl * reps);
+      for (let r = 0; r < reps; r++) for (let i = 0; i < sl; i++) seg[r * sl + i] = prev[i] * (1 - r * 0.12);
+    } else if (c < 0.62) seg = osc(len, f * Math.pow(2, rng.bi() * 1.6), { wave: 'square', gain: g * 0.6 });
+    else if (c < 0.82) { seg = noise(len, 'white', rng, { gain: g }); filter(seg, 'bp', f * Math.pow(2, rng.bi() * 2), 2); }
+    else if (c < 0.92) seg = new Float32Array(Math.round(len * 0.6));
+    else { const fr = new Float32Array(len); for (let i = 0; i < len; i++) fr[i] = 3000 * Math.pow(100 / 3000, i / len); seg = osc(len, fr, { wave: 'sine', gain: g }); }
+    for (let i = 0; i < seg.length && pos + i < n; i++) out[pos + i] += seg[i];
+    if (seg.some((x) => x !== 0)) prev = seg.subarray(0, Math.min(seg.length, len));
+    pos += seg.length;
+  }
+  return out;
+}
+
+/** Default tone for note/voice layers that name no instrument or patch. */
+export const DEFAULT_TONE = { sources: [{ type: 'osc', wave: 'tri' }], amp: { a: 0.003, d: 0.15, s: 0.6, r: 0.1 } };
+// per-layer overrides merged into a voice/note patch (so pitch_env etc. also work on the layer itself)
+const LAYER_PATCH_KEYS = ['pitch_env', 'vibrato', 'amp', 'filter', 'oneshot', 'drive'];
+function layerPatch(base, L) {
+  const o = {};
+  for (const k of LAYER_PATCH_KEYS) if (L[k] !== undefined) o[k] = L[k];
+  return Object.keys(o).length ? merge(base, o) : base;
+}
+
+/** fx list from an agent: [{type}] | "dc" | {comp:{...}} | a JSON string of any of those. */
+export function normFx(fx) {
+  if (fx == null || fx === false) return undefined;
+  if (typeof fx === 'string') {
+    const t = fx.trim();
+    if (t.startsWith('[') || t.startsWith('{')) { try { fx = JSON.parse(t); } catch { throw new Error(`fx is not valid JSON: ${t.slice(0, 80)}`); } }
+    else fx = t.split(/[\s,]+/).filter(Boolean);
+  }
+  if (!Array.isArray(fx)) fx = [fx];
+  return fx.map((f, i) => {
+    if (typeof f === 'string') f = { type: f };
+    if (!f || typeof f !== 'object') throw new Error(`fx[${i}] must be {type:"eq"|"comp"|"dc"|...}`);
+    if (f.type) return f;
+    const ks = Object.keys(f).filter((k) => FX_TYPES.includes(k));
+    if (ks.length === 1) return { type: ks[0], ...(f[ks[0]] && typeof f[ks[0]] === 'object' ? f[ks[0]] : {}) };
+    throw new Error(`fx[${i}] has no "type" (got ${JSON.stringify(f).slice(0, 80)}). Types: ${FX_TYPES.join(', ')}`);
+  });
+}
+/** reverb from an agent: "hall" | 0.3 (wet) | {preset, wet} | JSON string | false/null/"none" (off). */
+export function normReverb(rv, fallbackPreset = 'hall') {
+  if (rv === undefined) return undefined;
+  if (rv === null || rv === false || rv === 0) return null;
+  if (typeof rv === 'string') {
+    const t = rv.trim();
+    if (t.startsWith('{')) { try { rv = JSON.parse(t); } catch { throw new Error(`reverb is not valid JSON: ${t.slice(0, 80)}`); } }
+    else if (t === 'none' || t === 'off') return null;
+    else rv = { preset: t };
+  }
+  if (typeof rv === 'number') rv = { wet: rv };
+  if (!rv || typeof rv !== 'object') throw new Error('reverb must be {preset, wet} or a preset name');
+  const preset = rv.preset || fallbackPreset || 'hall';
+  if (!REVERBS[preset]) throw new Error(`reverb preset "${preset}" unknown. Presets: ${Object.keys(REVERBS).join(', ')}`);
+  const wet = rv.wet ?? 0.3;
+  return wet > 0 ? { ...rv, preset, wet } : null;
+}
+
 // ---------- layer helpers ----------
 const V = (patch, o = {}) => ({ kind: 'voice', patch, ...o });
 const thump = (f, dur, o = {}) => V({ sources: [{ type: 'osc', wave: 'sine', fixed: f }], pitch_env: { amount: o.drop ?? 18, time: o.time ?? 0.03 }, amp: { a: 0.001, d: dur, s: 0, r: 0.03 }, oneshot: dur }, o);
@@ -134,7 +235,7 @@ const whoosh = ({ dur, from, to, peak = null, q = 2 }, o = {}) => {
   const pts = peak ? [[0, from], [dur * 0.55, peak], [dur, to]] : [[0, from], [dur, to]];
   return { kind: 'whoosh', dur, pts, q, ...o };
 };
-const blip = (f, dur, o = {}) => V({ sources: [{ type: 'osc', wave: o.wave || 'sine', fixed: f }], pitch_env: o.up ? { amount: o.up, time: dur * 0.5 } : undefined, amp: { a: 0.002, d: dur, s: 0, r: 0.01 }, oneshot: dur }, o);
+const blip = (f, dur, o = {}) => V({ sources: [{ type: 'osc', wave: o.wave || 'sine', fixed: f }], pitch_env: o.up ? { amount: -o.up, time: dur * 0.5 } : undefined, amp: { a: 0.002, d: dur, s: 0, r: 0.01 }, oneshot: dur }, o);
 const bell = (note, o = {}) => ({ kind: 'note', instrument: o.instrument || 'church_bells', note, dur: o.dur ?? 0.5, ...o });
 
 /** Recipes: (rng, v, j) -> {layers, fx?, reverb?, target?}. j(x) = x varied by +-variation. */
@@ -177,12 +278,14 @@ export const RECIPES = {
   monster_growl: (r, v, j) => ({ layers: [growl(j(78) * v.pf, 1.1 * v.len, v, r)], fx: [{ type: 'drive', drive: 10 + 10 * v.intensity, shape: 'tube' }, { type: 'eq', bands: [{ type: 'hp', f: 50 }, { type: 'peak', f: 2500, q: 1, gain: -3 }] }], reverb: { preset: 'crypt', wet: 0.15 } }),
   boss_roar: (r, v, j) => ({ layers: [growl(j(55) * v.pf, 2.2 * v.len, v, r), growl(j(110) * v.pf, 2 * v.len, v, r, { gain: -6, at: 0.05 }), thump(j(38), 1.2, { drop: 14, time: 0.1, gain: -2 }), burst({ dur: 1.8 * v.len, from: 1500, to: 300, color: 'pink', type: 'bp' }, { gain: -8 })], fx: [{ type: 'drive', drive: 16 + 8 * v.intensity, shape: 'tube' }, { type: 'eq', bands: [{ type: 'hp', f: 30 }, { type: 'peak', f: 80, q: 0.8, gain: 3 }] }], reverb: { preset: 'cathedral', wet: 0.2 } }),
 };
+Object.assign(RECIPES, fpsRecipes({ V, thump, burst, whoosh, blip }));
 for (const k of ['pickup', 'laser', 'explosion', 'powerup', 'hit', 'jump', 'blip']) RECIPES[`sfxr_${k}`] = (r) => ({ layers: [{ kind: 'sfxr', params: sfxrPreset(k, r) }] });
 
 export const RECIPE_GROUPS = {
   gore: ['gib_burst', 'flesh_squelch', 'bone_crunch', 'blood_splat', 'dismember', 'arterial_spray'],
   combat: ['hit_light', 'hit_heavy', 'crit', 'whip_crack', 'blade_swing', 'crossbow_shot', 'censer_whoosh', 'explosion', 'fire_burst'],
   holy: ['bell_toll', 'choir_hit', 'chant_swell'], ui: ['click', 'hover', 'confirm', 'level_up'], monster: ['monster_growl', 'boss_roar'],
+  ...FPS_GROUPS,
   sfxr: ['sfxr_pickup', 'sfxr_laser', 'sfxr_explosion', 'sfxr_powerup', 'sfxr_hit', 'sfxr_jump', 'sfxr_blip'],
 };
 
@@ -222,20 +325,34 @@ export function renderSfxSpec(spec, rng, vars, ctx = {}, depth = 0) {
     let m;
     switch (L.kind || 'voice') {
       case 'voice': {
-        const patch = typeof L.patch === 'string' ? resolvePatch(L.patch, ctx.custom) : L.patch;
+        const p0 = typeof L.patch === 'string' ? resolvePatch(L.patch, ctx.custom) : L.patch && typeof L.patch === 'object' ? (L.patch.base ? resolvePatch(L.patch, ctx.custom) : L.patch) : L.instrument ? resolvePatch(L.instrument, ctx.custom) : DEFAULT_TONE;
+        const patch = layerPatch(p0, L);
         m = renderVoice(patch, { freqs: [L.freq ?? (L.note ? midiToFreq(noteToMidi(L.note)) : 220)], dur: L.dur ?? patch.oneshot ?? 0.3, vel: L.vel ?? 0.9, seed: r.int(1, 1e9), art: {} }, ctx);
         if (patch.fx) m = applyFx([m], patch.fx)[0];
         break;
       }
       case 'note': {
-        const patch = L.patch ? resolvePatch({ base: L.instrument, ...L.patch }, ctx.custom) : resolvePatch(L.instrument, ctx.custom);
+        const base = L.instrument ? resolvePatch(L.instrument, ctx.custom) : DEFAULT_TONE;
+        const patch = layerPatch(L.patch ? merge(base, typeof L.patch === 'string' ? resolvePatch(L.patch, ctx.custom) : L.patch) : base, L);
         const notes = L.notes || [L.note || 'c4'];
         m = renderVoice(patch, { freqs: notes.map((n) => midiToFreq(noteToMidi(n))), dur: L.dur ?? 0.5, vel: L.vel ?? 0.9, seed: r.int(1, 1e9), art: {} }, ctx);
         if (patch.fx) m = applyFx([m], patch.fx.filter((f) => f.type !== 'chorus'))[0];
         m = Float32Array.from(m, (x) => x * db2a(patch.gain ?? 0));
         break;
       }
-      case 'sfxr': m = sfxr(L.params, r.int(1, 1e9)); break;
+      case 'sfxr': {
+        m = sfxr(L.params, r.int(1, 1e9));
+        // slides on square/saw leave a DC offset: DC-blocking high-pass unless dc:false
+        if (L.dc !== false && m.length) {
+          m = Float32Array.from(m);
+          // only when the offset is measurable (>1% of peak): small offsets stay untouched
+          let mu = 0, pk = 0; for (const x of m) { mu += x; pk = Math.max(pk, Math.abs(x)); } mu /= m.length;
+          if (L.dc === true || L.dc_hz || Math.abs(mu) > 0.01 * pk) filter(m, 'hp', L.dc_hz ?? 20, 0.7071);
+        }
+        break;
+      }
+      case 'glide': m = renderGlide(L, r); break;
+      case 'glitch': m = renderGlitch(L, r); break;
       case 'crackle': m = crackle(L, r); break;
       case 'drops': m = drops(L, r); break;
       case 'squelch': m = squelch(L, r); break;
@@ -248,16 +365,19 @@ export function renderSfxSpec(spec, rng, vars, ctx = {}, depth = 0) {
         parts.push({ chs: st, at: L.at ?? 0, gain: L.gain ?? 0 });
         continue;
       }
-      default: throw new Error(`layer kind "${L.kind}" unknown (voice note sfxr crackle drops squelch growl whoosh recipe)`);
+      default: throw new Error(`layer kind "${L.kind}" unknown (voice note sfxr crackle drops squelch growl whoosh glide glitch recipe)`);
     }
     parts.push({ chs: panMono(m, L.pan ?? 0, 1), at: L.at ?? 0, gain: L.gain ?? 0 });
   }
-  const tailS = spec.reverb ? 1.5 : 0.05;
-  const N = Math.max(...parts.map((p) => Math.round(p.at * SR) + p.chs[0].length), 64) + Math.round(tailS * SR);
+  const tailS = spec.tail ?? (spec.reverb ? 1.5 : 0.05);
+  const content = Math.max(...parts.map((p) => Math.round(p.at * SR) + p.chs[0].length), 64);
+  const N = content + Math.round(tailS * SR);
   let out = [new Float32Array(N), new Float32Array(N)];
   for (const p of parts) for (let c = 0; c < 2; c++) addInto(out[c], p.chs[c], Math.round(p.at * SR), db2a(p.gain));
-  if (spec.fx) out = applyFx(out, spec.fx);
-  return out.map((c) => c.subarray(0, N));
+  if (spec.fx) out = applyFx(out, normFx(spec.fx));
+  out = out.map((c) => c.subarray(0, N));
+  out.content = content;
+  return out;
 }
 
 function buildRecipe(name, rng, vars) {
@@ -271,35 +391,91 @@ function buildRecipe(name, rng, vars) {
   return fn(rng, vv, j);
 }
 
-/** Render a sound effect definition -> {chs, spec}. def: {recipe | params (sfxr) | layers, seed, vars, fx, reverb, target}. */
+const parseJson = (v) => (typeof v === 'string' && /^\s*[[{]/.test(v) ? JSON.parse(v) : v);
+const LAYER_KINDS = ['voice', 'note', 'sfxr', 'crackle', 'drops', 'squelch', 'growl', 'whoosh', 'glide', 'glitch', 'recipe'];
+
+/** The layer spec a definition renders (recipes resolved with the seed): {layers, fx, reverb, target, loop, tail}. */
+export function resolveSfxSpec(def, rng = makeRng(def.seed ?? 1)) {
+  const vars = { ...(parseJson(def.vars) || {}) };
+  const layers = parseJson(def.layers);
+  let spec;
+  if (layers) {
+    if (!Array.isArray(layers)) throw new Error('layers must be an array of {kind, ...}');
+    spec = { layers };
+  } else if (def.recipe) spec = buildRecipe(def.recipe, rng, vars);
+  else if (def.params) spec = { layers: [{ kind: 'sfxr', params: parseJson(def.params) }] };
+  else throw new Error('sfx needs recipe, params (sfxr) or layers');
+  const fx = normFx(def.fx);
+  if (fx) spec.fx = layers ? fx : [...(normFx(spec.fx) || []), ...fx];
+  else if (spec.fx) spec.fx = normFx(spec.fx);
+  const rv = normReverb(def.reverb, spec.reverb?.preset);
+  if (rv !== undefined) spec.reverb = rv;
+  if (vars.reverb !== undefined) spec.reverb = typeof vars.reverb === 'string' ? normReverb(vars.reverb) : vars.reverb > 0 ? { preset: spec.reverb?.preset || 'hall', wet: vars.reverb } : null;
+  if (def.tail !== undefined) spec.tail = def.tail;
+  return { spec, vars };
+}
+
+/** Validate a definition before anything is saved: layer kinds, instruments, recipes and fx resolve. */
+export function validateSfx(def, ctx = {}) {
+  const { spec } = resolveSfxSpec(def);
+  for (const [i, L] of (spec.layers || []).entries()) {
+    if (!L || typeof L !== 'object') throw new Error(`layers[${i}] must be an object {kind, ...}`);
+    const k = L.kind || 'voice';
+    if (!LAYER_KINDS.includes(k)) throw new Error(`layers[${i}]: layer kind "${k}" unknown (${LAYER_KINDS.join(' ')})`);
+    if (L.instrument) resolvePatch(L.instrument, ctx.custom);
+    if (typeof L.patch === 'string') resolvePatch(L.patch, ctx.custom);
+    if (k === 'recipe' && !RECIPES[L.recipe]) throw new Error(`layers[${i}]: unknown recipe "${L.recipe}"`);
+  }
+  return spec;
+}
+
+/** Seamless loop of length `len`: the `xf` samples after it crossfade (equal power) into the start; longer tails wrap. */
+function makeLoop(chs, len, xf) {
+  const T = chs[0].length;
+  const B = Math.max(64, Math.min(len, T - xf));
+  return chs.map((c) => {
+    const o = c.slice(0, B);
+    for (let i = 0; i < xf && B + i < T; i++) { const x = (i + 0.5) / xf; o[i] = c[i] * Math.sin((Math.PI / 2) * x) + c[B + i] * Math.cos((Math.PI / 2) * x); }
+    for (let i = B + xf; i < T; i++) o[(i - B) % B] += c[i];
+    return o;
+  });
+}
+
+/** Render a sound effect definition -> {chs, spec, loop, target}. def: {recipe | params (sfxr) | layers, seed, vars, fx, reverb, target, loop}. */
 export function renderSfx(def, ctx = {}) {
   const rng = makeRng(def.seed ?? 1);
-  const vars = { ...(def.vars || {}) };
-  let spec;
-  if (def.layers) spec = { layers: def.layers, fx: def.fx, reverb: def.reverb };
-  else if (def.recipe) spec = buildRecipe(def.recipe, rng, vars);
-  else if (def.params) spec = { layers: [{ kind: 'sfxr', params: def.params }] };
-  else throw new Error('sfx needs recipe, params (sfxr) or layers');
-  if (def.fx && !def.layers) spec.fx = [...(spec.fx || []), ...def.fx];
-  if (vars.reverb !== undefined) spec.reverb = typeof vars.reverb === 'string' ? { preset: vars.reverb, wet: 0.3 } : vars.reverb > 0 ? { preset: spec.reverb?.preset || 'hall', wet: vars.reverb } : null;
+  const { spec, vars } = resolveSfxSpec(def, rng);
   let chs = renderSfxSpec(spec, rng, vars, ctx);
+  const content = chs.content;
   if (spec.reverb && spec.reverb.wet > 0) {
     const w = reverbAlgo(chs, { ...spec.reverb, tail: 0 });
     chs = chs.map((c, k) => { const o = Float32Array.from(c); for (let i = 0; i < o.length; i++) o[i] += w[k][i] * spec.reverb.wet; return o; });
   }
-  // finish: trim head silence, fade + trim tail, normalise peak to target (default -1 dBFS)
-  const th = db2a(-60), n = chs[0].length;
-  let s = 0; while (s < n && Math.abs(chs[0][s]) < th && Math.abs(chs[1][s]) < th) s++;
-  let e = n; while (e > s + 64 && Math.abs(chs[0][e - 1]) < db2a(-66) && Math.abs(chs[1][e - 1]) < db2a(-66)) e--;
-  chs = chs.map((c) => c.slice(Math.max(0, s - 8), e));
-  const m = chs[0].length, fo = Math.min(m >> 2, Math.round(0.02 * SR));
-  for (const c of chs) { for (let i = 0; i < fo; i++) c[m - 1 - i] *= i / fo; for (let i = 0; i < 8 && i < m; i++) c[i] *= i / 8; }
-  const target = def.target ?? spec.target ?? -1;
+  const loopDef = def.loop === false ? null : def.loop ?? vars.loop ?? spec.loop ?? null;
+  let loop = null;
+  if (loopDef) {
+    // loop: no head trim or fades; the end crossfades into the start and the loop points cover the file
+    const lo = typeof loopDef === 'object' ? loopDef : {};
+    const xf = Math.max(64, Math.round(Math.min(lo.crossfade ?? 0.12, content / SR / 3) * SR));
+    const len = lo.length ? Math.round(lo.length * SR) : content - xf;
+    chs = makeLoop(chs, len, xf);
+    loop = [0, chs[0].length];
+  } else {
+    // one-shot: trim head silence, fade + trim tail
+    const th = db2a(-60), n = chs[0].length;
+    let s = 0; while (s < n && Math.abs(chs[0][s]) < th && Math.abs(chs[1][s]) < th) s++;
+    let e = n; while (e > s + 64 && Math.abs(chs[0][e - 1]) < db2a(-66) && Math.abs(chs[1][e - 1]) < db2a(-66)) e--;
+    chs = chs.map((c) => c.slice(Math.max(0, s - 8), e));
+    const m = chs[0].length, fo = Math.min(m >> 2, Math.round(0.02 * SR));
+    for (const c of chs) { for (let i = 0; i < fo; i++) c[m - 1 - i] *= i / fo; for (let i = 0; i < 8 && i < m; i++) c[i] *= i / 8; }
+  }
+  // normalise the peak: def.target, else vars.target, else the recipe's own, default -1 dBFS
+  const target = def.target ?? vars.target ?? spec.target ?? -1;
   const pk = peakOf(...chs);
   if (!(pk > 1e-6)) throw new Error('the sfx rendered silent (check layer kinds/params: e.g. growl {f, dur, rough}, whoosh {dur, pts:[[t,hz],...]}, voice {patch, note, dur})');
-  if (pk > 0) { const k = db2a(target) / pk; for (const c of chs) for (let i = 0; i < c.length; i++) c[i] *= k; }
+  { const k = db2a(target) / pk; for (const c of chs) for (let i = 0; i < c.length; i++) c[i] *= k; }
   const tp = a2db(truePeak(chs));
   if (tp > target + 0.2) { const k = db2a(target - tp); for (const c of chs) for (let i = 0; i < c.length; i++) c[i] *= k; }
-  return { chs, spec };
+  return { chs, spec, loop, target };
 }
 export { shape, merge };

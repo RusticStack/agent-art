@@ -173,7 +173,7 @@ export class Doc {
         const l = new Layer(uniqueName(a.name || 'stamp'), this.width, this.height, this.composite());
         const at = this.insertIndex({ position: 'top', ...a });
         this.layers.splice(at, 0, l);
-        const hide = a.hide_others !== false;
+        const hide = a.hide_others !== false && a.keep_visible !== true;
         if (hide) this.layers.forEach((o) => { if (o !== l) o.visible = false; });
         this.active = at;
         return `Stamped visible layers into "${l.name}" at #${at}${hide ? ' (other layers hidden; flatten or remove them when happy)' : ''}`;
@@ -323,24 +323,58 @@ export class Doc {
     this.height = height;
   }
 
+  /** Crop to x,y,w,h. On a frame strip the rect is in frame coords and applies to every frame
+   *  (frames, animations and anchors are kept). */
   crop(x, y, w, h) {
     x = int(x, 'x'); y = int(y, 'y'); w = int(w, 'w'); h = int(h, 'h');
-    checkSize(w, h);
+    const fh = this.frameHeight || this.height, n = this.frames;
+    checkSize(w, h * n);
     for (const l of this.layers) {
-      const nd = new Uint8ClampedArray(w * h * 4);
-      for (let yy = 0; yy < h; yy++) {
+      const nd = new Uint8ClampedArray(w * h * n * 4);
+      for (let f = 0; f < n; f++) for (let yy = 0; yy < h; yy++) {
+        const ly = y + yy; // row inside the source frame; never borrow rows from the next frame
+        if (ly < 0 || ly >= fh) continue;
         for (let xx = 0; xx < w; xx++) {
-          const sx = x + xx, sy = y + yy;
-          if (sx < 0 || sy < 0 || sx >= this.width || sy >= this.height) continue;
-          const s = (sy * this.width + sx) * 4;
-          nd.set(l.data.subarray(s, s + 4), (yy * w + xx) * 4);
+          const sx = x + xx;
+          if (sx < 0 || sx >= this.width) continue;
+          const s = ((f * fh + ly) * this.width + sx) * 4;
+          nd.set(l.data.subarray(s, s + 4), ((f * h + yy) * w + xx) * 4);
         }
       }
       l.data = nd;
     }
     this.width = w;
-    this.height = h;
-    if (this.frameHeight && this.frameHeight >= h) this.frameHeight = null;
+    this.height = h * n;
+    this.frameHeight = n > 1 ? h : null;
+    this.shiftAnchors(-x, -y);
+  }
+
+  /** Grow every frame by l/t/r/b transparent pixels (frames stay separate; anchors follow). */
+  padFrames(l, t, r, b) {
+    const fh = this.frameHeight || this.height, n = this.frames;
+    const W = this.width + l + r, FH = fh + t + b;
+    checkSize(W, FH * n);
+    for (const L of this.layers) {
+      const nd = new Uint8ClampedArray(W * FH * n * 4);
+      for (let f = 0; f < n; f++) for (let y = 0; y < fh; y++) {
+        const s = (f * fh + y) * this.width * 4;
+        nd.set(L.data.subarray(s, s + this.width * 4), ((f * FH + y + t) * W + l) * 4);
+      }
+      L.data = nd;
+    }
+    this.width = W;
+    this.height = FH * n;
+    if (this.frameHeight) this.frameHeight = FH;
+    this.shiftAnchors(l, t);
+  }
+
+  /** Move rig anchors (meta.anchors[anim][frame][part] = [x, y, rot]) after the frame origin moved. */
+  shiftAnchors(dx, dy) {
+    const A = this.meta?.anchors;
+    if (!A || (!dx && !dy)) return;
+    for (const frames of Object.values(A)) for (const fr of frames || []) for (const v of Object.values(fr || {})) {
+      if (Array.isArray(v)) { v[0] += dx; v[1] += dy; }
+    }
   }
 
   // ---------- compositing & rendering ----------
@@ -741,6 +775,10 @@ class Ctx {
         // clip to another layer's painted pixels ("layer:body") or its empty pixels ("!layer:body")
         this.maskInvert = mask.startsWith('!');
         this.maskLayer = doc.layers[doc.layerIndex(mask.replace(/^!?layer:/, ''))].data;
+      } else if (typeof mask === 'string' && mask.startsWith('!')) {
+        // "!<color>": every pixel except that color
+        this.mask = this.color(mask.slice(1));
+        this.maskColorInvert = true;
       } else this.mask = this.color(mask);
     }
     this.dirty = dirty;
@@ -786,7 +824,7 @@ class Ctx {
       const ea = d[p + 3];
       if (this.mask === 'opaque' && ea === 0) return;
       if (this.mask === 'transparent' && ea !== 0) return;
-      if (Array.isArray(this.mask) && !colorsEqual([d[p], d[p + 1], d[p + 2], ea], this.mask)) return;
+      if (Array.isArray(this.mask) && colorsEqual([d[p], d[p + 1], d[p + 2], ea], this.mask) === !!this.maskColorInvert) return;
     }
     if (!force && this.maskLayer && (this.maskLayer[p + 3] === 0) !== !!this.maskInvert) return;
     if (!mode && this.blend === 'over' && c[3] < 255) c = blendOver([d[p], d[p + 1], d[p + 2], d[p + 3]], c);
@@ -805,6 +843,54 @@ class Ctx {
   }
 }
 
+/**
+ * rotate {angle, expand:true}: nothing is cut. Grows every frame (or the canvas) just enough to
+ * hold the rotated content, and lets the result extend past the region.
+ */
+function rotateExpand(ctx, block, R, deg, cx, cy) {
+  let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+  for (let yy = 0; yy < R.h; yy++) for (let xx = 0; xx < R.w; xx++) if (block[(yy * R.w + xx) * 4 + 3]) {
+    if (xx < bx0) bx0 = xx;
+    if (xx > bx1) bx1 = xx;
+    if (yy < by0) by0 = yy;
+    if (yy > by1) by1 = yy;
+  }
+  if (bx0 === Infinity) return 'rotate: region is empty';
+  const rad = (deg * Math.PI) / 180, cos = Math.cos(rad), sin = Math.sin(rad);
+  const pts = [[bx0, by0], [bx1 + 1, by0], [bx0, by1 + 1], [bx1 + 1, by1 + 1]].map(([px, py]) => [cx + (px - cx) * cos - (py - cy) * sin, cy + (px - cx) * sin + (py - cy) * cos]);
+  const e = 1e-6;
+  // rotated content bounds in block coords (exclusive max)
+  const ox0 = Math.floor(Math.min(...pts.map((p) => p[0])) + e), oy0 = Math.floor(Math.min(...pts.map((p) => p[1])) + e);
+  const ox1 = Math.ceil(Math.max(...pts.map((p) => p[0])) - e), oy1 = Math.ceil(Math.max(...pts.map((p) => p[1])) - e);
+  const padL = Math.max(0, -(R.x + ox0)), padT = Math.max(0, -(R.y + oy0));
+  const padR = Math.max(0, R.x + ox1 - ctx.w), padB = Math.max(0, R.y + oy1 - ctx.h);
+  const doc = ctx.doc;
+  const grew = padL || padT || padR || padB;
+  if (grew) {
+    const frame = Math.round(ctx.oy / (doc.frameHeight || doc.height));
+    const maskIdx = ctx.maskLayer ? doc.layers.findIndex((l) => l.data === ctx.maskLayer) : -1;
+    doc.padFrames(padL, padT, padR, padB);
+    ctx.data = doc.layers[ctx.layerIdx].data;
+    ctx.W = ctx.w = doc.width;
+    ctx.h = doc.frameHeight || doc.height;
+    ctx.oy = doc.frameHeight ? frame * doc.frameHeight : 0;
+    if (maskIdx >= 0) ctx.maskLayer = doc.layers[maskIdx].data;
+  }
+  const rx = R.x + padL, ry = R.y + padT;
+  // output rect = region U rotated bounds (block coords), clipped to the grown clip
+  const u0 = Math.max(-rx, Math.min(0, ox0)), v0 = Math.max(-ry, Math.min(0, oy0));
+  const u1 = Math.min(ctx.w - rx, Math.max(R.w, ox1)), v1 = Math.min(ctx.h - ry, Math.max(R.h, oy1));
+  const ow = u1 - u0, oh = v1 - v0;
+  const out = rotsprite(block, R.w, R.h, deg, cx, cy, { ox: u0, oy: v0, ow, oh });
+  for (let yy = 0; yy < oh; yy++) for (let xx = 0; xx < ow; xx++) {
+    const p = (yy * ow + xx) * 4, bx = xx + u0, by = yy + v0;
+    const inRegion = bx >= 0 && by >= 0 && bx < R.w && by < R.h;
+    if (!inRegion && !out[p + 3]) continue; // outside the region only write rotated content
+    ctx.put(rx + bx, ry + by, [out[p], out[p + 1], out[p + 2], out[p + 3]], 'mask');
+  }
+  return `rotated ${deg}°${grew ? ` (expanded: frames grew by left ${padL}, top ${padT}, right ${padR}, bottom ${padB} px to ${doc.width}x${doc.frameHeight || doc.height})` : ' (expand: already fits, no growth)'}`;
+}
+
 function linePoints(x0, y0, x1, y1) {
   const pts = [];
   let dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0);
@@ -820,10 +906,11 @@ function linePoints(x0, y0, x1, y1) {
   return pts;
 }
 
-function colorList(ctx, a, key = 'colors') {
+function colorList(ctx, a, key = 'colors', allowKeep = false) {
   const list = a[key] ?? (a.color !== undefined ? [a.color] : null);
   if (!Array.isArray(list) || !list.length) throw new Error(`needs "${key}" (array of colors)`);
-  return list.map((c) => ctx.color(c));
+  // "keep" = leave the pixel unchanged (returned as null)
+  return list.map((c) => (allowKeep && c === 'keep' ? null : ctx.color(c)));
 }
 
 function pickWeighted(colors, weights, v) {
@@ -902,10 +989,111 @@ const FONT = Object.fromEntries(Object.entries({
   '♥': '01010 11111 11111 01110 00100',
 }).map(([k, v]) => [k, v.split(' ')]));
 
-export function textWidth(text, scale = 1, spacing = 1) {
+// 5x7 font (classic LCD-style uppercase; some punctuation narrower)
+const FONT_5X7 = Object.fromEntries(Object.entries({
+  A: '01110 10001 10001 11111 10001 10001 10001', B: '11110 10001 10001 11110 10001 10001 11110',
+  C: '01110 10001 10000 10000 10000 10001 01110', D: '11110 10001 10001 10001 10001 10001 11110',
+  E: '11111 10000 10000 11110 10000 10000 11111', F: '11111 10000 10000 11110 10000 10000 10000',
+  G: '01110 10001 10000 10111 10001 10001 01111', H: '10001 10001 10001 11111 10001 10001 10001',
+  I: '111 010 010 010 010 010 111', J: '00111 00010 00010 00010 00010 10010 01100',
+  K: '10001 10010 10100 11000 10100 10010 10001', L: '10000 10000 10000 10000 10000 10000 11111',
+  M: '10001 11011 10101 10101 10001 10001 10001', N: '10001 10001 11001 10101 10011 10001 10001',
+  O: '01110 10001 10001 10001 10001 10001 01110', P: '11110 10001 10001 11110 10000 10000 10000',
+  Q: '01110 10001 10001 10001 10101 10010 01101', R: '11110 10001 10001 11110 10100 10010 10001',
+  S: '01111 10000 10000 01110 00001 00001 11110', T: '11111 00100 00100 00100 00100 00100 00100',
+  U: '10001 10001 10001 10001 10001 10001 01110', V: '10001 10001 10001 10001 10001 01010 00100',
+  W: '10001 10001 10001 10101 10101 10101 01010', X: '10001 10001 01010 00100 01010 10001 10001',
+  Y: '10001 10001 01010 00100 00100 00100 00100', Z: '11111 00001 00010 00100 01000 10000 11111',
+  0: '01110 10001 10011 10101 11001 10001 01110', 1: '010 110 010 010 010 010 111',
+  2: '01110 10001 00001 00010 00100 01000 11111', 3: '11111 00010 00100 00010 00001 10001 01110',
+  4: '00010 00110 01010 10010 11111 00010 00010', 5: '11111 10000 11110 00001 00001 10001 01110',
+  6: '00110 01000 10000 11110 10001 10001 01110', 7: '11111 00001 00010 00100 01000 01000 01000',
+  8: '01110 10001 10001 01110 10001 10001 01110', 9: '01110 10001 10001 01111 00001 00010 01100',
+  ' ': '000 000 000 000 000 000 000', '.': '0 0 0 0 0 0 1', ',': '00 00 00 00 01 01 10', '!': '1 1 1 1 1 0 1',
+  '?': '01110 10001 00001 00010 00100 00000 00100', '-': '0000 0000 0000 1111 0000 0000 0000', _: '00000 00000 00000 00000 00000 00000 11111',
+  ':': '0 0 1 0 0 1 0', ';': '00 00 01 00 00 01 10', '/': '00001 00010 00010 00100 01000 01000 10000',
+  "'": '1 1 0 0 0 0 0', '"': '101 101 000 000 000 000 000', '(': '001 010 100 100 100 010 001', ')': '100 010 001 001 001 010 100',
+  '+': '00000 00100 00100 11111 00100 00100 00000', '=': '00000 00000 11111 00000 11111 00000 00000',
+  '#': '01010 01010 11111 01010 11111 01010 01010', '%': '11001 11001 00010 00100 01000 10011 10011',
+  '*': '00000 10101 01110 11111 01110 10101 00000', '<': '0001 0010 0100 1000 0100 0010 0001', '>': '1000 0100 0010 0001 0010 0100 1000',
+  '&': '01100 10010 10100 01000 10101 10010 01101', '@': '01110 10001 10111 10101 10111 10000 01111',
+  '[': '111 100 100 100 100 100 111', ']': '111 001 001 001 001 001 111', '|': '1 1 1 1 1 1 1',
+  '^': '00100 01010 10001 00000 00000 00000 00000', '~': '00000 00000 01000 10101 00010 00000 00000',
+  '♥': '01010 11111 11111 11111 01110 00100 00000',
+}).map(([k, v]) => [k, v.split(' ')]));
+
+// 7x9 font (1 px strokes; I, 1, L, K and punctuation narrower)
+const FONT_7X9 = Object.fromEntries(Object.entries({
+  A: '0011100 0100010 1000001 1000001 1111111 1000001 1000001 1000001 1000001',
+  B: '1111110 1000001 1000001 1000001 1111110 1000001 1000001 1000001 1111110',
+  C: '0111110 1000001 1000000 1000000 1000000 1000000 1000000 1000001 0111110',
+  D: '1111100 1000010 1000001 1000001 1000001 1000001 1000001 1000010 1111100',
+  E: '1111111 1000000 1000000 1000000 1111110 1000000 1000000 1000000 1111111',
+  F: '1111111 1000000 1000000 1000000 1111110 1000000 1000000 1000000 1000000',
+  G: '0111110 1000001 1000000 1000000 1001111 1000001 1000001 1000001 0111110',
+  H: '1000001 1000001 1000001 1000001 1111111 1000001 1000001 1000001 1000001',
+  I: '11111 00100 00100 00100 00100 00100 00100 00100 11111',
+  J: '0001111 0000010 0000010 0000010 0000010 0000010 1000010 1000010 0111100',
+  K: '100001 100010 100100 101000 110000 101000 100100 100010 100001',
+  L: '100000 100000 100000 100000 100000 100000 100000 100000 111111',
+  M: '1000001 1100011 1010101 1001001 1000001 1000001 1000001 1000001 1000001',
+  N: '1000001 1000001 1100001 1010001 1001001 1000101 1000011 1000001 1000001',
+  O: '0111110 1000001 1000001 1000001 1000001 1000001 1000001 1000001 0111110',
+  P: '1111110 1000001 1000001 1000001 1111110 1000000 1000000 1000000 1000000',
+  Q: '0111110 1000001 1000001 1000001 1000001 1000001 1000101 1000010 0111101',
+  R: '1111110 1000001 1000001 1000001 1111110 1001000 1000100 1000010 1000001',
+  S: '0111110 1000001 1000000 1000000 0111110 0000001 0000001 1000001 0111110',
+  T: '1111111 0001000 0001000 0001000 0001000 0001000 0001000 0001000 0001000',
+  U: '1000001 1000001 1000001 1000001 1000001 1000001 1000001 1000001 0111110',
+  V: '1000001 1000001 1000001 1000001 0100010 0100010 0100010 0010100 0001000',
+  W: '1000001 1000001 1000001 1000001 1001001 1001001 1010101 1100011 1000001',
+  X: '1000001 1000001 0100010 0010100 0001000 0010100 0100010 1000001 1000001',
+  Y: '1000001 1000001 0100010 0010100 0001000 0001000 0001000 0001000 0001000',
+  Z: '1111111 0000001 0000010 0000100 0001000 0010000 0100000 1000000 1111111',
+  0: '0111110 1000001 1000011 1000101 1001001 1010001 1100001 1000001 0111110',
+  1: '00100 01100 10100 00100 00100 00100 00100 00100 11111',
+  2: '0111110 1000001 0000001 0000010 0001100 0010000 0100000 1000000 1111111',
+  3: '0111110 1000001 0000001 0000001 0011110 0000001 0000001 1000001 0111110',
+  4: '0000010 0000110 0001010 0010010 0100010 1000010 1111111 0000010 0000010',
+  5: '1111111 1000000 1000000 1111110 0000001 0000001 0000001 1000001 0111110',
+  6: '0011110 0100000 1000000 1000000 1111110 1000001 1000001 1000001 0111110',
+  7: '1111111 0000001 0000010 0000100 0001000 0010000 0010000 0010000 0010000',
+  8: '0111110 1000001 1000001 1000001 0111110 1000001 1000001 1000001 0111110',
+  9: '0111110 1000001 1000001 1000001 0111111 0000001 0000001 0000010 0111100',
+  ' ': '0000 0000 0000 0000 0000 0000 0000 0000 0000', '.': '0 0 0 0 0 0 0 0 1', ',': '00 00 00 00 00 00 00 01 10',
+  '!': '1 1 1 1 1 1 1 0 1', ':': '0 0 1 0 0 0 1 0 0', ';': '00 00 01 00 00 00 01 01 10',
+  '?': '0111110 1000001 0000001 0000010 0000100 0001000 0001000 0000000 0001000',
+  '-': '00000 00000 00000 00000 11111 00000 00000 00000 00000', _: '0000000 0000000 0000000 0000000 0000000 0000000 0000000 0000000 1111111',
+  '/': '0000001 0000010 0000010 0000100 0001000 0010000 0100000 0100000 1000000',
+  "'": '1 1 1 0 0 0 0 0 0', '"': '101 101 101 000 000 000 000 000 000',
+  '(': '0011 0100 1000 1000 1000 1000 1000 0100 0011', ')': '1100 0010 0001 0001 0001 0001 0001 0010 1100',
+  '+': '0000000 0000000 0001000 0001000 1111111 0001000 0001000 0000000 0000000',
+  '=': '0000000 0000000 0000000 1111111 0000000 1111111 0000000 0000000 0000000',
+  '#': '0100100 0100100 1111111 0100100 0100100 0100100 1111111 0100100 0100100',
+  '%': '1100000 1100001 0000010 0000100 0001000 0010000 0100000 1000011 0000011',
+  '*': '0000000 0001000 1001001 0101010 0011100 0101010 1001001 0001000 0000000',
+  '<': '00001 00010 00100 01000 10000 01000 00100 00010 00001', '>': '10000 01000 00100 00010 00001 00010 00100 01000 10000',
+  '&': '0011000 0100100 0100100 0011000 0110001 1001010 1000100 1001010 0110001',
+  '@': '0111110 1000001 1011101 1010101 1010101 1011110 1000000 1000001 0111110',
+  '[': '111 100 100 100 100 100 100 100 111', ']': '111 001 001 001 001 001 001 001 111', '|': '1 1 1 1 1 1 1 1 1',
+  '^': '0001000 0010100 0100010 1000001 0000000 0000000 0000000 0000000 0000000',
+  '~': '0000000 0000000 0000000 0110001 1001001 1000110 0000000 0000000 0000000',
+  '♥': '0110110 1111111 1111111 1111111 0111110 0011100 0001000 0000000 0000000',
+}).map(([k, v]) => [k, v.split(' ')]));
+
+/** Built-in bitmap fonts: name -> { h, glyphs }. Default "3x5". */
+export const FONTS = { '3x5': { h: FONT_H, glyphs: FONT }, '5x7': { h: 7, glyphs: FONT_5X7 }, '7x9': { h: 9, glyphs: FONT_7X9 } };
+export function getFont(name = '3x5') {
+  const f = FONTS[name ?? '3x5'];
+  if (!f) throw new Error(`font must be one of ${Object.keys(FONTS).join(', ')}`);
+  return f;
+}
+
+export function textWidth(text, scale = 1, spacing = 1, font = '3x5') {
+  const G = getFont(font).glyphs;
   const chars = [...String(text).toUpperCase()];
   if (!chars.length) return 0;
-  return chars.reduce((w, ch) => w + ((FONT[ch] || FONT['?'])[0].length + spacing) * scale, 0) - spacing * scale;
+  return chars.reduce((w, ch) => w + ((G[ch] || G['?'])[0].length + spacing) * scale, 0) - spacing * scale;
 }
 export { FONT, FONT_H };
 
@@ -1013,19 +1201,20 @@ const COMMANDS = {
     const col = ctx.color(a.color);
     const scale = Math.max(1, int(a.scale ?? 1, 'scale'));
     const spacing = int(a.spacing ?? 1, 'spacing');
-    const lineH = (FONT_H + int(a.line_spacing ?? 2, 'line_spacing')) * scale;
+    const font = getFont(a.font ?? '3x5'), G = font.glyphs;
+    const lineH = (font.h + int(a.line_spacing ?? 2, 'line_spacing')) * scale;
     const shadow = a.shadow !== undefined ? ctx.color(a.shadow) : null;
     const lines = String(a.text ?? '').toUpperCase().split(/\r?\n/);
     let y = int(a.y ?? 0, 'y');
     for (const line of lines) {
       let x = int(a.x ?? 0, 'x');
-      const w = textWidth(line, scale, spacing);
+      const w = textWidth(line, scale, spacing, a.font ?? '3x5');
       if (a.align === 'center') x -= Math.floor(w / 2);
       else if (a.align === 'right') x -= w;
       for (const ch of line) {
-        const g = FONT[ch] || FONT['?'];
+        const g = G[ch] || G['?'];
         for (const [c, d] of shadow ? [[shadow, scale], [col, 0]] : [[col, 0]]) {
-          for (let gy = 0; gy < FONT_H; gy++) for (let gx = 0; gx < g[gy].length; gx++) {
+          for (let gy = 0; gy < font.h; gy++) for (let gx = 0; gx < g[gy].length; gx++) {
             if (g[gy][gx] !== '1') continue;
             for (let sy = 0; sy < scale; sy++) for (let sx = 0; sx < scale; sx++) ctx.set(x + gx * scale + sx + d, y + gy * scale + sy + d, c);
           }
@@ -1082,9 +1271,15 @@ const COMMANDS = {
       const nx = (px + 0.5 - cx) / rx, ny = (py + 0.5 - cy) / ry;
       return nx * nx + ny * ny <= 1.0001;
     };
+    // thickness: border pixels within t px (along x or y) of the outside, like rect
+    const t = Math.max(1, int(a.thickness ?? 1, 'thickness'));
+    const near = (xx, yy) => {
+      for (let k = 1; k <= t; k++) if (!inside(xx - k, yy) || !inside(xx + k, yy) || !inside(xx, yy - k) || !inside(xx, yy + k)) return true;
+      return false;
+    };
     for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) {
       if (!inside(xx, yy)) continue;
-      const edge = !inside(xx - 1, yy) || !inside(xx + 1, yy) || !inside(xx, yy - 1) || !inside(xx, yy + 1);
+      const edge = near(xx, yy);
       if (edge && outline) ctx.set(xx, yy, outline);
       else if (fill) ctx.set(xx, yy, fill);
     }
@@ -1135,7 +1330,7 @@ const COMMANDS = {
     const colors = colorList(ctx, a);
     const { x, y, w, h } = ctx.region(a);
     const dir = a.direction || 'vertical';
-    const dither = a.dither || 'bayer';
+    const dither = a.dither === false ? 'none' : a.dither === true ? 'bayer' : a.dither || 'bayer';
     const seed = int(a.seed ?? 1, 'seed');
     const n = colors.length;
     for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) {
@@ -1146,8 +1341,10 @@ const COMMANDS = {
       else if (dir === 'diagonal') t = (u + v) / 2;
       else if (dir === 'diagonal-reverse') t = ((1 - u) + v) / 2;
       else if (dir === 'radial') {
-        const dx = (xx + 0.5) / w - 0.5, dy = (yy + 0.5) / h - 0.5;
-        t = Math.min(1, Math.sqrt(dx * dx + dy * dy) * 2);
+        // 0 at the centre, exactly 1 on the edge pixels; corners clamp to the outer color, so an
+        // opaque outer color fills the whole region edge (no dithered rectangle rim)
+        const dx = w > 1 ? (2 * xx) / (w - 1) - 1 : 0, dy = h > 1 ? (2 * yy) / (h - 1) - 1 : 0;
+        t = Math.min(1, Math.sqrt(dx * dx + dy * dy));
       } else throw new Error('direction must be vertical, horizontal, diagonal, diagonal-reverse or radial');
       const pos = t * (n - 1);
       let idx = Math.floor(pos);
@@ -1162,7 +1359,7 @@ const COMMANDS = {
   },
 
   noise(ctx, a) {
-    const colors = colorList(ctx, a);
+    const colors = colorList(ctx, a, 'colors', true);
     const { x, y, w, h } = ctx.region(a);
     const seed = int(a.seed ?? 1, 'seed');
     const scale = Math.max(1, Number(a.scale ?? 1));
@@ -1192,7 +1389,8 @@ const COMMANDS = {
     const ranks = new Float64Array(w * h);
     order.forEach((idx, r) => (ranks[idx] = (r + 0.5) / order.length));
     const pick = new Int32Array(w * h);
-    for (let i = 0; i < w * h; i++) pick[i] = colors.indexOf(pickWeighted(colors, weights, ranks[i]));
+    const idxs = colors.map((_, i) => i);
+    for (let i = 0; i < w * h; i++) pick[i] = pickWeighted(idxs, weights, ranks[i]);
     // despeckle: lone pixels (no same-colored 4-neighbour, wrapping) take the majority neighbour color
     const passes = a.despeckle === true ? 1 : Math.max(0, int(a.despeckle ?? 0, 'despeckle'));
     for (let p = 0; p < passes; p++) {
@@ -1207,7 +1405,13 @@ const COMMANDS = {
         pick[yy * w + xx] = [...cnt.entries()].sort((q, r) => r[1] - q[1] || q[0] - r[0])[0][0];
       }
     }
-    for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) ctx.set(x + xx, y + yy, colors[pick[yy * w + xx]]);
+    // under a mask a transparent color would punch holes into the masked art: skip it unless erase:true
+    const masked = !!(ctx.mask || ctx.maskLayer) && a.erase !== true;
+    for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) {
+      const c = colors[pick[yy * w + xx]];
+      if (!c || (masked && c[3] === 0)) continue;
+      ctx.set(x + xx, y + yy, c);
+    }
   },
 
   scatter(ctx, a) {
@@ -1235,12 +1439,18 @@ const COMMANDS = {
     const { x, y, w, h } = ctx.region(a);
     const rnd = mulberry32(int(a.seed ?? 1, 'seed'));
     const jitter = Number(a.jitter ?? 0);
+    // alpha = delta (-1..1, result clamped to 0..1); set_alpha = absolute 0..1
+    const alpha = a.alpha === undefined ? undefined : Number(a.alpha);
+    if (alpha !== undefined && !(Number.isFinite(alpha) && Math.abs(alpha) <= 1)) throw new Error(`alpha is a change in opacity, -1..1 (e.g. -0.3 = 30% more transparent); got ${JSON.stringify(a.alpha)}. Use set_alpha:0..1 for an absolute value`);
+    const setAlpha = a.set_alpha === undefined ? undefined : Number(a.set_alpha);
+    if (setAlpha !== undefined && !(Number.isFinite(setAlpha) && setAlpha >= 0 && setAlpha <= 1)) throw new Error(`set_alpha must be 0..1; got ${JSON.stringify(a.set_alpha)}`);
     for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) {
       const c = ctx.get(xx, yy);
       if (!c || c[3] === 0) continue;
       const j = jitter ? (rnd() * 2 - 1) * jitter : 0;
       let nc = adjustColor(c, { hue: Number(a.hue ?? 0), saturation: Number(a.saturation ?? 0), lightness: Number(a.lightness ?? 0) + j });
-      if (a.alpha !== undefined) nc[3] = Math.max(0, Math.min(255, Math.round(Number(a.alpha) * 255)));
+      if (setAlpha !== undefined) nc[3] = Math.round(setAlpha * 255);
+      if (alpha !== undefined) nc[3] = Math.max(0, Math.min(255, Math.round(nc[3] + alpha * 255)));
       ctx.put(xx, yy, nc, 'mask');
     }
   },
@@ -1263,7 +1473,14 @@ const COMMANDS = {
     // of: only pixels of these colors count as the shape (selective outline, e.g. just the hair)
     const of = a.of === undefined ? null : (Array.isArray(a.of) ? a.of : [a.of]).map((c) => ctx.color(c));
     const tol = Number(a.tolerance ?? 0);
-    const solid = (c) => c[3] > 0 && (!of || of.some((o) => colorsEqual(c, o, tol)));
+    // skip_existing: pixels already in the outline color are outline, not shape, so a re-run does
+    // not grow a second ring (only fills gaps). Default on when this layer already has that color.
+    let skip = a.skip_existing, auto = false;
+    if (skip === undefined && mode === 'outer' && col[3] > 0) {
+      outer: for (let y = 0; y < ctx.h; y++) for (let x = 0; x < ctx.w; x++) if (colorsEqual(ctx.get(x, y), col)) { skip = auto = true; break outer; }
+    }
+    skip = !!skip && mode === 'outer';
+    const solid = (c) => c[3] > 0 && (!of || of.some((o) => colorsEqual(c, o, tol))) && !(skip && colorsEqual(c, col));
     const op = (x, y) => x >= 0 && y >= 0 && x < ctx.w && y < ctx.h && solid(src[y * ctx.w + x]);
     const nb = diag ? [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]] : [[1, 0], [-1, 0], [0, 1], [0, -1]];
     // region limits where outline pixels are written; the canvas mask (if any) is honoured
@@ -1275,9 +1492,10 @@ const COMMANDS = {
       let hit = false;
       if (mode === 'outer' && !me) hit = nb.some(([dx, dy]) => op(x + dx, y + dy)) && (!of || !src[y * ctx.w + x][3] || a.over_other !== false);
       if (mode === 'inner' && me) hit = nb.some(([dx, dy]) => !op(x + dx, y + dy));
+      if (hit && skip && colorsEqual(ctx.get(x, y), col)) continue;
       if (hit) { ctx.put(x, y, col, putMode); n++; }
     }
-    return `outlined ${n} px`;
+    return `outlined ${n} px${auto ? ' (layer already had this outline color: skipped existing outline, pass skip_existing:false to add another ring)' : ''}`;
   },
 
   bevel(ctx, a) {
@@ -1321,6 +1539,7 @@ const COMMANDS = {
         if (c) block.set(c, (yy * w + xx) * 4);
       }
       const cx = a.cx !== undefined ? Number(a.cx) - x : w / 2, cy = a.cy !== undefined ? Number(a.cy) - y : h / 2;
+      if (a.expand) return rotateExpand(ctx, block, { x, y, w, h }, deg, cx, cy);
       const out = rotsprite(block, w, h, deg, cx, cy);
       for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) {
         const p = (yy * w + xx) * 4;

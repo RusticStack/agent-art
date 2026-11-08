@@ -72,7 +72,9 @@ test('fix 17: sfx reads-as separates pitch sweeps from impacts', () => {
   const hit = reads('hit_light');
   assert.ok(!/falling tone/.test(hit.reads_as), hit.reads_as);
   assert.match(hit.reads_as, /impact/);
-  for (const seed of [1, 2, 4]) {
+  // seed 2 used to read as a tone only because of its large DC offset (now DC-blocked); it is a
+  // short noisy square slide, so it is not part of the clean-laser set
+  for (const seed of [1, 3, 4]) {
     const laser = reads('sfxr_laser', seed);
     assert.ok(!/impact/.test(laser.reads_as), `seed ${seed}: ${laser.reads_as}`);
     assert.match(laser.reads_as, /falling tone/);

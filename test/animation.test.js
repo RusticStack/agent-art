@@ -214,3 +214,66 @@ test('cli batch + stdin args', () => {
   const o2 = execFileSync(process.execPath, [bin, 'op', 'read', '-'], { input: '{"canvas":"k","w":1,"h":1}', env, encoding: 'utf8' });
   assert.match(o2, /#aabbcc/);
 });
+
+test('crop on a frame strip crops every frame and keeps frames, animations and anchors', () => {
+  const e = new Engine({ home: tmp() });
+  e.run('create', { name: 'cs', width: 8, height: 8, frames: 3 });
+  for (let f = 0; f < 3; f++) e.run('draw', { canvas: 'cs', frame: f, commands: [{ op: 'pixels', points: [[2 + f, 3]], color: '#ff0000' }] });
+  e.run('animation', { canvas: 'cs', action: 'tag', name: 'run', from: 0, to: 2, duration: 80 });
+  e.get('cs').meta.anchors = { run: [{ hand: [4, 5, 0] }, { hand: [5, 5, 0] }, { hand: [6, 5, 0] }] };
+  const info = e.run('transform', { canvas: 'cs', action: 'crop', x: 1, y: 2, w: 5, h: 4 });
+  assert.equal(info.frames, 3);
+  assert.equal(info.frameHeight, 4);
+  assert.equal(info.width, 5);
+  assert.equal(info.height, 12);
+  assert.deepEqual(info.animations.run.frames, [0, 1, 2]);
+  for (let f = 0; f < 3; f++) assert.equal(px(e, 'cs', 1 + f, 1, f), '#ff0000', `frame ${f} content moved by the crop offset`);
+  assert.deepEqual(e.get('cs').meta.anchors.run[0].hand, [3, 3, 0]);
+  // export still sees 3 frames
+  const sh = e.run('export_animation', { canvas: 'cs', format: 'spritesheet', animation: 'run' });
+  assert.equal(decodePNG(fs.readFileSync(sh.png)).width, 15);
+});
+
+test('rotate expand grows every frame and keeps rotated content', () => {
+  const e = new Engine({ home: tmp() });
+  e.run('create', { name: 're', width: 8, height: 8, frames: 2 });
+  e.run('draw', { canvas: 're', frame: 0, commands: [{ op: 'rect', x: 1, y: 1, w: 6, h: 6, color: '#00ff00' }] });
+  e.run('draw', { canvas: 're', frame: 1, commands: [{ op: 'pixels', points: [[0, 0]], color: '#0000ff' }] });
+  const count = (d, f) => { let n = 0; const fh = d.frameHeight; for (let y = 0; y < fh; y++) for (let x = 0; x < d.width; x++) if (d.layers[0].data[((f * fh + y) * d.width + x) * 4 + 3]) n++; return n; };
+  // default: a 6x6 square rotated 45° in an 8x8 frame loses its corners
+  const e2 = new Engine({ home: tmp() });
+  e2.run('create', { name: 'r', width: 8, height: 8 });
+  e2.run('draw', { canvas: 'r', commands: [{ op: 'rect', x: 1, y: 1, w: 6, h: 6, color: '#00ff00' }, { op: 'rotate', angle: 45 }] });
+  const cut = count(e2.get('r'), 0);
+  const r = e.run('draw', { canvas: 're', frame: 0, commands: [{ op: 'rotate', angle: 45, expand: true }] });
+  const d = e.get('re');
+  assert.ok(d.width > 8 && d.frameHeight > 8, `grew to ${d.width}x${d.frameHeight}`);
+  assert.equal(d.frames, 2);
+  assert.equal(d.width, d.frameHeight, 'symmetric growth around the centre');
+  assert.ok(count(d, 0) > cut, `expand keeps more pixels (${count(d, 0)} vs ${cut})`);
+  assert.match(r.notes.join(' '), /expanded/);
+  // frame 1 is padded, not shifted into frame 0
+  const pad = (d.width - 8) / 2;
+  assert.equal(px(e, 're', pad, pad, 1), '#0000ff');
+  // 90° in a big enough canvas: no growth
+  const e3 = new Engine({ home: tmp() });
+  e3.run('create', { name: 'q', width: 8, height: 8 });
+  e3.run('draw', { canvas: 'q', commands: [{ op: 'rect', x: 3, y: 3, w: 2, h: 2, color: '#ff0000' }, { op: 'rotate', angle: 90, expand: true }] });
+  assert.equal(e3.get('q').width, 8);
+  // undo restores the old size
+  e.run('undo', { canvas: 're' });
+  assert.equal(e.get('re').width, 8);
+});
+
+test('spritesheet json:false writes only the png', () => {
+  const e = new Engine({ home: tmp() });
+  e.run('create', { name: 'sj', width: 4, height: 4, frames: 2 });
+  e.run('draw', { canvas: 'sj', commands: [{ op: 'rect', color: '#123456' }] });
+  const out = path.join(tmp(), 'sheet');
+  const r = e.run('export_animation', { canvas: 'sj', format: 'spritesheet', path: out, json: false });
+  assert.ok(fs.existsSync(out + '.png'));
+  assert.ok(!fs.existsSync(out + '.json'));
+  assert.equal(r.json, undefined);
+  const r2 = e.run('export_animation', { canvas: 'sj', format: 'spritesheet', path: out });
+  assert.ok(fs.existsSync(r2.json), 'default still writes the json');
+});

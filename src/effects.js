@@ -170,11 +170,16 @@ export const EFFECTS = {
     const r = Math.max(1, int(a.radius ?? 2, 'radius'));
     const intensity = num(a.intensity, 'intensity', 0.7);
     const tint = a.color !== undefined ? ctx.color(a.color) : null;
+    // select: which brightness picks emitters. value (HSV max channel, default: saturated neon
+    // blooms too), luma (perceived brightness, the old behaviour), saturation
+    const select = a.select ?? 'value';
+    const metric = { value: (c) => Math.max(c[0], c[1], c[2]) / 255, luma: lum, saturation: (c) => { const mx = Math.max(c[0], c[1], c[2]); return mx ? (mx - Math.min(c[0], c[1], c[2])) / mx : 0; } }[select];
+    if (!metric) throw new Error('glow select must be "value" (default), "luma" or "saturation"');
     const buf = new Float32Array(w * h * 3);
     for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) {
       const c = ctx.get(x + xx, y + yy);
       if (!c || !c[3]) continue;
-      const l = lum(c);
+      const l = metric(c);
       if (l <= thr) continue;
       const k = ((l - thr) / Math.max(0.001, 1 - thr)) * (c[3] / 255);
       const src = tint || c;

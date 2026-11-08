@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { SR } from './dsp.js';
-import { renderSfx, RECIPE_GROUPS, RECIPES } from './sfx.js';
+import { renderSfx, RECIPE_GROUPS, RECIPES, resolveSfxSpec, validateSfx } from './sfx.js';
 import { renderSong, normalizeSong, renderLayers } from './song.js';
 import { PRESETS, DRUMS, resolvePatch, PRESET_NAMES } from './presets.js';
 import { GENERATORS, runGenerator } from './generators.js';
@@ -57,6 +57,25 @@ function getDef(e, name) {
   return d;
 }
 const r1 = (v) => Math.round(v * 10) / 10;
+/** Names matching a wildcard pattern ("gib_*"), or the name itself. */
+function matchNames(s, name) {
+  if (!name || !name.includes('*')) return name ? [name] : [];
+  const re = new RegExp(`^${name.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`);
+  return [...s.defs.keys()].filter((n) => re.test(n)).sort();
+}
+// partial song update: only tracks or only sections merge into the saved song (null removes a key)
+function mergeSong(old, nu) {
+  const out = { ...old };
+  for (const [k, v] of Object.entries(nu)) {
+    if ((k === 'tracks' || k === 'sections') && v && typeof v === 'object') {
+      const m = { ...(old[k] || {}) };
+      for (const [n, x] of Object.entries(v)) { if (x === null) delete m[n]; else m[n] = x && typeof x === 'object' && m[n] && typeof m[n] === 'object' && !Array.isArray(x) ? { ...m[n], ...x } : x; }
+      out[k] = m;
+    } else if (v === null) delete out[k];
+    else out[k] = v;
+  }
+  return out;
+}
 
 /** Render (or load from cache) an asset -> {chs, loop, meta, stems?}. */
 export function getAudio(e, name, { stems = false, force = false } = {}) {
@@ -76,7 +95,7 @@ export function getAudio(e, name, { stems = false, force = false } = {}) {
   const getSample = (n) => { const a = getAudio(e, n); return { mono: toMono(a.chs), sr: SR, loop: a.loop }; };
   if (def.kind === 'sfx') {
     const r = renderSfx(def, { custom: s.inst, getSample });
-    out = { chs: r.chs, loop: null, meta: { kind: 'sfx', recipe: def.recipe } };
+    out = { chs: r.chs, loop: r.loop, meta: { kind: 'sfx', recipe: def.recipe, target: r.target } };
   } else if (def.kind === 'song') {
     const r = renderSong(def.song, { custom: s.inst, getSample, stems });
     const kit = Object.values(r.song.tracks).find((t) => t.kit);
@@ -97,9 +116,9 @@ export function getAudio(e, name, { stems = false, force = false } = {}) {
 }
 
 function quickStats(a, def) {
-  const m = measure(a.chs, { loop: a.loop });
+  const m = measure(a.chs, { loop: a.loop, beatSec: a.meta.tempo ? 60 / a.meta.tempo : null });
   const s = m.stats;
-  const c = critiqueAudio(s, { kind: def.kind === 'song' ? 'music' : 'sfx', loop: !!a.loop, target_lufs: a.meta.target_lufs, recipe: def.recipe });
+  const c = critiqueAudio(s, { kind: def.kind === 'song' ? 'music' : 'sfx', loop: !!a.loop, target_lufs: a.meta.target_lufs, target_peak: a.meta.target, recipe: def.recipe });
   return { duration: s.duration, lufs: s.lufs, peak_dbfs: s.peak_dbfs, true_peak_dbtp: s.true_peak_dbtp, centroid_hz: s.centroid_hz, seam: s.seam, score: c.score, issues: c.issues.map((i) => i.id) };
 }
 
@@ -108,7 +127,7 @@ function perceptionFor(e, name, a, def, args) {
   const full = isSong ? getAudio(e, name, { stems: 'dry' }) : a;
   const key = `${args.intent ?? def.intent}|${args.genre ?? def.genre}`;
   if (full._perc?.key === key) return full._perc.v;
-  const meas = measure(full.chs, { loop: full.loop });
+  const meas = measure(full.chs, { loop: full.loop, beatSec: full.meta.tempo ? 60 / full.meta.tempo : null });
   const p = perceive(full.chs, meas, {
     tempo: full.meta.tempo, beatsPerBar: full.meta.beatsPerBar, stems: isSong ? full.stems : null, drums: full.meta.drums, timeline: full.meta.timeline,
     intent: args.intent ?? def.intent, genre: args.genre ?? def.genre, kind: isSong || (def.kind === 'sample' && meas.stats.duration > 8) ? 'music' : 'sfx',
@@ -128,15 +147,30 @@ export const AUDIO_OPS = {
       return { recipes: RECIPE_GROUPS, presets: Object.fromEntries(PRESET_NAMES.map((n) => [n, PRESETS[n].doc || ''])), generators: Object.keys(GENERATORS), genres: GENRE_NAMES, fx: 'eq filter drive saturate amp cab bitcrush chorus flanger delay reverb comp gate transient multiband limit formant tremolo width gain pan duck fade dc' };
     }
     const def = getDef(this, a.name);
-    return { ...def, cache: store(this).mem.get(a.name)?.meta };
+    const res = { ...def, cache: store(this).mem.get(a.name)?.meta };
+    if (def.kind === 'sfx' && def.recipe) {
+      // the layers the recipe resolved to for this seed + vars: copy, edit, re-render as {layers, seed}
+      const { spec } = resolveSfxSpec(def);
+      res.resolved = { layers: spec.layers, fx: spec.fx, reverb: spec.reverb, target: spec.target, tail: spec.tail, loop: spec.loop };
+      res.tip = 'art_audio sfx {name, layers: resolved.layers, fx: resolved.fx, reverb: resolved.reverb, seed} reproduces this sound; edit layers to change it';
+    }
+    return res;
   },
 
   audio_delete(a, source) {
-    const s = store(this), def = getDef(this, a.name);
-    for (const f of [path.join(s.d.root, `${def.name}.json`), path.join(s.d.cache, `${def.name}.wav`), path.join(s.d.cache, `${def.name}.meta.json`)]) fs.rmSync(f, { force: true });
-    s.defs.delete(def.name); s.mem.delete(def.name);
-    this.emit('event', { type: 'audio', name: def.name, deleted: true, source, ts: Date.now() });
-    return { deleted: def.name };
+    const s = store(this);
+    const names = a.names || matchNames(s, a.name);
+    if (!a.names && !a.name) throw new Error('delete needs name (wildcards ok: "gib_*") or names:[...]');
+    if (!names.length) throw new Error(`No audio asset matches "${a.name}". Existing: ${[...s.defs.keys()].slice(0, 40).join(', ') || '(none)'}`);
+    const deleted = [];
+    for (const n of names) {
+      const def = getDef(this, n);
+      for (const f of [path.join(s.d.root, `${def.name}.json`), path.join(s.d.cache, `${def.name}.wav`), path.join(s.d.cache, `${def.name}.meta.json`)]) fs.rmSync(f, { force: true });
+      s.defs.delete(def.name); s.mem.delete(def.name);
+      this.emit('event', { type: 'audio', name: def.name, deleted: true, source, ts: Date.now() });
+      deleted.push(def.name);
+    }
+    return { deleted: deleted.length === 1 && !a.names && !a.name.includes('*') ? deleted[0] : deleted };
   },
 
   /** Sound effects: recipe | params (sfxr) | layers, seed, variants -> one asset per variant. */
@@ -147,15 +181,25 @@ export const AUDIO_OPS = {
     const n = Math.max(1, Math.min(32, a.variants ?? 1));
     const seed0 = a.seed ?? 1;
     const out = [];
+    const s = store(this);
     for (let i = 0; i < n; i++) {
       const name = n > 1 ? `${base}_${i + 1}` : base;
-      const def = { name, kind: 'sfx', recipe: a.recipe, params: a.params, layers: a.layers, fx: a.fx, reverb: a.reverb, target: a.target, seed: seed0 + i, vars: a.vars || {}, sample_rate: sampleRate(a.sample_rate) ?? undefined };
+      const def = { name, kind: 'sfx', recipe: a.recipe, params: a.params, layers: a.layers, fx: a.fx, reverb: a.reverb, target: a.target, loop: a.loop, tail: a.tail, seed: seed0 + i, vars: a.vars || {}, sample_rate: sampleRate(a.sample_rate) ?? undefined };
       for (const k of Object.keys(def)) if (def[k] === undefined) delete def[k];
+      // validate (layer kinds, instruments, fx) before anything is written
+      validateSfx(def, { custom: s.inst });
+      const prev = s.defs.get(name);
       saveDef(this, def, source);
-      const au = getAudio(this, name, { force: true });
+      let au;
+      try { au = getAudio(this, name, { force: true }); } catch (err) {
+        // a failed render leaves nothing behind: restore the previous definition or remove the new one
+        if (prev) saveDef(this, prev, source);
+        else { fs.rmSync(path.join(s.d.root, `${name}.json`), { force: true }); s.defs.delete(name); s.mem.delete(name); }
+        throw err;
+      }
       def.stats = quickStats(au, def);
       saveDef(this, def, source);
-      out.push({ name, seed: def.seed, ...def.stats, sample_rate: def.sample_rate ?? SR, render_ms: au.meta.render_ms });
+      out.push({ name, seed: def.seed, ...def.stats, loop: au.loop || undefined, sample_rate: def.sample_rate ?? SR, render_ms: au.meta.render_ms });
     }
     return { created: out, tip: 'art_audio analyze {name} shows it (spectrogram + listener report); export {name:"' + base + (n > 1 ? '_*' : '') + '", format:"ogg"} writes files' };
   },
@@ -196,7 +240,11 @@ export const AUDIO_OPS = {
   /** Songs: JSON (tempo, tracks, sections, arrangement) or {text} notation. */
   audio_song(a, source) {
     const { name, action, render, ...rest } = a;
-    const song = rest.song || rest;
+    let song = rest.song || rest;
+    if (typeof song === 'string') song = JSON.parse(song);
+    // partial update: a song with only tracks (or only sections) merges into the saved one
+    const old = store(this).defs.get(name);
+    if (old?.kind === 'song' && !song.text && (!song.sections || !song.tracks)) song = mergeSong(old.song, song);
     const sr = sampleRate(a.sample_rate ?? song.sample_rate);
     for (const k of ['intent', 'genre', 'stems', 'format', 'path', 'sample_rate']) delete song[k];
     const s = store(this);
@@ -226,7 +274,7 @@ export const AUDIO_OPS = {
     const def = getDef(this, a.name);
     const au = getAudio(this, a.name);
     const { full, meas, p } = perceptionFor(this, a.name, au, def, a);
-    const issues = critiqueAudio(meas.stats, { kind: def.kind === 'song' ? 'music' : 'sfx', loop: !!full.loop, target_lufs: full.meta.target_lufs, perception: p, recipe: def.recipe, genre: a.genre ?? def.genre }).issues;
+    const issues = critiqueAudio(meas.stats, { kind: def.kind === 'song' ? 'music' : 'sfx', loop: !!full.loop, target_lufs: full.meta.target_lufs, target_peak: full.meta.target, perception: p, recipe: def.recipe, genre: a.genre ?? def.genre }).issues;
     const view = a.view || 'overview';
     const image = view === 'mix' && p.mix ? mixImage(p.mix) : overviewImage({ chs: full.chs, meas, perception: p, loop: full.loop, title: a.name, target_lufs: full.meta.target_lufs ?? (def.kind === 'song' ? -14 : -18), timeline: full.meta.timeline });
     const pub = publicPerception(p);
@@ -239,7 +287,7 @@ export const AUDIO_OPS = {
     const def = getDef(this, a.name);
     const au = getAudio(this, a.name);
     const { full, meas, p } = perceptionFor(this, a.name, au, def, a);
-    const c = critiqueAudio(meas.stats, { kind: def.kind === 'song' ? 'music' : a.kind || (meas.stats.duration > 10 ? 'music' : 'sfx'), loop: !!full.loop, target_lufs: a.target_lufs ?? full.meta.target_lufs, perception: p, recipe: def.recipe, genre: a.genre ?? def.genre });
+    const c = critiqueAudio(meas.stats, { kind: def.kind === 'song' ? 'music' : a.kind || (meas.stats.duration > 10 ? 'music' : 'sfx'), loop: !!full.loop, target_lufs: a.target_lufs ?? full.meta.target_lufs, target_peak: full.meta.target, perception: p, recipe: def.recipe, genre: a.genre ?? def.genre });
     return { name: a.name, ...c, report: listenerReport(p, c.issues), genre: p.genre?.verdict, intent: p.intent || undefined };
   },
 
@@ -270,8 +318,7 @@ export const AUDIO_OPS = {
   /** Export WAV (16/24/32f) or mp3/ogg/opus via ffmpeg; loop smpl chunk + JSON sidecar (re-render recipe). */
   audio_export(a) {
     const s = store(this);
-    let names = a.names || [a.name];
-    if (a.name && a.name.includes('*')) { const re = new RegExp(`^${a.name.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`); names = [...s.defs.keys()].filter((n) => re.test(n)).sort(); }
+    const names = a.names || matchNames(s, a.name);
     if (!names.length || !names[0]) throw new Error('export needs name (wildcards ok: "gib_burst_*") or names:[...]');
     const format = a.format || 'wav';
     if (!['wav', 'mp3', 'ogg', 'opus'].includes(format)) throw new Error('format must be wav, mp3, ogg or opus');

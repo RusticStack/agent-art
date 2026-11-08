@@ -453,8 +453,10 @@ const OPS = {
         json.meta.frameTags.push({ name: t, from: fr[0], to: fr[fr.length - 1], direction: tag.direction, loop: tag.loop, row: 0 });
       }
       fs.writeFileSync(base + '.png', encodePNG(W, H, sheet));
-      fs.writeFileSync(base + '.json', JSON.stringify(json, null, 2));
-      return { png: base + '.png', json: base + '.json', size: `${W}x${H}`, rows: uniqueRows.length, frames: k };
+      // json:false = png only (no Aseprite-style sidecar)
+      const writeJson = a.json !== false;
+      if (writeJson) fs.writeFileSync(base + '.json', JSON.stringify(json, null, 2));
+      return { png: base + '.png', json: writeJson ? base + '.json' : undefined, size: `${W}x${H}`, rows: uniqueRows.length, frames: k };
     }
     throw new Error('format must be gif, spritesheet or frames');
   },
@@ -562,8 +564,20 @@ const OPS = {
 
   draw(a, source) {
     const d = this.get(a.canvas);
+    if (a.commands_file) {
+      // commands from a JSON file: [cmd, ...] or {commands:[...]}; inline commands run after them
+      const file = path.resolve(a.commands_file);
+      let j;
+      try { j = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { throw new Error(`commands_file ${file}: ${e.message}`); }
+      const list = Array.isArray(j) ? j : j?.commands;
+      if (!Array.isArray(list)) throw new Error(`commands_file ${file} must hold a JSON array of commands or {"commands":[...]}`);
+      a = { ...a, commands: [...list, ...(a.commands || [])] };
+    }
+    const size0 = `${d.width}x${d.height}x${d.frameHeight}`;
     const r = d.execute(a.commands, { layer: a.layer, frame: a.frame, label: a.label, resolveDoc: (n) => this.get(n) });
-    this.changed(d, { op: 'draw', source, label: a.label || a.commands.map((c) => c.op).join(', '), dirty: r.dirty });
+    // rotate {expand:true} can grow the canvas: tell the UI to reload the whole document
+    const grew = size0 !== `${d.width}x${d.height}x${d.frameHeight}`;
+    this.changed(d, { op: 'draw', source, label: a.label || a.commands.map((c) => c.op).join(', '), dirty: grew ? null : r.dirty, structural: grew });
     return { canvas: d.name, version: d.version, commands: a.commands.length, dirty: r.dirty, frames: r.frames, notes: r.notes.length ? r.notes : undefined };
   },
 
@@ -723,6 +737,20 @@ const OPS = {
       return { canvas: d.name, width: d.width, height: d.height, frames: d.frames, scale: `1/${k}`, note: `overview downsampled 1/${k}; pass x,y,w,h to zoom into exact pixels`, image: encodePNG(W, H, out) };
     }
     const used = a.scale ?? Math.max(1, Math.min(16, Math.floor(target / big)));
+    if (a.scale === undefined && tile > 1 && used < 16 && big * used < target * 0.75) {
+      // tiled seam checks: integer scale would waste most of max_size (192 px for 3x64 in 300):
+      // render one step larger and nearest-neighbour downscale to fit max_size
+      const img = d.render({ ...opts, scale: used + 1, grid: false });
+      const k = Math.min(target / img.width, target / img.height);
+      const W = Math.max(1, Math.floor(img.width * k)), H = Math.max(1, Math.floor(img.height * k));
+      const out = new Uint8ClampedArray(W * H * 4);
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const s = (Math.min(img.height - 1, Math.floor(y / k)) * img.width + Math.min(img.width - 1, Math.floor(x / k))) * 4;
+        out.set(img.data.subarray(s, s + 4), (y * W + x) * 4);
+      }
+      const sc = Math.round((W / vw) * 100) / 100;
+      return { canvas: d.name, width: d.width, height: d.height, frames: d.frames, scale: sc, note: `tiled view fitted to max_size: ~${sc} screen px per art pixel (nearest neighbour)`, tint, image: encodePNG(W, H, out) };
+    }
     const png = d.toPNG({ ...opts, scale: used, grid: a.grid ?? used >= 8 });
     return { canvas: d.name, width: d.width, height: d.height, frames: d.frames, scale: used, tint, image: png };
   },

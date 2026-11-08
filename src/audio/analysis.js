@@ -137,7 +137,7 @@ export function stereoField(chs) {
 }
 
 /** Loop seam continuity: second-difference prediction error + level jump across end->start. */
-export function seamCheck(chs, start = 0, end = chs[0].length) {
+export function seamCheck(chs, start = 0, end = chs[0].length, { beatSec = null } = {}) {
   let worst = 0, ratio = 0, energyJump = 0;
   for (const c of chs) {
     const at = (i) => c[start + ((((i - start) % (end - start)) + (end - start)) % (end - start))];
@@ -151,17 +151,26 @@ export function seamCheck(chs, start = 0, end = chs[0].length) {
     const p99 = d[Math.floor(d.length * 0.99)] || 1e-6;
     worst = Math.max(worst, err);
     ratio = Math.max(ratio, err / Math.max(p99, 1e-4));
-    const w = Math.min(Math.round(0.05 * SR), Math.floor((end - start) / 4));
-    let a = 0, b = 0;
-    for (let i = 0; i < w; i++) { a += c[end - 1 - i] ** 2; b += c[start + i] ** 2; }
-    energyJump = Math.max(energyJump, Math.abs(10 * Math.log10((a + 1e-12) / (b + 1e-12))));
+    // level jump: RMS of the last vs the first window (a beat when the tempo is known, so a
+    // rhythmic loop with intended gaps compares hit+gap with hit+gap), minus the loop's own typical
+    // window-to-window change (gaps inside the loop are not a seam problem)
+    const len = end - start;
+    const w = Math.max(64, Math.min(beatSec ? Math.round(beatSec * SR) : Math.round(0.05 * SR), Math.floor(len / 4)));
+    const e = (s0) => { let a = 0; for (let i = 0; i < w; i++) a += at(s0 + i) ** 2; return a / w + 1e-9; }; // floor -90 dB
+    const raw = Math.abs(10 * Math.log10(e(end - w) / e(start)));
+    const nW = Math.floor(len / w), internal = [];
+    for (let k = 1; k < nW && internal.length < 400; k++) internal.push(Math.abs(10 * Math.log10(e(start + k * w) / e(start + (k - 1) * w))));
+    internal.sort((x, y) => x - y);
+    // a change that happens at least twice inside the loop (hit after a gap) is the loop's own rhythm
+    const typical = internal.length >= 3 ? internal[internal.length - 2] : 0;
+    energyJump = Math.max(energyJump, Math.max(0, raw - typical));
   }
   return { jump: +worst.toFixed(4), jump_ratio: +ratio.toFixed(2), level_jump_db: +energyJump.toFixed(2), click: worst > 0.02 && ratio > 8 };
 }
 
 const r1 = (v) => (Number.isFinite(v) ? Math.round(v * 10) / 10 : v);
 /** Core meter readings for a buffer. */
-export function measure(chs, { loop = null, spec = null } = {}) {
+export function measure(chs, { loop = null, spec = null, beatSec = null } = {}) {
   const n = chs[0].length;
   let peak = 0, sum2 = 0, dc = 0, clipped = 0;
   for (const c of chs) for (let i = 0; i < n; i++) { const v = c[i], a = Math.abs(v); if (a > peak) peak = a; sum2 += v * v; dc += v; if (a >= 0.9999) clipped++; }
@@ -183,7 +192,7 @@ export function measure(chs, { loop = null, spec = null } = {}) {
     bands: Object.fromEntries(Object.entries(sum.bands).map(([k, v]) => [k, +(v * 100).toFixed(1)])),
     stereo: stereoField(chs),
   };
-  if (loop) out.seam = seamCheck(chs, loop[0], loop[1]);
+  if (loop) out.seam = seamCheck(chs, loop[0], loop[1], { beatSec });
   return { stats: out, loud: lu, spec: sp, summary: sum, mono };
 }
 
