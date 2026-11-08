@@ -6,128 +6,77 @@
   <title>Agent Art</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 4' shape-rendering='crispEdges'><rect width='2' height='2' fill='%23f5a524'/><rect x='2' y='2' width='2' height='2' fill='%2338bdf8'/><rect x='2' width='2' height='2' fill='%2322c55e'/><rect y='2' width='2' height='2' fill='%23e5484d'/></svg>">
   <link rel="stylesheet" href="style.css">
+  <!-- three.js r170 is vendored (public/vendor/three, MIT) so the 3D viewer works offline -->
+  <script type="importmap">{ "imports": { "three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/" } }</script>
 </head>
 <body>
   <header class="topbar">
+    <button class="btn icon pane-toggle" id="toggleBrowser" title="Assets pane ([)">☰</button>
     <div class="brand"><span class="logo"></span>Agent Art</div>
     <div id="status" class="status"><span class="dot"></span><span id="statusText">connecting…</span></div>
+    <span id="wsPath" class="ws mono"></span>
     <div class="spacer"></div>
-    <label class="toggle" title="What to show when the agent draws">Follow agent
-      <select id="followMode">
-        <option value="canvas">canvas</option>
+    <div class="group">
+      <button class="btn" id="followBtn" title="Follow mode (F): the viewer switches to whatever the agent touches">◉ Follow</button>
+      <select id="followMode" title="What follow mode opens">
+        <option value="canvas">asset</option>
         <option value="project">project overview</option>
         <option value="off">off</option>
       </select>
-    </label>
+    </div>
+    <button class="btn" id="compareBtn" title="Compare two assets or states side by side (C)">⇆ Compare</button>
+    <button class="btn" id="reviewBtn" title="Review mode (M): drag a box or click a pin to leave a note for the agent">⚑ Review</button>
+    <button class="btn" id="reviewListBtn" title="All review notes">Notes <span id="reviewCount" class="count-badge" hidden></span></button>
+    <button class="btn" id="graphBtn" title="Asset graph (Shift+G)">⬡ Graph</button>
+    <button class="btn icon" id="helpBtn" title="Keyboard shortcuts (?)">?</button>
+    <button class="btn icon pane-toggle" id="toggleSide" title="Inspector / activity pane (])">☷</button>
   </header>
 
-  <main class="layout">
-    <aside class="sidebar">
-      <div class="panel-head">
-        <h2>Canvases</h2>
-        <button id="newBtn" class="btn small" title="New canvas">+ New</button>
-      </div>
-      <form id="newForm" class="new-form" hidden>
-        <input id="newName" placeholder="name" required pattern="[A-Za-z0-9_\-.]{1,64}">
-        <div class="row">
-          <input id="newW" type="number" value="16" min="1" max="4096" title="width">
-          <span>×</span>
-          <input id="newH" type="number" value="16" min="1" max="4096" title="height">
-        </div>
-        <div class="row"><button class="btn small primary" type="submit">Create</button><button class="btn small" type="button" id="newCancel">Cancel</button></div>
-      </form>
-      <ul id="canvasList" class="canvas-list"></ul>
-      <p id="emptyHint" class="hint">No canvases yet. Ask the agent to draw something, or create one.</p>
-    </aside>
+  <main id="app" class="app">
+    <aside id="browser" class="pane browser" aria-label="Assets"></aside>
+    <div class="splitter v browser-split" data-size="browser-w" data-dir="x" data-sign="1" title="Drag to resize"></div>
 
-    <section class="stage-wrap">
-      <div class="toolbar">
-        <div class="group" id="tools">
-          <button class="tool active" data-tool="pencil" title="Pencil (B)">✎</button>
-          <button class="tool" data-tool="eraser" title="Eraser (E)">⌫</button>
-          <button class="tool" data-tool="fill" title="Fill (G)">◧</button>
-          <button class="tool" data-tool="line" title="Line (L)">╱</button>
-          <button class="tool" data-tool="rect" title="Rectangle (R)">▭</button>
-          <button class="tool" data-tool="picker" title="Pick color (I)">⦿</button>
+    <section class="center">
+      <div id="viewers" class="viewers">
+        <div class="slot-wrap" id="slotWrapA">
+          <div class="slot-head"><div class="slot-title" id="titleA"></div><div class="tabs" id="tabsA"></div></div>
+          <div class="slot" id="slotA"></div>
         </div>
-        <div class="group">
-          <input type="color" id="color" value="#4a7c3a" title="Color">
-          <input type="range" id="alpha" min="0" max="255" value="255" title="Alpha">
+        <div class="slot-wrap" id="slotWrapB" hidden>
+          <div class="slot-head"><div class="slot-title" id="titleB"></div><div class="tabs" id="tabsB"></div><div class="spacer"></div>
+            <button class="btn small" id="swapB" title="Swap sides">⇄</button><button class="btn small" id="closeB" title="Close comparison (C / Esc)">✕</button></div>
+          <div class="slot" id="slotB"></div>
         </div>
-        <div class="group">
-          <button class="btn" id="undoBtn" title="Undo (Ctrl+Z)">↶</button>
-          <button class="btn" id="redoBtn" title="Redo (Ctrl+Y)">↷</button>
-        </div>
-        <div class="group">
-          <button class="btn" id="zoomOut" title="Zoom out (-)">−</button>
-          <span id="zoomLabel" class="mono">1×</span>
-          <button class="btn" id="zoomIn" title="Zoom in (+)">+</button>
-          <button class="btn" id="zoomFit" title="Fit (0)">Fit</button>
-        </div>
-        <div class="group">
-          <label class="toggle"><input type="checkbox" id="gridToggle" checked> Grid</label>
-          <label class="toggle"><input type="checkbox" id="tileToggle"> Tile 3×3</label>
-        </div>
-        <div class="spacer"></div>
-        <button class="btn" id="overviewBtn" title="Show every canvas of this project (O)" hidden>▦ Overview</button>
-        <a class="btn" id="exportBtn" download>Export PNG</a>
       </div>
-      <div id="stage" class="stage">
-        <div id="canvasHolder" class="canvas-holder">
-          <canvas id="view"></canvas>
-          <canvas id="overlay"></canvas>
-        </div>
-        <div id="overview" class="overview" hidden>
-          <div class="overview-head"><h1 id="ovTitle"></h1><p id="ovDesc"></p>
-            <label class="toggle">Size <input type="range" id="ovSize" min="32" max="192" step="16" value="80"></label></div>
-          <div id="ovGrid" class="ov-grid"></div>
-        </div>
-        <div id="stageEmpty" class="stage-empty">Select or create a canvas</div>
-      </div>
-      <div id="timeline" class="timeline" hidden>
-        <div class="tl-controls">
-          <label class="toggle" title="Edit one frame at a time"><input type="checkbox" id="frameView" checked> Frame view</label>
-          <label class="toggle" title="Ghost previous (red) and next (blue) frames"><input type="checkbox" id="onion"> Onion skin</label>
-          <span class="mono" id="frameLabel"></span>
-          <div class="spacer"></div>
-          <label class="toggle">Preview <select id="animSelect"><option value="">all frames</option></select></label>
-          <a class="btn small" id="gifBtn" download title="Download the selected animation as GIF">GIF</a>
-        </div>
-        <div id="frames" class="frames"></div>
-      </div>
-      <div class="statusbar mono">
-        <span id="canvasMeta">—</span>
-        <span id="cursorInfo"></span>
-      </div>
+      <div class="splitter h bottom-split" data-size="bottom-h" data-dir="y" data-sign="-1"></div>
+      <div id="bottomDock" class="bottom-dock"></div>
     </section>
 
-    <aside class="rightbar">
-      <section class="panel">
-        <div class="panel-head"><h2>Preview</h2><span id="fpsWrap" hidden><input id="fps" type="range" min="1" max="20" value="10" title="Animation speed"></span></div>
-        <div class="preview-row">
-          <canvas id="preview1" class="preview"></canvas>
-          <canvas id="preview2" class="preview"></canvas>
-        </div>
-      </section>
-      <section class="panel" id="projectPanel" hidden>
-        <div class="panel-head"><h2>Project</h2><span id="projName" class="mono"></span></div>
-        <div id="projNotes" class="notes"></div>
-      </section>
-      <section class="panel">
-        <div class="panel-head"><h2>Palette</h2></div>
-        <div id="palette" class="palette"></div>
-        <div id="usedColors" class="palette used"></div>
-      </section>
-      <section class="panel">
-        <div class="panel-head"><h2>Layers</h2></div>
-        <ul id="layers" class="layers"></ul>
-      </section>
-      <section class="panel grow">
-        <div class="panel-head"><h2>Activity</h2></div>
-        <ol id="log" class="log"></ol>
-      </section>
+    <div class="splitter v side-split" data-size="side-w" data-dir="x" data-sign="-1" title="Drag to resize"></div>
+    <aside id="side" class="pane side">
+      <div id="inspector" class="inspector" aria-label="Inspector"></div>
+      <div class="splitter h insp-split" data-size="insp-h" data-dir="y" data-sign="1"></div>
+      <div id="sideDock" class="side-dock"><div id="timelinePane" class="timeline-pane" aria-label="Activity"></div></div>
     </aside>
   </main>
+
+  <div id="help" class="modal help" hidden>
+    <div class="modal-card wide">
+      <h3>Keyboard shortcuts</h3>
+      <div class="help-grid">
+        <div><h4>Everywhere</h4>
+          <p><kbd>F</kbd> follow the agent · <kbd>C</kbd> compare · <kbd>M</kbd> review mode · <kbd>/</kbd> filter assets · <kbd>Shift</kbd>+<kbd>G</kbd> asset graph · <kbd>O</kbd> project overview · <kbd>P</kbd> timeline right / bottom · <kbd>[</kbd> <kbd>]</kbd> side panes · <kbd>1</kbd>–<kbd>5</kbd> viewer tabs · <kbd>Esc</kbd> back to live / close · <kbd>?</kbd> this help</p>
+          <p>Alt/Shift+click an asset = open it in the comparison pane.</p></div>
+        <div><h4>Canvas</h4>
+          <p><kbd>B</kbd> pencil · <kbd>E</kbd> eraser · <kbd>G</kbd> fill · <kbd>L</kbd> line · <kbd>R</kbd> rectangle (Shift = filled) · <kbd>I</kbd> pick · <kbd>H</kbd> pan · <kbd>Ctrl</kbd>+<kbd>Z</kbd>/<kbd>Y</kbd> undo/redo</p>
+          <p>Wheel = zoom at cursor · Space/middle drag = pan · <kbd>+</kbd> <kbd>-</kbd> <kbd>0</kbd> zoom/fit · <kbd>#</kbd> grid · <kbd>T</kbd> tile 3×3 · <kbd>,</kbd> <kbd>.</kbd> frames · <kbd>N</kbd> onion skin</p></div>
+        <div><h4>Players</h4>
+          <p><kbd>Space</kbd> play / pause (animation, rig clip, 3D clip, audio) · <kbd>W</kbd> wireframe (3D) · <kbd>0</kbd> reset view</p></div>
+      </div>
+      <p class="muted small">Your edits use the same API as the agent, so it sees them. Hidden / pinned assets are saved per workspace.</p>
+    </div>
+  </div>
+  <div id="toasts" class="toasts"></div>
   <script src="app.js" type="module"></script>
 </body>
 </html>
