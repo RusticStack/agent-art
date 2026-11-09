@@ -56,7 +56,8 @@ export function splitRig(mesh, info) {
     const Z = [0, 0, 0];
     for (const g of m.groups.values()) {
       rot(g.pos, J); rot(g.nrm, Z);
-      for (const t of g.morphs || []) { rot(t.pos, Z); if (t.nrm) rot(t.nrm, Z); }
+      // morph targets hold absolute positions: same frame change as the base positions
+      for (const t of g.morphs || []) { rot(t.pos, J); if (t.nrm) rot(t.nrm, Z); }
       for (const f of g.faces || []) { const q = rt(f.n[0], f.n[1], f.n[2]); f.n[0] = q[0]; f.n[1] = q[1]; f.n[2] = q[2]; }
     }
   }

@@ -394,3 +394,28 @@ test('damage states, LODs and fracture on skinned models export skinned', () => 
   assert.ok(e.run('model_export', { name: 'snake', path: path.join(tmp(), 'snake.glb'), damage: true }).damage, 'skinned damage export');
   assert.ok(e.run('model_export', { name: 'snake', path: path.join(tmp(), 'snake.glb') }).file, 'plain skinned export still works');
 });
+
+test('rigged damage: the dent morph of every non-root rig piece is a delta in its own frame (not shifted by the joint)', async () => {
+  const { validateGLB: validateSkin, parseGLB: parse, readAccessor } = await import('../src/gltfvalidate.js');
+  const e = new Engine({ home: tmp() }), dir = tmp();
+  e.run('model_create', { name: 'locker', origin: 'bottom', parts: [
+    { type: 'box', name: 'body', w: 24, h: 40, d: 16, color: '#667' },
+    { type: 'box', name: 'door', parent: 'body', w: 22, h: 38, d: 2, at: [0, 1, 9], pivot: [-11, 0, 0], color: '#889' },
+  ] });
+  e.run('model_damage', { name: 'locker', kind: 'door', states: ['wrecked'], seed: 4 });
+  e.run('model_export', { name: 'locker', path: path.join(dir, 'locker.glb'), bake_ao: true, lightmap: true, damage: { lods: [1, 0.5] } });
+  const glb = fs.readFileSync(path.join(dir, 'locker.damage.glb'));
+  const v = validateSkin(glb), c = validateGLB(glb);
+  assert.ok(v.ok && c.ok, [...(v.errors || []), ...(c.errors || [])].slice(0, 3).join('; '));
+  const { json, bin } = parse(glb);
+  let checked = 0;
+  for (const n of json.nodes.filter((x) => x.mesh !== undefined && /_(door|body)$/.test(x.name))) for (const p of json.meshes[n.mesh].primitives) if (p.targets) {
+    const d = readAccessor(json, bin, p.targets[0].POSITION);
+    let still = 0;
+    for (let i = 0; i < d.length; i += 3) if (Math.hypot(d[i], d[i + 1], d[i + 2]) < 1e-5) still++;
+    // the dent moves part of the surface; the rest of the piece stays put (a joint offset moved every vertex)
+    assert.ok(still > d.length / 3 / 5, `${n.name}: ${still} of ${d.length / 3} vertices unmoved by the dent`);
+    checked++;
+  }
+  assert.ok(checked >= 4, `${checked} rig pieces with the dent morph`);
+});
