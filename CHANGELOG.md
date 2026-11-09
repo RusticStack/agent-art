@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Docs pass: the README is restructured (quick start, a first asset in 5 calls, a feature tour, a tools table with every action, complete help-topic and skill lists, configuration) with the deep detail moved to `docs/<area>/README.md` pages; new `llms.txt` and a generated `llms-full.txt` (`npm run docs:llms`, both shipped on npm, drift-tested by `test/llms.test.js`); skill files get trigger-oriented, YAML-safe frontmatter descriptions; `art_help` and the MCP instructions list every help topic (`fp`, `damage`, `skin2d`, `melee`, `materials`, `cleanup` were missing from one or the other).
+
 ## 0.10.0
 
 Fixes the known limits of art_fx, damage and melee from 0.9.0. Everything that does not use a changed feature is byte-identical to 0.9.0: `test/limits.test.js` checks 260 digests (damage exports of rig-less models, art_fx sheets and metadata, the 0.9.0 audio recipes, knife and rifle melee clips and a knife batch manifest) against `test/fixtures/limits-golden-0.9.json`, recorded on 0.9.0.
