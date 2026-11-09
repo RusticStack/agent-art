@@ -46,7 +46,7 @@ npx -y @rusticstack/agent-art tool art_create_canvas '{"name":"slime","width":16
 npx -y @rusticstack/agent-art serve --open                # the web UI on its own
 ```
 
-**From a source checkout:** `npm start` (web UI), `npm test`. The included `.mcp.json` registers the server for Claude Code in this folder.
+**From a source checkout:** `npm install`, then `npm run build:ui` once (the web UI is built with Vite into `dist/ui/`; without it the page says so), `npm start` (web UI), `npm test`. To work on the UI, `npm run dev:ui` serves it with hot reload and forwards `/api` to a running server on port 7420 (or `AGENT_ART_URL`). The included `.mcp.json` registers the server for Claude Code in this folder.
 
 ## Your first asset in 5 calls
 

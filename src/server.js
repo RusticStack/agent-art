@@ -14,7 +14,26 @@ import { getAudio } from './audio/ops.js';
 import { encodeWAV } from './audio/wav.js';
 import { rigLayers, rigDebugRender } from './rigdebug.js';
 
-const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
+/**
+ * The built web UI (npm run build:ui; the npm package ships it). Its sources in web/ need the
+ * bundler (npm packages, and Svelte later), so without a build the server shows NOT_BUILT_PAGE.
+ */
+export const UI_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'ui');
+export const UI_NOT_BUILT = 'Agent Art web UI not built: run npm run build:ui';
+let warnedNotBuilt = false;
+const NOT_BUILT_PAGE = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent Art: web UI not built</title>
+</head>
+<body style="font: 15px system-ui, sans-serif; margin: 3em; max-width: 44em">
+<h1 style="font-size: 1.3em">Web UI not built</h1>
+<p>This source checkout has no built web UI. Run <code>npm install</code>, then <code>npm run build:ui</code>, and reload this page. To work on the UI with hot reload, use <code>npm run dev:ui</code>.</p>
+<p>The MCP tools and the <code>/api</code> endpoints work without it.</p>
+</body>
+</html>
+`;
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml', '.png': 'image/png', '.gif': 'image/gif', '.json': 'application/json; charset=utf-8', '.txt': 'text/plain; charset=utf-8',
@@ -91,7 +110,7 @@ function sendBin(res, type, buf, extra = {}) {
   res.end(buf);
 }
 
-export function startServer(engine, { port, host = '127.0.0.1' }) {
+export function startServer(engine, { port, host = '127.0.0.1', uiDir = UI_DIR }) {
   const clients = new Set();
   const uiToken = crypto.randomBytes(24).toString('hex');
   const modelThumbs = new Map(); // model name -> {key, png}
@@ -297,19 +316,29 @@ export function startServer(engine, { port, host = '127.0.0.1' }) {
       m = p.match(/^\/api\/canvas\/([^/]+)$/);
       if (m) return sendJSON(res, 200, engine.peek('info', { canvas: decodeURIComponent(m[1]) }));
 
-      // static UI
+      // static UI: the built bundle (npm run build:ui)
+      // every page carries this process's UI token (see opSource) and is never cached
+      const withToken = (html) => html.replace(/<head>/i, (h) => `${h}\n  <meta name="${UI_TOKEN_META}" content="${uiToken}">`);
+      const root = path.resolve(uiDir);
+      if (!fs.existsSync(path.join(root, 'index.html'))) {
+        if (!warnedNotBuilt) { warnedNotBuilt = true; process.stderr.write(`${UI_NOT_BUILT} (${root} is missing)\n`); }
+        if (p !== '/' && p !== '/index.html') return sendJSON(res, 404, { ok: false, error: UI_NOT_BUILT });
+        // the page still carries the token, so npm run dev:ui can borrow it from this server
+        res.writeHead(503, { 'content-type': MIME['.html'], 'cache-control': 'no-store' });
+        return res.end(withToken(NOT_BUILT_PAGE));
+      }
       const rel = p === '/' ? 'index.html' : p.slice(1);
-      const file = path.normalize(path.join(PUBLIC, rel));
-      if (!file.startsWith(PUBLIC) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+      const file = path.normalize(path.join(root, rel));
+      if (!file.startsWith(root + path.sep) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
         return sendJSON(res, 404, { ok: false, error: 'Not found' });
       }
       if (path.extname(file) === '.html') {
-        // the page carries this process's UI token (see opSource); never cached
-        const html = fs.readFileSync(file, 'utf8').replace(/<head>/i, (h) => `${h}\n  <meta name="${UI_TOKEN_META}" content="${uiToken}">`);
         res.writeHead(200, { 'content-type': MIME['.html'], 'cache-control': 'no-store' });
-        return res.end(html);
+        return res.end(withToken(fs.readFileSync(file, 'utf8')));
       }
-      res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-cache' });
+      // assets/ file names carry a content hash, so they never change
+      const cache = rel.startsWith('assets/') ? 'public, max-age=31536000, immutable' : 'no-cache';
+      res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'cache-control': cache });
       fs.createReadStream(file).pipe(res);
     } catch (e) {
       sendJSON(res, 400, { ok: false, error: e.message });

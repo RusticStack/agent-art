@@ -173,13 +173,66 @@ test('ui: asset index, model GLB, rig layer stack + debug render, audio, exports
     const n = await (await fetch(U('/api/graph/node?id=crate'))).json();
     assert.equal(n.id, 'model:crate');
     assert.ok(n.out.some((x) => x.rel === 'depends_on' && x.to === 'canvas:tex'));
-    // static UI and the vendored three.js
-    assert.match(await (await fetch(U('/'))).text(), /importmap/);
-    assert.equal((await fetch(U('/vendor/three/three.module.min.js'))).status, 200);
-    assert.equal((await fetch(U('/ui/viewers/model.js'))).headers.get('content-type'), 'text/javascript; charset=utf-8');
   } finally {
     await close(srv);
   }
+});
+
+test('ui: serves the built bundle with the UI token, a clear page when it is not built', async () => {
+  // a stand-in for dist/ui (npm run build:ui output): index.html + hashed assets
+  const dist = tmp();
+  fs.mkdirSync(path.join(dist, 'assets'));
+  fs.writeFileSync(path.join(dist, 'index.html'), '<!doctype html><html><head><script type="module" src="./assets/index-abc.js"></script></head><body></body></html>');
+  fs.writeFileSync(path.join(dist, 'assets', 'index-abc.js'), 'import("./three-def.js");');
+  fs.writeFileSync(path.join(dist, 'assets', 'three-def.js'), 'export const REVISION = "170";');
+  const e = new Engine({ home: tmp() });
+  let port = nextPort++;
+  let srv = await startServer(e, { port, uiDir: dist });
+  let U = (p) => `http://127.0.0.1:${port}${p}`;
+  try {
+    const page = await fetch(U('/'));
+    assert.equal(page.status, 200);
+    assert.equal(page.headers.get('cache-control'), 'no-store');
+    assert.match(await page.text(), /<meta name="agent-art-ui-token" content="[0-9a-f]{48}">/);
+    const js = await fetch(U('/assets/index-abc.js'));
+    assert.equal(js.headers.get('content-type'), 'text/javascript; charset=utf-8');
+    assert.match(js.headers.get('cache-control'), /immutable/);
+    assert.equal(await (await fetch(U('/assets/three-def.js'))).text(), 'export const REVISION = "170";');
+    assert.equal((await fetch(U('/assets/nope.js'))).status, 404);
+    assert.equal((await fetch(U('/vendor/three/three.module.min.js'))).status, 404);
+  } finally {
+    await close(srv);
+  }
+  // no build: a page that says what to run (still carrying the token for npm run dev:ui), API unaffected
+  port = nextPort++;
+  srv = await startServer(e, { port, uiDir: path.join(dist, 'missing') });
+  U = (p) => `http://127.0.0.1:${port}${p}`;
+  try {
+    const page = await fetch(U('/'));
+    assert.equal(page.status, 503);
+    const html = await page.text();
+    assert.match(html, /npm run build:ui/);
+    assert.match(html, /<meta name="agent-art-ui-token" content="[0-9a-f]{48}">/);
+    const asset = await fetch(U('/assets/index-abc.js'));
+    assert.equal(asset.status, 404);
+    assert.match((await asset.json()).error, /npm run build:ui/);
+    assert.equal((await (await fetch(U('/api/health'))).json()).app, 'agent-art');
+  } finally {
+    await close(srv);
+  }
+});
+
+test('ui: sources load three.js from the npm package through the bundler (no vendored copy, no import map)', () => {
+  const web = (p) => new URL(`../web/${p}`, import.meta.url);
+  assert.ok(!fs.existsSync(web('vendor')));
+  assert.doesNotMatch(fs.readFileSync(web('index.html'), 'utf8'), /importmap/);
+  const viewer = fs.readFileSync(web('ui/viewers/model.js'), 'utf8');
+  for (const m of ['three', 'three/addons/controls/OrbitControls.js', 'three/addons/loaders/GLTFLoader.js', 'three/addons/helpers/VertexNormalsHelper.js']) assert.ok(viewer.includes(`import('${m}')`), m);
+  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.deepEqual(pkg.dependencies || {}, {});
+  assert.ok(pkg.devDependencies.three && pkg.files.includes('dist/ui/') && !pkg.files.includes('public/'));
+  assert.equal(pkg.scripts.prepack, 'npm run build:ui');
+  assert.ok(!pkg.scripts.postinstall && !pkg.scripts.prepare);
 });
 
 test('ui: audio wav + analysis endpoints', async () => {

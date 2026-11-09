@@ -10,7 +10,7 @@
     "bin/",
     "src/",
     "!src/meshfixtures.js",
-    "public/",
+    "dist/ui/",
     "README.md",
     "LICENSE"
   ],
@@ -18,7 +18,12 @@
     "start": "node bin/agent-art.js serve --open",
     "serve": "node bin/agent-art.js serve",
     "mcp": "node bin/agent-art.js mcp",
+    "build:ui": "vite build",
+    "dev:ui": "vite",
+    "check:ui": "svelte-check --tsconfig ./tsconfig.json",
     "test": "node --test test/",
+    "test:ui": "vitest run",
+    "prepack": "npm run build:ui",
     "docs:llms": "node scripts/build-llms.js"
   },
   "keywords": [
@@ -51,5 +56,14 @@
   "engines": {
     "node": ">=20"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "svelte": "^5.57.3",
+    "svelte-check": "^4.7.8",
+    "three": "0.170.0",
+    "typescript": "^6.0.0",
+    "vite": "^8.3.7",
+    "vitest": "^5.1.0"
+  }
 }

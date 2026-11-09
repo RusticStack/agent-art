@@ -1,4 +1,4 @@
-// 3D model viewer (three.js, vendored in public/vendor/three, loaded on first use): the model's
+// 3D model viewer (three.js from npm, bundled as a separate chunk loaded on first use): the model's
 // in-memory .glb from the server (same scene as art_model export). Orbit, wireframe, vertex
 // normals, UV checker, clips (glTF animations), sockets and pivots, triangle / node stats, and a
 // channel dropdown (materials v2: albedo, normal, ORM, metal, rough, AO, emissive, height, lightmap,

@@ -1,0 +1,76 @@
+// Web UI build (Vite). Sources live in web/, the build goes to dist/ui/, which src/server.js serves.
+//   npm run build:ui   production build (no sourcemaps; three.js is a lazy chunk for the 3D viewer)
+//   npm run dev:ui     dev server with hot reload; /api (REST, ops, SSE) is proxied to a running
+//                      agent-art server (AGENT_ART_URL, default http://127.0.0.1:7420)
+import { fileURLToPath } from 'node:url';
+import { defineConfig } from 'vite';
+import { svelte } from '@sveltejs/vite-plugin-svelte';
+
+const here = (p) => fileURLToPath(new URL(p, import.meta.url));
+const API = (process.env.AGENT_ART_URL || 'http://127.0.0.1:7420').replace(/\/+$/, '');
+const TOKEN_META = /<meta name="agent-art-ui-token"[^>]*>/;
+const isLocal = (origin) => { try { return ['localhost', '127.0.0.1', '[::1]'].includes(new URL(origin).hostname); } catch { return false; } };
+
+/**
+ * Dev only: the server trusts ops with source "user" when the page carries its per-process UI
+ * token and the request has its own Origin. Copy the token from the running server's page into the
+ * dev page; the proxy below rewrites a local Origin to the server's.
+ */
+function devUiToken() {
+  let warned = false;
+  return {
+    name: 'agent-art-dev-ui-token',
+    apply: 'serve',
+    async transformIndexHtml(html) {
+      try {
+        const meta = (await (await fetch(API + '/')).text()).match(TOKEN_META)?.[0];
+        if (meta) return html.replace(/<head>/i, (h) => `${h}\n  ${meta}`);
+      } catch { /* server not running */ }
+      if (!warned) console.warn(`[dev:ui] no agent-art server at ${API}: start one (npm run serve) or set AGENT_ART_URL`);
+      warned = true;
+      return html;
+    },
+  };
+}
+
+export default defineConfig({
+  root: here('./web'),
+  base: './',
+  publicDir: false,
+  plugins: [svelte({ configFile: here('./svelte.config.js') }), devUiToken()],
+  build: {
+    outDir: here('./dist/ui'),
+    emptyOutDir: true,
+    sourcemap: false,
+    assetsDir: 'assets',
+    chunkSizeWarningLimit: 800, // the lazy three.js chunk (~700 kB) is expected
+    rolldownOptions: {
+      output: {
+        // keep /*! */ and @license notices (three.js is MIT)
+        comments: { legal: true, annotation: false, jsdoc: false },
+        // three.js core + the addons the 3D viewer uses: one lazy chunk, fetched when it first opens
+        codeSplitting: { groups: [{ name: 'three', test: /[\\/]node_modules[\\/]three[\\/]/ }] },
+      },
+    },
+  },
+  server: {
+    port: 5173,
+    strictPort: false,
+    proxy: {
+      '/api': {
+        target: API,
+        changeOrigin: true,
+        configure(proxy) {
+          proxy.on('proxyReq', (proxyReq, req) => {
+            if (req.headers.origin && isLocal(req.headers.origin)) proxyReq.setHeader('origin', new URL(API).origin);
+          });
+        },
+      },
+    },
+  },
+  test: {
+    root: here('./web'),
+    include: ['**/*.test.ts'],
+    environment: 'node',
+  },
+});
