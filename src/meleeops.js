@@ -5,7 +5,7 @@
 // line per cell) and preview paired clips. anim_batch calls meleeBatchAnim for the manifest fields.
 import fs from 'node:fs';
 import path from 'node:path';
-import { normalizeRig, resolvePose, lerpPose, solvePose, partIn, poseOf, renderPose, ikChain, footLow, groundRow } from './rig.js';
+import { normalizeRig, resolvePose, lerpPose, solvePose, partIn, poseOf, renderPose, ikChain, footLow, groundRow, groundEnds } from './rig.js';
 import { getRig, framePoses } from './rigops.js';
 import { normalizeClip, evalClip, applyProportions, retargetClip, LIB_NAME } from './animlib.js';
 import { meleeLibrary, meleeParts, meleeAnim, meleeEvents, hitSources, frameVolumes, segDist, inPoly, pairedOut, turnedView, VIEW_YAW8, normalizeMelee, frameOfT, HD_VIEWS } from './melee.js';
@@ -47,7 +47,9 @@ const listClips = (e, sk) => { const d = libDir(e, 'clips', sk); return fs.exist
 const cellsOf = (sk) => (sk.melee ? { weapon: sk.melee.cell ?? null, shield: sk.melee.shield_cell ?? null } : null);
 
 /** Sub-samples per frame step for the exported swept hit polygons. */
-const SWEEP_SUB = 4;
+const SWEEP_SUB = 8; // sub-steps of the exported swept hulls (the check samples twice as densely)
+/** foot | hand: which ground-contact metric a limb end counts toward. */
+const endKind = (n) => (/^hand(_|$)/.test(n) ? 'hand' : 'foot');
 
 // ---------- paired fitting ----------
 /** A contact point of a part: hands / fists at the knuckles, heads and chests at their centre, a shield on its face. */
@@ -425,9 +427,9 @@ function checkClip(e, rig, def, clip, getClip, sk, views, tol) {
     const firstActive = phase.indexOf('active');
     if (firstActive >= 0 && firstActive < Math.min(wEnd, frameOfT(m.windup?.[0] ?? 0, n) + 1)) issues.push(`hit volume at frame ${firstActive}, before the windup`);
     metrics.first_active = firstActive;
-    // coverage: the edge line at 8 sub-steps between active frames lies inside the frame
+    // coverage: the edge line at 16 sub-steps between active frames lies inside the frame
     // capsules or the swept polygon (r + tol)
-    const k = 8;
+    const k = SWEEP_SUB * 2;
     const sources = hitSources(rig, m, cellsOf(sk));
     const dense = subPoses(rig, clip, getClip, sk, k);
     let worst = 0, checked = 0;
@@ -459,18 +461,19 @@ function checkClip(e, rig, def, clip, getClip, sk, views, tol) {
     metrics.sweep_miss_px = r1(worst);
     if (worst > tol) issues.push(`weapon path leaves the hit volumes by ${r1(worst)} px`);
   }
-  // ground contact: no foot drawn below the view's ground row, in any view (every melee clip)
-  const feet = rig.feet || ['foot_f', 'foot_b'];
-  let sink = 0, at = '';
+  // ground contact: no foot or hand drawn below the view's ground row, in any view (every melee clip)
+  const feet = rig.feet || ['foot_f', 'foot_b'], ends = groundEnds(rig);
+  const sink = { foot: [0, ''], hand: [0, ''] };
   for (const view of views) {
     const g = groundRow(rig, view, feet);
     clipFrames(e, rig, def, clip, getClip, sk, view).forEach((P, f) => {
       const s = solvePose(rig, P, view);
-      for (const ft of feet) { const d = (footLow(rig, s, ft) ?? -Infinity) - g; if (d > sink) { sink = d; at = `${ft}, ${view} frame ${f}`; } }
+      for (const n of ends) { const d = (footLow(rig, s, n) ?? -Infinity) - g, w = sink[endKind(n)]; if (d > w[0]) { w[0] = d; w[1] = `${n}, ${view} frame ${f}`; } }
     });
   }
-  metrics.foot_sink_px = r1(sink);
-  if (sink > tol) issues.push(`a foot sinks ${r1(sink)} px below the ground (${at})`);
+  metrics.foot_sink_px = r1(sink.foot[0]);
+  metrics.hand_sink_px = r1(sink.hand[0]);
+  for (const k of ['foot', 'hand']) if (sink[k][0] > tol) issues.push(`a ${k} sinks ${r1(sink[k][0])} px below the ground (${sink[k][1]})`);
   return { issues, metrics };
 }
 
@@ -483,7 +486,7 @@ function pairedTrack(e, rig, def, att, vic, getClip, sk, view, cells, rigV = rig
   const foot = (r, solved, n, dx) => { const q = contactPoint(r, solved, n, cells); const pp = partIn(r, n, solved.src); return [q[0] + dx, solved.world[n].y + (pp.h - 1 - pp.pivot[1])]; };
   // each actor's drawn foot rows against its own rig's ground row in the view it is drawn in
   const gA = groundRow(rig, view, feet), gV = groundRow(rigV, po.partner_view, feetV);
-  const sinkOf = (r, solved, fs, g) => Object.fromEntries(fs.map((n) => [n, (footLow(r, solved, n) ?? -Infinity) - g]));
+  const sinkOf = (r, solved, fs, g) => Object.fromEntries(groundEnds(r).map((n) => [n, (footLow(r, solved, n) ?? -Infinity) - g]));
   return A.map((Pa, f) => {
     const sa = solvePose(rig, Pa, view), sv = partnerSolve(rigV, V[f], po);
     return {
@@ -548,7 +551,8 @@ function checkPaired(e, rig, def, att, vic, getClip, sk, views, tol, cells, rigV
   const ground = solvePose(rig, {}, 'side');
   const gy = Math.max(...(rig.feet || ['foot_f', 'foot_b']).map((f) => { const pp = partIn(rig, f, 'side'); return ground.world[f].y + pp.h - 1 - pp.pivot[1]; }));
   const contactTol = Math.max(tol * 2, ((rig.frame[1] - 4) / 98) * 4);
-  let slide = 0, rel = 0, worstContact = 0, sink = 0, sinkAt = '';
+  let slide = 0, rel = 0, worstContact = 0;
+  const sink = { foot: [0, ''], hand: [0, ''] };
   const byView = {}, lateral = {};
   let sideTr = null;
   const sideTrack = () => sideTr || (sideTr = pairedTrack(e, rig, def, att, vic, getClip, sk, 'side', cells, rigV, defV));
@@ -559,7 +563,7 @@ function checkPaired(e, rig, def, att, vic, getClip, sk, views, tol, cells, rigV
     if (view === 'side') sideTr = tr;
     const planted = (q) => q[1] >= gy - 1.5;
     // no foot of either actor drawn below its ground row, in every view
-    for (let f = 0; f < tr.length; f++) for (const who of ['a', 'v']) for (const [ft, d] of Object.entries(tr[f].sink[who])) if (d > sink) { sink = d; sinkAt = `${who === 'a' ? 'attacker' : 'victim'} ${ft}, ${view} frame ${f}`; }
+    for (let f = 0; f < tr.length; f++) for (const who of ['a', 'v']) for (const [ft, d] of Object.entries(tr[f].sink[who])) { const w = sink[endKind(ft)]; if (d > w[0]) { w[0] = d; w[1] = `${who === 'a' ? 'attacker' : 'victim'} ${ft}, ${view} frame ${f}`; } }
     if (view === 'side') {
       for (let f = 1; f < tr.length; f++) for (const who of ['a', 'v']) for (const [ft, q] of Object.entries(tr[f][who])) {
         const q0 = tr[f - 1][who][ft];
@@ -589,9 +593,9 @@ function checkPaired(e, rig, def, att, vic, getClip, sk, views, tol, cells, rigV
   }
   if (slide > tol) issues.push(`a planted foot slides ${r1(slide)} px`);
   if (rel > tol) issues.push(`feet slide against each other by ${r1(rel)} px`);
-  if (sink > tol) issues.push(`a foot sinks ${r1(sink)} px below the ground (${sinkAt})`);
+  for (const k of ['foot', 'hand']) if (sink[k][0] > tol) issues.push(`a ${k} sinks ${r1(sink[k][0])} px below the ground (${sink[k][1]})`);
   for (const [v, d] of Object.entries(byView)) if (d > contactTol) issues.push(`${v}: contact points ${d} px apart${/^(front|back)$/.test(rig.mirror[v] || v) ? ' in 3D (screen + side-view depth)' : ''} (tolerance ${r1(contactTol)})`);
-  const metrics = { foot_slide_px: r1(slide), feet_relative_px: r1(rel), foot_sink_px: r1(Math.max(0, sink)), contact_px: r1(worstContact), contact_tolerance_px: r1(contactTol), contact_by_view: byView, ...(Object.keys(lateral).length ? { lateral_px: lateral } : {}), ...(release < n ? { release_frame: release } : {}) };
+  const metrics = { foot_slide_px: r1(slide), feet_relative_px: r1(rel), foot_sink_px: r1(Math.max(0, sink.foot[0])), hand_sink_px: r1(Math.max(0, sink.hand[0])), contact_px: r1(worstContact), contact_tolerance_px: r1(contactTol), contact_by_view: byView, ...(Object.keys(lateral).length ? { lateral_px: lateral } : {}), ...(release < n ? { release_frame: release } : {}) };
   if (att.melee.paired.transfer && rig.weapon) { const t = checkTransfer(e, rig, def, att, vic, getClip, sk, views, tol, rigV, defV); issues.push(...t.issues); Object.assign(metrics, t.metrics); }
   return { issues, metrics };
 }

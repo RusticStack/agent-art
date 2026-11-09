@@ -633,8 +633,8 @@ export function framePoses(engine, rig, def, a) {
     if (feet.length) poses = plantFeet(rig, poses, view, feet, { loop });
     else notes.push('plant: this rig has no foot parts with a two-bone leg (foot -> shin -> thigh); set rig "feet" or pass plant:[parts]');
   }
-  // ground: a foot drawn below the ground row is lifted onto it by leg IK (melee clips)
-  if (a.ground) poses = groundFeet(rig, poses, view, rig.feet || ['foot_f', 'foot_b'].filter((n) => rig.parts[n]));
+  // ground: a foot or hand drawn below the ground row is lifted onto it by limb IK (melee clips)
+  if (a.ground) poses = groundFeet(rig, poses, view);
   // secondary: damped follow-through for rig.secondary parts (or an inline {part:{stiffness,damping}})
   if (a.secondary) {
     const config = typeof a.secondary === 'object' ? normalizeSecondary(rig.parts, a.secondary) : rig.secondary;

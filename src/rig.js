@@ -852,6 +852,13 @@ export function footLow(rig, solved, foot) {
   return low;
 }
 
+/** Limb ends the ground pass keeps above the ground row: the feet and every hand on a two-bone arm. */
+export function groundEnds(rig) {
+  const feet = rig.feet || ['foot_f', 'foot_b'].filter((n) => rig.parts[n]);
+  const two = (n) => { const B = rig.parts[n]?.parent; return !!(B && rig.parts[B].parent); };
+  return [...feet, ...rig.order.filter((n) => /^hand(_|$)/.test(n) && !feet.includes(n) && two(n))];
+}
+
 /** The ground row of a view: the lowest drawn foot row of the rest pose. */
 export function groundRow(rig, view, feet = rig.feet) {
   const rest = solvePose(rig, {}, view);
@@ -859,15 +866,15 @@ export function groundRow(rig, view, feet = rig.feet) {
 }
 
 /**
- * Ground contact (melee clips): a foot drawn below the view's ground row is lifted onto it by
- * two-bone leg IK (front / back with scale_children: in depth, the leg foreshortens toward the
- * viewer; otherwise in the screen plane, the knee kept on its side), the foot keeping its world
- * rotation. Frames with no sinking foot are returned untouched.
+ * Ground contact (melee clips): a limb end (feet, hands: groundEnds) drawn below the view's ground
+ * row is lifted onto it by two-bone IK (front / back with scale_children: in depth, the limb
+ * foreshortens toward the viewer; otherwise in the screen plane, the knee / elbow kept on its
+ * side), the end keeping its world rotation. Frames with nothing sinking are returned untouched.
  */
-export function groundFeet(rig, poses, view, feet = rig.feet, { tol = 0.25 } = {}) {
+export function groundFeet(rig, poses, view, feet = groundEnds(rig), { tol = 0.25, ground = rig.feet || ['foot_f', 'foot_b'].filter((n) => rig.parts[n]) } = {}) {
   const src = rig.mirror[view] || view;
   const deep = /^(front|back)$/.test(src) && rig.scaleChildren;
-  const g = groundRow(rig, view, feet);
+  const g = groundRow(rig, view, ground);
   if (!Number.isFinite(g)) return poses;
   for (const f of feet) ikChain(rig, f);
   return poses.map((P0) => {
