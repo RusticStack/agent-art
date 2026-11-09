@@ -78,7 +78,8 @@ function aimList(v, base) {
   } else {
     const n = v === undefined ? FP_AIMS : Math.round(Number(v));
     if (!(n >= 1 && n <= 9)) throw new Error('"aims" must be 1..9 (variants around the base aim) or a list of 1-9 screen angles in degrees');
-    list = Array.from({ length: n }, (_, k) => (k === (n - 1) / 2 ? base : wrap(base + (k - (n - 1) / 2) * FP_AIM_STEP * DEG)));
+    const mid = Math.floor((n - 1) / 2); // even counts: the base aim + one more variant above it than below
+    list = Array.from({ length: n }, (_, k) => (k === mid ? base : wrap(base + (k - mid) * FP_AIM_STEP * DEG)));
   }
   const seen = new Set();
   return list.filter((r) => { const k = Math.round(r / DEG * 100); if (seen.has(k)) return false; seen.add(k); return true; }).sort((x, y) => x - y);

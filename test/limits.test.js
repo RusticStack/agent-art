@@ -556,3 +556,31 @@ test('gun butt strokes: the exported swept hulls cover the weapon path sampled 1
     }
   }
 });
+
+// ---------- review fixes ----------
+test('art_fx: even aim counts keep the base aim; a remake with fewer aims drops its old variant files', () => {
+  const e = new Engine({ home: fs.mkdtempSync(path.join(os.tmpdir(), 'aa-fxaims-')) });
+  const dir = path.join(e.home, 'fxout');
+  for (const n of [2, 4]) {
+    const r = e.run('fx_make', { type: 'muzzle', variant: 'rifle', view: 'fp', aims: n, name: `mz${n}`, path: dir });
+    assert.equal(r.aims.length, n);
+    assert.ok(r.aims.includes(r.meta.fp.aims.find((v) => v.file === r.meta.file).aim_deg));
+  }
+  const files = () => fs.readdirSync(path.join(dir, 'fx')).filter((f) => f.startsWith('mz4')).sort();
+  assert.equal(files().length, 4);
+  e.run('fx_make', { type: 'muzzle', variant: 'rifle', view: 'fp', aims: 2, name: 'mz4', path: dir });
+  assert.equal(files().length, 2);
+  // an invalid effect writes nothing
+  const before = fs.readdirSync(path.join(dir, 'fx')).length;
+  assert.throws(() => e.run('fx_make', { type: 'muzzle', variant: 'rifle', view: 'side', aims: 3, name: 'bad', path: dir }), /aims/);
+  assert.equal(fs.readdirSync(path.join(dir, 'fx')).length, before);
+});
+
+test('ground contact: a hand on a one-bone arm is not an IK end (the torso does not bend)', async () => {
+  const { normalizeRig, groundEnds } = await import('../src/rig.js');
+  const rig = normalizeRig({ frame: [48, 48], parts: {
+    pelvis: { w: 8, h: 6 }, chest: { w: 8, h: 8, parent: 'pelvis' }, arm: { w: 3, h: 30, parent: 'chest' }, hand: { w: 3, h: 3, parent: 'arm' },
+    thigh: { w: 3, h: 8, parent: 'pelvis' }, shin: { w: 3, h: 8, parent: 'thigh' }, foot_f: { w: 4, h: 2, parent: 'shin' },
+  }, feet: ['foot_f'] });
+  assert.deepEqual(groundEnds(rig), ['foot_f']);
+});

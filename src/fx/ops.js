@@ -42,7 +42,7 @@ function readManifest(dir) {
   return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : { version: 1, generator: 'agent-art art_fx', groups: {} };
 }
 const writeJSON = (f, o) => fs.writeFileSync(f, JSON.stringify(o, null, 1));
-const png = (dir, rel, w, h, data) => { texLimit(w, h, rel); const f = path.join(dir, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, encodePNG(w, h, data)); return rel; };
+const pngFile = (dir, rel, w, h, data) => { texLimit(w, h, rel); const f = path.join(dir, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, encodePNG(w, h, data)); return rel; };
 function groupOf(a) {
   const g = a.group ?? 'fx';
   if (typeof g !== 'string' || !GROUP_RE.test(g) || RESERVED_GROUPS.has(g)) throw new Error(`"group" must be 1-64 chars of letters, digits, _ - (not ${[...RESERVED_GROUPS].join(', ')}; got ${JSON.stringify(g)})`);
@@ -89,7 +89,9 @@ function peakImage(r) {
   return compositeOver(bg, r.sheet, r.o.blend === 'distortion' ? 'alpha' : r.o.blend);
 }
 /** Write one rendered effect's files; -> meta (file names filled). */
-function writeFx(dir, group, r) {
+function writeFx(dir, group, r, write = true) {
+  // write:false fills the metadata with the planned file names (validated before any file is written)
+  const png = write ? pngFile : (d, rel, w, h) => { texLimit(w, h, rel); return rel; };
   const { meta } = r, F = fxFiles(group, r);
   if (r.decal) {
     const A = r.decal;
@@ -126,8 +128,17 @@ function makeOne(engine, a, dir, group, man, source) {
   r.ms = Date.now() - t0; // render time: in the reply only, never in the saved json (same seed = same bytes)
   const c = clash(man, group, o.id, Object.values(fxFiles(group, r)));
   if (c) throw new Error(`effect "${o.id}" in group "${group}" would overwrite ${c}: pick another name or group`);
-  const meta = writeFx(dir, group, r), errs = validateFxMeta(meta);
+  const errs = validateFxMeta(writeFx(dir, group, r, false));
   if (errs.length) throw new Error(`fx metadata invalid: ${errs.join('; ')}`);
+  const prev = man.groups[group]?.[o.id], meta = writeFx(dir, group, r);
+  // remaking an effect with fewer aim variants (or no straight sheet): its old extra files go
+  if (prev) {
+    const keep = new Set(filesOfMeta(meta)), root = path.resolve(dir);
+    for (const f of filesOfMeta(prev)) {
+      const abs = path.resolve(dir, f);
+      if (!keep.has(f) && abs.startsWith(root + path.sep) && fs.existsSync(abs)) fs.rmSync(abs, { force: true });
+    }
+  }
   (man.groups[group] ??= {})[o.id] = meta;
   if (canvas) toCanvas(engine, canvas, r, source);
   return r;
