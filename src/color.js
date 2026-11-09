@@ -150,6 +150,24 @@ export function blendOver(dst, src, opacity = 1) {
   return [ch(0), ch(1), ch(2), clamp255(oa * 255)];
 }
 
+/**
+ * Nearest palette colour ([r,g,b]) to r, g, b under the weighted (redmean) RGB metric used by
+ * sprite quantize; cache: optional Map keyed by the rounded input.
+ */
+export function nearestColor(pal, r, g, b, cache) {
+  const key = cache ? `${Math.round(r)},${Math.round(g)},${Math.round(b)}` : null;
+  let best = cache ? cache.get(key) : undefined;
+  if (best) return best;
+  let bd = Infinity;
+  for (const p of pal) {
+    const rm = (r + p[0]) / 2;
+    const dd = (2 + rm / 256) * (r - p[0]) ** 2 + 4 * (g - p[1]) ** 2 + (2 + (255 - rm) / 256) * (b - p[2]) ** 2;
+    if (dd < bd) { bd = dd; best = p; }
+  }
+  if (cache) cache.set(key, best);
+  return best;
+}
+
 /** Median-cut palette of n colours from opaque pixels of several RGBA images. */
 export function medianCut(images, n) {
   const counts = new Map();
