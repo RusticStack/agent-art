@@ -116,11 +116,13 @@ Parameters:
 
 ### art_help
 
-Docs on demand: {op:"shade"} = draw op options + example; {topic}: workflow textures characters animation scenes hires minecraft rig library skin2d melee 3d materials damage audio music mixing perception planets fx fp graph cleanup; {skill} = step-by-step recipe.
+Docs on demand: {op:"shade"} = draw op options + example; {topic} = guide (long ones answer with a core + section index: {topic, section:"a,b"} or full:true); {skill} = step-by-step recipe.
 
 Parameters:
 - op (string)
 - topic (string): one of index | ops | workflow | textures | characters | animation | scenes | hires | minecraft | rig | library | skin2d | melee | 3d | materials | damage | audio | music | mixing | perception | planets | fx | fp | graph | cleanup
+- section (string)
+- full (boolean)
 - skill (string): one of tileable-texture | sprite | rig | rig-hd | weapon-handling | anim-library | walk-cycle | iso-scene | hd2d-scene | minecraft-pack | 3d-kit | ship-model | hard-surface | ships-structures | fp-weapon | prop-rig | ui-icons | sfx-pack | music-track | planets-space | combat-fx
 
 ### art_sheet

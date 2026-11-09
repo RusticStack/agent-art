@@ -22,10 +22,10 @@ test('llms-full.txt is up to date (run npm run docs:llms)', () => {
   assert.fail(`llms-full.txt is stale at line ${i + 1}:\n  committed: ${JSON.stringify((a[i] ?? '<end>').slice(0, 160))}\n  generated: ${JSON.stringify((b[i] ?? '<end>').slice(0, 160))}\nRun: npm run docs:llms`);
 });
 
-test('every help topic is named in the art_help description and the MCP instructions', () => {
-  const help = TOOLS.find((t) => t.name === 'art_help').description;
+test('every help topic is in the art_help topic enum and the MCP instructions', () => {
+  const topics = TOOLS.find((t) => t.name === 'art_help').inputSchema.properties.topic.enum;
   for (const k of Object.keys(TOPICS)) {
-    assert.match(help, new RegExp(`(^|[\\s:|])${k}([\\s;|]|$)`), `art_help description lists ${k}`);
+    assert.ok(topics.includes(k), `art_help topic enum lists ${k}`);
     assert.match(INSTRUCTIONS, new RegExp(`[\\s|]${k}[|}]`), `INSTRUCTIONS list ${k}`);
   }
 });

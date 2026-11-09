@@ -57,7 +57,8 @@ const USAGE = `agent-art — pixel art editor for AI agents, with a live web UI
   agent-art tools                      the MCP tool list + server instructions (for agents without MCP)
   agent-art tool <art_tool> [json | @file.json | -] [--out view.png]
         call one MCP tool exactly as an MCP client would; an image reply is written to --out
-  agent-art help [topic | op]          guides (workflow, textures, characters, animation, rig, 3d, ...) or a draw command's usage
+  agent-art help [topic [section] | op] [--full]   guides (workflow, textures, characters, animation, rig, 3d, ...;
+        long ones print a core + section index) or a draw command's usage
   agent-art skills [--out DIR]         write the agent skills as <DIR>/<name>/SKILL.md (default ./agent-art-skills)
 
 Tip (Windows / any shell): avoid quoting problems by piping JSON on stdin:
@@ -188,9 +189,10 @@ async function main() {
       runner.close();
     }
   } else if (cmd === 'help' && rest[0]) {
-    const [what] = rest;
+    const full = rest.includes('--full');
+    const [what, section] = rest.filter((r) => r !== '--full');
     if (SKILLS[what]) console.log(skillText(what));
-    else if (TOPICS[what] || what === 'index' || what === 'ops') console.log(helpText({ topic: what }));
+    else if (TOPICS[what] || what === 'index' || what === 'ops') console.log(helpText({ topic: what, section, full }));
     else console.log(helpText({ op: what }));
   } else if (cmd === 'usage') {
     const opt = (n) => { const v = flag(n); return v === true ? undefined : v; };

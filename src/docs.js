@@ -9,6 +9,7 @@ import './kitrooms.js';
 import { AUDIO_TOPICS } from './audio/docs.js';
 import { PLANET_TOPICS } from './space/docs.js';
 import { FX_TOPICS } from './fx/docs.js';
+import { estimateTokens } from './usage.js';
 
 /** op -> [signature, short purpose]. Field names are exact; "?" = optional. */
 export const SIGS = {
@@ -456,6 +457,48 @@ prune_manifest:{file, keys?:["sprites.marine_idle"]} also removes entries from a
 usage = disk use by kind, project and group, biggest offenders, trash size. Replies are compact (counts + first N; limit, full:true).
 art_canvas/art_model/art_audio/art_project delete also move the files to the trash (graph and notes unchanged, as before); cleanup.trash_deletes:false in config.json restores hard deletes.`;
 
+/**
+ * Sections of the long topics: [id, prefix of the heading line that starts it]. art_help {topic}
+ * answers with the text before the first section plus an index, {topic, section} with one or more
+ * sections, {topic, full:true} with everything. A long topic costs its tokens every time an agent
+ * reads it, and most tasks need one part of it.
+ */
+export const TOPIC_SECTIONS = {
+  '3d': [['parts', '- floor {'], ['textures', 'TEXTURES:'], ['recipes', 'RECIPES:'], ['hard-surface', 'HARD-SURFACE DETAIL'],
+    ['render-cost', 'RENDER COST'], ['mesh', 'MESH PROCESSING'], ['hard-surface-recipes', 'HARD-SURFACE RECIPES'],
+    ['ships', 'SHIPS + STRUCTURES'], ['assemblies', '- Assemblies'], ['ship-kits', '- Templates: create'],
+    ['rigs', 'RIGS & CLIPS'], ['sprites', 'PRE-RENDERED SPRITES'], ['skinning', 'SKINNING']],
+  rig: [['basics', '0. Quick start'], ['hd', 'HIGH-DETAIL CHARACTERS'], ['weapons', 'HELD WEAPONS'], ['depth', 'DEPTH, DRAW ORDER']],
+  melee: [['clips', '1. melee {'], ['takedowns', 'PER-SKELETON TAKEDOWNS'], ['manifest', 'MANIFEST'], ['runtime', 'THREE.JS RUNTIME']],
+  music: [['genres', 'GENRE RECIPES'], ['example', 'WORKED:']],
+  fx: [['types', '- types / variants:'], ['metadata', '- metadata per effect'], ['runtime', 'three.js:']],
+  damage: [['states', 'STATES:'], ['fracture', 'FRACTURE:'], ['export', 'EXPORT:'], ['sprites', 'SPRITES:']],
+  audio: [['fps-scifi', 'FPS / SCI-FI SFX'], ['sfx-options', 'SFX OPTIONS'], ['instruments', 'INSTRUMENTS:'], ['samples-export', 'SAMPLES:']],
+  fp: [['hand-drawn', 'HAND-DRAWN']],
+  materials: [['editor', 'EDITOR:'], ['export', 'EXPORT (art_model export)']],
+  library: [['weapons', 'RUNTIME WEAPON LAYERS']],
+};
+
+/** {core, sections:[{id, text}]} of a topic (sections empty when it has none). */
+export function topicParts(topic) {
+  const text = TOPICS[topic];
+  const spec = TOPIC_SECTIONS[topic];
+  if (!spec) return { core: text, sections: [] };
+  const lines = text.split('\n');
+  const starts = spec.map(([id, pre]) => {
+    const i = lines.findIndex((l) => l.startsWith(pre));
+    if (i < 0) throw new Error(`topic ${topic}: section "${id}" heading "${pre}" not found`);
+    return [id, i];
+  });
+  for (let k = 1; k < starts.length; k++) if (starts[k][1] <= starts[k - 1][1]) throw new Error(`topic ${topic}: section "${starts[k][0]}" is out of order`);
+  return {
+    core: lines.slice(0, starts[0][1]).join('\n'),
+    sections: starts.map(([id, i], k) => ({ id, text: lines.slice(i, k + 1 < starts.length ? starts[k + 1][1] : lines.length).join('\n') })),
+  };
+}
+
+const approxTokens = (s) => Math.round(estimateTokens(s) / 50) * 50; // for the section index
+
 export function helpText(a = {}) {
   if (a.op) {
     const u = opUsage(a.op);
@@ -468,5 +511,14 @@ export function helpText(a = {}) {
   }
   if (t === 'ops') return Object.keys(SIGS).map(opUsage).join('\n\n');
   if (!TOPICS[t]) throw new Error(`Unknown topic "${t}". Topics: ${Object.keys(TOPICS).join(', ')}`);
-  return TOPICS[t];
+  const { core, sections } = topicParts(t);
+  if (!sections.length || a.full) return TOPICS[t];
+  if (a.section) {
+    const want = [].concat(a.section).flatMap((s) => String(s).split(',')).map((s) => s.trim()).filter(Boolean);
+    const bad = want.filter((w) => !sections.some((s) => s.id === w));
+    if (bad.length) throw new Error(`Unknown section ${bad.join(', ')} of topic "${t}". Sections: ${sections.map((s) => s.id).join(', ')}`);
+    return sections.filter((s) => want.includes(s.id)).map((s) => s.text).join('\n');
+  }
+  const index = sections.map((s) => `- ${s.id} (~${Math.max(50, approxTokens(s.text))} tok): ${s.text.split('\n')[0].replace(/^- /, '').slice(0, 90)}`);
+  return `${core}\nMORE (art_help {topic:"${t}", section:"<id>"}; several: "a,b"; everything: full:true):\n${index.join('\n')}`;
 }

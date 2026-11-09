@@ -131,10 +131,10 @@ export const TOOLS = [
   },
   {
     name: 'art_help',
-    description: `Docs on demand: {op:"shade"} = draw op options + example; {topic}: ${Object.keys(TOPICS).join(' ')}; {skill} = step-by-step recipe.`,
+    description: 'Docs on demand: {op:"shade"} = draw op options + example; {topic} = guide (long ones answer with a core + section index: {topic, section:"a,b"} or full:true); {skill} = step-by-step recipe.',
     inputSchema: {
       type: 'object',
-      properties: { op: { type: 'string' }, topic: { type: 'string', enum: ['index', 'ops', ...Object.keys(TOPICS)] }, skill: { type: 'string', enum: Object.keys(SKILLS) } },
+      properties: { op: { type: 'string' }, topic: { type: 'string', enum: ['index', 'ops', ...Object.keys(TOPICS)] }, section: { type: 'string' }, full: { type: 'boolean' }, skill: { type: 'string', enum: Object.keys(SKILLS) } },
     },
     run: async (call, a) => ({ text: a.skill ? skillText(a.skill) : helpText(a) }),
   },
