@@ -213,7 +213,7 @@ Optional: real vanilla texture names and sizes per Minecraft Java version (refer
 
 ## Help topics and skills
 
-**Help topics** (`art_help {topic:"<name>"}`, or `agent-art help <name>`):
+**Help topics** (`art_help {topic:"<name>"}`, or `agent-art help <name>`). The long ones (3d, rig, melee, music, fx, damage, audio, fp, materials, library) answer with their core and an index of sections, each with a one-line summary and its token size. `{topic, section:"a,b"}` returns those sections and `full:true` the whole topic, so an agent pays only for what it reads:
 
 | Topic | Covers |
 | --- | --- |

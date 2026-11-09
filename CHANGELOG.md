@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Token diet, measured with 12 Haiku benchmark runs (the same six tasks with and without it, logged with the new debug mode). Results held; what Agent Art added to the agents' context fell 26% (help reads 58%; the 3D tasks used 18-22% fewer tokens end to end). Nothing is removed:
+  - `art_help {topic}` on a long topic answers with its core and an index of sections (a one-line summary and token size each); `{topic, section:"a,b"}` returns sections and `full:true` the whole topic as before. `3d` 18.6k -> 1.2k tokens, `rig` 4k -> 350, `melee` 3k -> 350. CLI: `agent-art help <topic> [section] [--full]`.
+  - The `art_help` description no longer repeats the topic list (the schema enum has it).
+- Debug mode: `agent-art tool` / `agent-art tools` log too (`AGENT_ART_DEBUG_SESSION` groups a run of CLI calls); repeats and retries are counted per session in the report; the token estimate is fitted against Anthropic's public tokenizer (~6% mean error; it was ~2x high on JSON).
+- Fix: on Windows, Git Bash / MSYS paths (`/c/Users/x`) in path arguments resolve to `C:/Users/x` instead of a `c` folder on the current drive (three benchmark runs lost exports to that).
+- Fix: a ship template (`fighter`, `dropship`, `hauler`) given a metre-sized `length` (it is px, 32 px = 1 m) now says so in the error or the reply; every build is unchanged.
 - MCP debug mode: `agent-art mcp --debug [full]` (or `AGENT_ART_DEBUG=1|full`) logs every session, list call and tool call to `<workspace>/debug/usage-<date>.jsonl` (`AGENT_ART_DEBUG_FILE` overrides). Each record has the per-session overhead (instructions, tool definitions, prompts) and, per call, the estimated tokens of the arguments and reply (images by Claude's image rule), time, engine ops, errors, repeats and retries. The default level keeps only argument shapes. `agent-art usage` reports it by tool and action, with the biggest and slowest calls, error groups, art_help reads and suggestions; `--transcript` adds the real billed usage from a Claude Code session log. Off by default. See `docs/debug/README.md`.
 - Fix: `art_fp {action:"paint"}` could only import (the op read the tool's own `action`). Export is now the default and import is `mode:"import"`.
 - MCP prompts use the new skill descriptions.
