@@ -121,7 +121,7 @@ Low-poly glTF 2.0 `.glb` with pixel textures (HD-2D look, NEAREST filtering, 32 
 | --- | --- | --- |
 | ![hull](docs/surface/hull_before_after.png) | ![gunship](docs/ships/hero_turntable.png) | ![lightmap](docs/materials/corridor_lightmap.png) |
 
-`art_model unwrap` bakes a multi-part model onto one UV atlas canvas (no seams on round parts, contact shading, worn edges, courses across parts) that you can paint directly or through a view.
+New models are unwrapped by default: `art_model create` bakes the model onto one UV atlas canvas `<name>_uv` (no seams on round parts, contact shading, worn edges, patterns and courses across parts) that you can paint directly or through a view, and update / preview / export keep it current. `unwrap:false` keeps per-part textures; models saved before keep theirs (`art_model unwrap {name}` converts one).
 
 More: [docs/3d/README.md](docs/3d/README.md), [materials](docs/materials/README.md), [skinning](docs/skinning/README.md), [mesh processing](docs/meshproc/README.md).
 

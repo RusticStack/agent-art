@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-- `art_model unwrap` (opt-in; models without `unwrap` are unchanged): one cohesive UV atlas canvas (`<model>_uv`) for a multi-part model.
+- New models are unwrapped by default. `art_model create` stores a default `unwrap` in the model and bakes one cohesive atlas canvas `<name>_uv` (world-aligned texture, contact AO, edge wear, grime). Existing models are unchanged: a saved model without `unwrap` keeps its per-part textures, and `update` does not add it. `unwrap:false` on create / update keeps the old per-part texturing (byte-identical).
+  - `update`, `livery`, `material`, the interior merge of `generate`, and `preview` / `render` / `export` re-bake the atlas when the parts or part textures changed (paint is kept).
+  - Per-part textures automatically, with one `unwrap_note` and no error: skinned models, morphs, layouts of placed models (pieces stay instanced), over 6000 triangles (ship templates) or past `max_size`. `unwrap:{do:"check"}` reports it (`unwrap_off`).
+  - The cohesion shading is clean pixel art: a few value bands, a 1 px checker only at band borders, no orphan texels (was a per-texel ordered dither that read as noise).
+- `art_model unwrap`: one cohesive UV atlas canvas (`<model>_uv`) for a multi-part model.
   - Layout: seam-aware charts with zero stretch, one ring island per round part with the seam at the back, power-of-two shelf packing (an error instead of a silent rescale).
   - Bakes: the part textures in world-pattern space (ring fit closes brick rings), then a cohesion pass (AO, contact line, worn convex edges, ground grime, optional model-wide `courses` and contact `overlays`) quantized to the palette.
   - The canvas keeps `base`, `cohesion` and `paint` layers (hidden `masks` / `guide`). Paint moves with its island when the layout changes, and paint on a view canvas projects onto the atlas (`do:"view"` / `do:"project"`).
