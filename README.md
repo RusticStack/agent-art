@@ -8,7 +8,7 @@
 
 The banner and every asset in this showcase were made by an agent through Agent Art's own tools:
 
-![Asset showcase: a knight walk cycle from one rig, hand-pixeled props, a seamless cobblestone texture, a 3D crate intact and wrecked, a planet, a starfighter with livery, muzzle-flash and impact flipbooks, and the analysis of a recorded rifle shot](docs/brand/showcase.png)
+![Asset showcase: an HD humanoid rig in 8 directions and a walk cycle; three skins sharing one skeleton and melee clip; HD-2D ruins built from 3D kit pieces; a gunship template with livery; a hard-surface reactor prop with neon and glass; door, barrel and crate damage states and a column fracture; PBR channel previews and a connected-texture set; first-person arms with a rifle and attachments; explosion, plasma, muzzle, shield, fire and decal flipbooks; planets on a skybox and an asteroid field; seamless textures, an iso scene and UI icons; song and gunshot analysis](docs/brand/showcase.png)
 
 ![Agent Art web UI: activity timeline, asset browser and canvas viewer](docs/ui/01-overview.png)
 
