@@ -10,7 +10,7 @@
 
 > Example: [Sanctum Burn](https://sanctum-burn.vercel.app), a co-op 2.5D survivor game. All of its art was made by an agent with Agent Art.
 
-**Contents:** [Quick start](#quick-start) · [First asset in 5 calls](#your-first-asset-in-5-calls) · [Feature tour](#feature-tour) · [Tools](#tools) · [Help topics and skills](#help-topics-and-skills) · [CLI](#cli) · [Web UI](#web-ui) · [Configuration](#configuration) · [For AI agents](#for-ai-agents)
+**Contents:** [Quick start](#quick-start) · [First asset in 5 calls](#your-first-asset-in-5-calls) · [Feature tour](#feature-tour) · [Tools](#tools) · [Help topics and skills](#help-topics-and-skills) · [CLI](#cli) · [Web UI](#web-ui) · [Debug and usage logging](#debug-and-usage-logging) · [Configuration](#configuration) · [For AI agents](#for-ai-agents)
 
 ## Quick start
 
