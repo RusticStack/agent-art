@@ -290,7 +290,7 @@ export const AUDIO_OPS = {
     const def = getDef(this, a.name);
     const au = getAudio(this, a.name);
     const { full, meas, p } = perceptionFor(this, a.name, au, def, a);
-    const issues = critiqueAudio(meas.stats, { kind: def.kind === 'song' ? 'music' : 'sfx', loop: !!full.loop, target_lufs: full.meta.target_lufs, target_peak: full.meta.target, perception: p, recipe: def.recipe, genre: a.genre ?? def.genre, intent: a.intent ?? def.intent }).issues;
+    const issues = critiqueAudio(meas.stats, { kind: def.kind === 'song' ? 'music' : 'sfx', loop: !!full.loop, target_lufs: full.meta.target_lufs, target_peak: full.meta.target, perception: p, recipe: def.recipe, genre: a.genre ?? def.genre, intent: a.intent ?? def.intent, vars: def.vars }).issues;
     const view = a.view || 'overview';
     const image = view === 'mix' && p.mix ? mixImage(p.mix) : overviewImage({ chs: full.chs, meas, perception: p, loop: full.loop, title: a.name, target_lufs: full.meta.target_lufs ?? (def.kind === 'song' ? -14 : -18), timeline: full.meta.timeline });
     const pub = publicPerception(p);
@@ -306,7 +306,7 @@ export const AUDIO_OPS = {
     const def = getDef(this, a.name);
     const au = getAudio(this, a.name);
     const { full, meas, p } = perceptionFor(this, a.name, au, def, a);
-    const c = critiqueAudio(meas.stats, { kind: def.kind === 'song' ? 'music' : a.kind || (meas.stats.duration > 10 ? 'music' : 'sfx'), loop: !!full.loop, target_lufs: a.target_lufs ?? full.meta.target_lufs, target_peak: full.meta.target, perception: p, recipe: def.recipe, genre: a.genre ?? def.genre, intent: a.intent ?? def.intent });
+    const c = critiqueAudio(meas.stats, { kind: def.kind === 'song' ? 'music' : a.kind || (meas.stats.duration > 10 ? 'music' : 'sfx'), loop: !!full.loop, target_lufs: a.target_lufs ?? full.meta.target_lufs, target_peak: full.meta.target, perception: p, recipe: def.recipe, genre: a.genre ?? def.genre, intent: a.intent ?? def.intent, vars: def.vars });
     return { name: a.name, ...c, report: listenerReport(p, c.issues), genre: p.genre?.verdict, intent: p.intent || undefined };
   },
 

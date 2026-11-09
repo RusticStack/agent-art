@@ -288,6 +288,12 @@ test('gunshot realism: transient profile separates a noise blast from a pitched 
   await call({ action: 'sfx', name: 'old_rifle', recipe: 'gunshot_rifle_synth', seed: 1 });
   const cr = JSON.parse(text(await call({ action: 'critique', name: 'old_rifle' })));
   assert.ok(cr.issues.some((i) => i.id === 'pitched_ring'), cr.summary);
+  // the bundled recordings (approved by ear) pass the gun checks: the calibration reference
+  for (const recipe of ['gunshot_rifle', 'gunshot_pistol', 'gunshot_shotgun', 'gunshot_suppressed']) {
+    await call({ action: 'sfx', name: recipe, recipe, seed: 2 });
+    const rc = JSON.parse(text(await call({ action: 'critique', name: recipe })));
+    assert.ok(!rc.issues.some((i) => /pitched_ring|no_crack|no_tail|soft_attack/.test(i.id)), recipe + ': ' + rc.summary);
+  }
   // a non-gun impact is not judged as a gunshot; intent turns the checks on
   await call({ action: 'sfx', name: 'bone', recipe: 'bone_crunch', seed: 1 });
   const bone = JSON.parse(text(await call({ action: 'critique', name: 'bone' })));

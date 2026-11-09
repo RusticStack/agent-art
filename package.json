@@ -1,7 +1,7 @@
 {
   "name": "@rusticstack/agent-art",
   "version": "0.10.0",
-  "description": "Pixel art for AI agents: MCP server + live web UI for sprites, rigs and animations, tilesets, textures, icons and 2.5D scenes.",
+  "description": "Game art and audio for AI agents: MCP server + live web UI for pixel-art sprites, rigs and animations, tilesets, textures, low-poly 3D models (.glb), combat effects, planets, sound effects and music.",
   "type": "module",
   "bin": {
     "agent-art": "bin/agent-art.js"
@@ -9,10 +9,9 @@
   "files": [
     "bin/",
     "src/",
+    "!src/meshfixtures.js",
     "public/",
     "README.md",
-    "llms.txt",
-    "llms-full.txt",
     "LICENSE"
   ],
   "scripts": {
@@ -25,13 +24,20 @@
   "keywords": [
     "mcp",
     "model-context-protocol",
-    "pixel-art",
+    "mcp-server",
     "ai-agents",
+    "claude",
+    "pixel-art",
     "sprites",
     "spritesheet",
     "animation",
+    "tileset",
     "gamedev",
-    "claude"
+    "game-assets",
+    "gltf",
+    "3d",
+    "sound-effects",
+    "procedural"
   ],
   "repository": {
     "type": "git",

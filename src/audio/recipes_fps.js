@@ -86,9 +86,10 @@ export function fpsRecipes({ V, thump, burst, whoosh }) {
     const env = recEnv(v, j, 0.4);
     return {
       layers: [
-        { kind: 'sample', sample: gunBank()[v.caliber === 'rifle' ? 'rifle' : 'pistol'].near, pitch: v.pitch - 2, dur: 0.35 * v.len, gain: -4 + 3 * (v.intensity - 0.6) },
-        clank(j(3200) * v.pf, 0.05, { gain: -9, at: 0.002 }),
-        { kind: 'crackle', dur: 0.05, density: 60, f: 3200, metal: true, gain: -14, at: 0.02 },
+        { kind: 'sample', sample: gunBank()[v.caliber === 'rifle' ? 'rifle' : 'pistol'].near, pitch: (v.pitch_set ?? 0) - 2, dur: 0.35 * v.len, gain: -4 + 3 * (v.intensity - 0.6) },
+        // the action: short noise clicks (no modal / metal resonators: they ring like a bell)
+        burst({ dur: 0.006, from: 6000, to: 2500, type: 'bp', q: 1.2 }, { gain: -8, at: 0.004 }),
+        burst({ dur: 0.008, from: 5000, to: 2000, type: 'bp', q: 1.2 }, { gain: -12, at: 0.045 * v.len }),
       ],
       fx: [{ type: 'eq', bands: [{ type: 'hp', f: 180 }, { type: 'lp', f: 2200 }] }, ...env.fx, { type: 'dc' }], reverb: env.reverb, tail: Math.min(env.tail, 0.4) + 0.05,
     };
