@@ -419,3 +419,33 @@ test('rigged damage: the dent morph of every non-root rig piece is a delta in it
   }
   assert.ok(checked >= 4, `${checked} rig pieces with the dent morph`);
 });
+
+test('breach on an open host (close:auto): the hole-fill caps that made it cuttable do not show up as geometry', async () => {
+  const { validateGLB: validateSkin, parseGLB: parse, readAccessor } = await import('../src/gltfvalidate.js');
+  const e = new Engine({ home: tmp() }), dir = tmp();
+  e.run('model_create', { name: 'duct', origin: 'bottom', parts: [{ type: 'tube', id: 'shell', from: [-40, 24, 0], to: [40, 24, 0], r: 22, sides: 6, caps: false, color: '#789' }] });
+  const w = e.run('model_damage', { name: 'duct', kind: 'hull', states: ['wrecked'], seed: 5 }).states[1].features;
+  assert.equal(w.breaches, 1);
+  assert.equal(w.closed_hosts, 1, 'the host was closed for the cut');
+  e.run('model_export', { name: 'duct', path: path.join(dir, 'duct.glb') });
+  const man = JSON.parse(fs.readFileSync(path.join(dir, 'duct.damage.json'), 'utf8'));
+  const glb = fs.readFileSync(path.join(dir, man.file));
+  const v = validateSkin(glb), c = validateGLB(glb);
+  assert.ok(v.ok && c.ok, [...(v.errors || []), ...(c.errors || [])].slice(0, 3).join('; '));
+  const { json, bin } = parse(glb);
+  const node = json.nodes.find((n) => n.name === 'duct_wrecked');
+  let caps = 0, tris = 0;
+  for (const p of json.meshes[node.mesh].primitives) {
+    const P = readAccessor(json, bin, p.attributes.POSITION), I = readAccessor(json, bin, p.indices);
+    for (let t = 0; t < I.length; t += 3) {
+      tris++;
+      const q = [0, 1, 2].map((k) => [P[I[t + k] * 3], P[I[t + k] * 3 + 1], P[I[t + k] * 3 + 2]]);
+      const a = q[1].map((x, k) => x - q[0][k]), b = q[2].map((x, k) => x - q[0][k]);
+      const n = [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], l = Math.hypot(...n) || 1;
+      // the open ends of the duct are at x = +-40 px (+-1.25 units): nothing may cover them
+      if (q.every((x) => Math.abs(x[0]) > 1.2) && Math.abs(n[0] / l) > 0.9) caps++;
+    }
+  }
+  assert.ok(tris > 0);
+  assert.equal(caps, 0, `${caps} cap triangles on the open ends`);
+});

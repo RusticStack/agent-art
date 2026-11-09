@@ -86,7 +86,7 @@ export function meshFromTris(tris, groups) {
       if (og.col) { const c = t.c ? t.c[k] : [1, 1, 1, 1]; og.col.push(c[0], c[1], c[2], c[3]); }
       if (og.skin) { const j = t.sj ? t.sj[k] : [0, 0, 0, 0], w = t.sw ? t.sw[k] : [1, 0, 0, 0]; og.skin.j.push(...j); og.skin.w.push(...w); }
     }
-    if (rec && last === t.f && lastG === og && t.f !== undefined && t.f !== null && !t.split) {
+    if (rec && last === t.f && lastG === og && t.f !== undefined && t.f !== null && !t.split && !!rec.fill === !!t.fill) {
       og.idx.push(base, base + 1, base + 2);
       rec.vc += 3; rec.ic += 3;
     } else {
@@ -95,6 +95,7 @@ export function meshFromTris(tris, groups) {
       rec = { v: base, vc: 3, i: i0, ic: 3, n, mode: 0 };
       if (t.f) for (const k of SOUP_FACE_PROPS) if (t.f[k] !== undefined) rec[k] = t.f[k];
       if (t.quad) rec.quad = true;
+      if (t.fill) rec.fill = true; // a hole-fill cap (cleanupMesh): callers that close a mesh only to cut it can drop these
       og.faces.push(rec);
     }
     last = t.f; lastG = og;
@@ -557,7 +558,7 @@ export function cleanupMesh(mesh, { weld = 1e-3, holes = 16, winding = true, are
         const p = [loop[i], loop[j], loop[k]].map((x) => pointOf(P, x));
         const at = p.map((q) => attrsAt(S, src, q));
         const n = norm3(cross3(sub3(p[1], p[0]), sub3(p[2], p[0])));
-        extra.push({ p, uv: at.map((x) => x.uv), n: [n, n, n], g: S.G[src], f: S.F[src], ...(S.C ? { c: at.map((x) => x.c) } : {}), ...(S.SJ ? { sj: at.map((x) => x.sj), sw: at.map((x) => x.sw) } : {}) });
+        extra.push({ p, uv: at.map((x) => x.uv), n: [n, n, n], g: S.G[src], f: S.F[src], fill: true, ...(S.C ? { c: at.map((x) => x.c) } : {}), ...(S.SJ ? { sj: at.map((x) => x.sj), sw: at.map((x) => x.sw) } : {}) });
       }
       rep.holes_filled++; rep.hole_triangles += tris.length;
     }

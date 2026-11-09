@@ -775,12 +775,12 @@ export function damageState(built, def, spec, st, opts = {}) {
     const outline = br.jag.map((j, i) => { const ang = (i / br.jag.length) * Math.PI * 2; return add(br.c, add(mul(t, Math.cos(ang) * R * j), mul(b, Math.sin(ang) * R * j))); });
     const host = { faces: P.faces };
     let hostMesh = implode({ faces: host.faces, overlays: [] });
-    let ms = manifoldStats(hostMesh);
+    let ms = manifoldStats(hostMesh), closedHost = false;
     if ((ms.open || ms.nonManifold) && spec.close !== false) {
       // open host (a plate made of separate faces, a part with a gap): close it with the #19 cleanup
       // hole fill (no voxel fallback: the host keeps its look) so the breach is a real boolean cut
       const c = closeOpenMesh(hostMesh, { voxel: false });
-      if (c) { hostMesh = c.mesh; ms = manifoldStats(hostMesh); stats.closed_hosts = (stats.closed_hosts || 0) + 1; }
+      if (c) { hostMesh = c.mesh; ms = manifoldStats(hostMesh); closedHost = true; stats.closed_hosts = (stats.closed_hosts || 0) + 1; }
     }
     const cut = new Mesh();
     const top = outline.map((p) => add(p, mul(n, 1))), bot = outline.map((p) => sub(p, mul(n, depth)));
@@ -795,7 +795,9 @@ export function damageState(built, def, spec, st, opts = {}) {
     const inPoly = (c) => { const d = sub(c, br.c), x = dot(d, t), y = dot(d, b), ang = (Math.atan2(y, x) / (Math.PI * 2) + 1) % 1, f = ang * br.jag.length, i0 = Math.floor(f) % br.jag.length; return Math.hypot(x, y) < R * lerp(br.jag[i0], br.jag[(i0 + 1) % br.jag.length], f - Math.floor(f)) && dot(d, n) > -depth - 0.5; };
     if (ms.open === 0 && ms.nonManifold === 0) {
       const res = booleanMesh('subtract', hostMesh, cut);
+      // the hole-fill caps only made the open host cuttable: what derives from them is not part of the look
       const rs = explode(res);
+      if (closedHost) rs.faces = rs.faces.filter((F) => !F.rec.fill);
       for (const F of rs.faces) F.rec.pi = P.pi;
       // replace the host faces in place
       const idx = soup.faces.indexOf(P.faces[0]);
