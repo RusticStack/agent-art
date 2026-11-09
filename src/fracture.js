@@ -9,6 +9,7 @@ import { booleanMesh, manifoldStats } from './csg.js';
 import { convexHull, hullMesh } from './proxies.js';
 import { mulberry32 } from './util.js';
 import { faceBasis } from './ctm.js';
+import { closeOpenMesh } from './remesh.js';
 
 const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -156,9 +157,11 @@ function cells(mesh, min, max, { pieces, method, seed }) {
 /**
  * Fracture a closed part mesh. opts: {pieces 2..64, method voronoi|slice, seed, inside (texture),
  * debris (number of the biggest chunks split again into 3), density (mass per unit^3), scale (px
- * per unit), name}. -> {chunks:[{name, level, parent, mesh, volume_px3, center, min, max, hull}], volume_px3, error}
+ * per unit), name, close ('auto' default: an open / non-manifold part is closed first by the cleanup
+ * path, then a voxel remesh; false = refuse open parts)}. -> {chunks:[{name, level, parent, mesh,
+ * volume_px3, center, min, max, hull}], volume_px3, error, closed?: {method, before, after}}
  */
-export function fracturePart(mesh, opts) {
+export function fracturePart(mesh0, opts) {
   const pieces = Math.max(2, Math.min(64, Math.round(Number(opts.pieces ?? 8))));
   const method = opts.method ?? 'voronoi';
   if (!FRACTURE_METHODS.includes(method)) throw new Error(`fracture method must be ${FRACTURE_METHODS.join(' or ')}`);
@@ -166,8 +169,16 @@ export function fracturePart(mesh, opts) {
   // booleans: csg.js booleanMesh (#19): "auto" = BSP for small parts, the robust BVH / arrangement path
   // (meshbool.js) above ROBUST_THRESHOLD input triangles; "bsp" / "robust" force one
   const boolMethod = opts.boolean ?? 'auto';
-  const ms = manifoldStats(mesh);
-  if (ms.open || ms.nonManifold) throw new Error(`fracture: part "${opts.name}" is not a closed solid (${ms.open} open edges, ${ms.nonManifold} non-manifold): fracture boxes, cylinders, wedges, extrusions; merge:true or a boolean union first for assemblies`);
+  const ms = manifoldStats(mesh0);
+  let mesh = mesh0, closed = null;
+  if (ms.open || ms.nonManifold) {
+    const close = opts.close ?? 'auto';
+    const hint = `fracture boxes, cylinders, wedges, extrusions; merge:true or a boolean union first for assemblies`;
+    if (close === false) throw new Error(`fracture: part "${opts.name}" is not a closed solid (${ms.open} open edges, ${ms.nonManifold} non-manifold) and close:false: ${hint}, or drop close:false to close it automatically`);
+    closed = closeOpenMesh(mesh0, { voxel: close !== 'cleanup' });
+    if (!closed) throw new Error(`fracture: part "${opts.name}" is not a closed solid (${ms.open} open edges, ${ms.nonManifold} non-manifold) and could not be closed (cleanup hole fill and voxel remesh failed): ${hint}`);
+    mesh = closed.mesh;
+  }
   const whole = meshVolume(mesh);
   if (!(whole.volume > 1e-6)) throw new Error(`fracture: part "${opts.name}" has no volume (inside-out or flat)`);
   const b = mesh.bounds();
@@ -223,5 +234,5 @@ export function fracturePart(mesh, opts) {
     c.hullVerts = h ? h.verts.length : 0;
   }
   const sum1 = l1.reduce((s, c) => s + c.volume_px3, 0);
-  return { chunks, volume_px3: whole.volume, center: whole.center, bounds: b, level1_volume_px3: sum1, error: Math.abs(sum1 - whole.volume) / whole.volume, method, pieces, seed };
+  return { chunks, volume_px3: whole.volume, center: whole.center, bounds: b, level1_volume_px3: sum1, error: Math.abs(sum1 - whole.volume) / whole.volume, method, pieces, seed, ...(closed ? { closed: { method: closed.method, before: closed.before, after: closed.after, triangles: mesh.triangles, ms: closed.ms } } : {}) };
 }

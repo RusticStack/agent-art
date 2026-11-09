@@ -111,6 +111,7 @@ function buildAtlas(meshes, maxSize = 256) {
     const merged = { tex: atlas, pos: new Float32Array(vc * 3), nrm: new Float32Array(vc * 3), uv: new Float32Array(vc * 2), idx: new Uint32Array(on.reduce((s, p) => s + p.idx.length, 0)) };
     // baked AO rides along (every primitive of a mesh shares the AO lightmap / has vertex AO)
     if (on.every((p) => p.uv1)) merged.uv1 = new Float32Array(vc * 2);
+    if (on.every((p) => p.uvd)) merged.uvd = new Float32Array(vc * 2);
     if (on.every((p) => p.ao)) merged.ao = new Float32Array(vc);
     const vkeys = on[0].vattr ? Object.keys(on[0].vattr).join() : '';
     if (vkeys && on.every((p) => p.vattr && Object.keys(p.vattr).join() === vkeys)) merged.vattr = Object.fromEntries(Object.entries(on[0].vattr).map(([k, a]) => [k, { size: a.size, data: new Float32Array(vc * a.size) }]));
@@ -118,6 +119,7 @@ function buildAtlas(meshes, maxSize = 256) {
     for (const p of on) {
       merged.pos.set(p.pos, vo * 3); merged.nrm.set(p.nrm, vo * 3); merged.uv.set(p.uv, vo * 2);
       if (merged.uv1) merged.uv1.set(p.uv1, vo * 2);
+      if (merged.uvd) merged.uvd.set(p.uvd, vo * 2);
       if (merged.ao) merged.ao.set(p.ao, vo);
       if (merged.vattr) for (const [k, a] of Object.entries(merged.vattr)) a.data.set(p.vattr[k].data, vo * a.size);
       for (let i = 0; i < p.idx.length; i++) merged.idx[io + i] = p.idx[i] + vo;
@@ -249,7 +251,7 @@ export function writeGLB(scene, opts = {}) {
   };
 
   let triangles = 0, vertices = 0;
-  const meshTris = [];
+  const meshTris = [], uvdSets = new Set();
   for (const m of meshes) {
     const prims = [];
     let mt = 0, morphNames = null;
@@ -273,6 +275,11 @@ export function writeGLB(scene, opts = {}) {
         TEXCOORD_0: acc(view(p.overlay ? p.uv0 : p.uv, ARRAY), FLOAT, vc, 'VEC2'),
       };
       if (!p.overlay && p.uv1) attributes.TEXCOORD_1 = acc(view(p.uv1, ARRAY), FLOAT, vc, 'VEC2');
+      // damage mask chart UVs (art_model damage blend): the first free TEXCOORD set, after the AO /
+      // lightmap UVs (TEXCOORD_1) and the materials v2 extra UV sets, so those survive damage exports
+      const uvdSet = !p.overlay && p.uvd ? (p.uv1 ? 2 : 1) + (p.vattr ? Object.keys(p.vattr).filter((k) => k.startsWith('TEXCOORD_')).length : 0) : 0;
+      if (uvdSet) uvdSets.add(uvdSet);
+      if (uvdSet === 1) attributes.TEXCOORD_1 = acc(view(p.uvd, ARRAY), FLOAT, vc, 'VEC2');
       // damage vertex channel (art_model damage, export damage.vertex): RGBA = scorch, dent, holes, wear.
       // COLOR_0 only when nothing else (materials v2 vertex colours) claims it; else _DAMAGE.
       const dmgAttr = !p.overlay && p.dmg ? (opts.dmgAttr === 'COLOR_0' && p.vattr && p.vattr.COLOR_0 ? '_DAMAGE' : opts.dmgAttr || '_DAMAGE') : null;
@@ -294,6 +301,7 @@ export function writeGLB(scene, opts = {}) {
         attributes.WEIGHTS_0 = acc(view(p.skin.w, ARRAY), FLOAT, vc, 'VEC4');
       }
       if (v2) v2.attributes(p, attributes, (arr, type) => acc(view(arr, ARRAY), FLOAT, vc, type));
+      if (uvdSet > 1) attributes[`TEXCOORD_${uvdSet}`] = acc(view(p.uvd, ARRAY), FLOAT, vc, 'VEC2');
       const prim = { attributes, indices: acc(view(I, ELEMENTS), big ? U32 : U16, I.length, 'SCALAR'), material: material(p.tex, !!p.overlay, !p.overlay && (!!opts.ao || !!(v2 && v2.bakedUV)) && !p.uv1), mode: 4 };
       if (p.morphs) {
         // morph targets: POSITION / NORMAL deltas (units), names in mesh.extras.targetNames
@@ -428,7 +436,7 @@ export function writeGLB(scene, opts = {}) {
     stats: {
       bytes: glb.length, triangles, vertices, meshes: json.meshes.length, nodes: scene.nodes.length, materials: json.materials.length, textures: json.textures.length,
       animations: json.animations ? json.animations.length : undefined,
-      atlased: atlased || undefined, ...(v2 ? { v2: v2.report } : {}), bounds: { min: bmin.map(fin), max: bmax.map(fin), size: bmax.map((v, i) => fin(v - bmin[i])) },
+      atlased: atlased || undefined, ...(v2 ? { v2: v2.report } : {}), ...(uvdSets.size ? { damage_uv_sets: [...uvdSets].sort() } : {}), bounds: { min: bmin.map(fin), max: bmax.map(fin), size: bmax.map((v, i) => fin(v - bmin[i])) },
     },
   };
 }

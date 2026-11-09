@@ -380,13 +380,15 @@ test('fracture: total work budget with a clear error; unchanged groups come from
   assert.equal(a3.groups[0].chunks, 7, 'changed options re-run');
 });
 
-test('damage / fracture reject skinned models', () => {
+test('damage states on skinned models export skinned; fracture still needs a rigid copy', () => {
   const e = new Engine({ home: tmp() });
   e.run('model_create', { name: 'snake', parts: [{ type: 'tube', path: [[0, 32, 0], [0, 20, 0], [0, 8, 0], [0, 2, 0]], r: 2, sides: 6, texture: '#c84', segments: 3 }] });
   e.run('model_skeleton', { name: 'snake', skeleton: { template: 'chain', count: 3, from: [0, 32, 0], to: [0, 2, 0] } });
   e.run('model_skin', { name: 'snake', skin: { method: 'heat' } });
-  assert.throws(() => e.run('model_damage', { name: 'snake', states: ['scuffed'] }), /skinned/);
+  // damage states keep the skin (every state is skinned on the one armature; see test/limits.test.js)
+  assert.ok(e.run('model_damage', { name: 'snake', states: ['scuffed'] }).states.length === 2);
   assert.throws(() => e.run('model_fracture', { name: 'snake', groups: [{ part: 0 }] }), /skinned/);
-  assert.throws(() => e.run('model_export', { name: 'snake', path: path.join(tmp(), 'snake.glb'), damage: true }), /skinned/);
+  assert.throws(() => e.run('model_export', { name: 'snake', path: path.join(tmp(), 'snake.glb'), damage: { lods: [1, 0.5] } }), /skinned model: lods/);
+  assert.ok(e.run('model_export', { name: 'snake', path: path.join(tmp(), 'snake.glb'), damage: true }).damage, 'skinned damage export');
   assert.ok(e.run('model_export', { name: 'snake', path: path.join(tmp(), 'snake.glb') }).file, 'plain skinned export still works');
 });

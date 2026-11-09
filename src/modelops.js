@@ -823,7 +823,12 @@ export const MODEL_OPS = {
     const { glb, stats, built, info, rigClips, ctm, ctmNames, ext, v2, kit } = assembleGLB(this, def, { normal, instances: !!a.instances, scale, up: a.up, atlas: !!a.atlas, ctmFile: path.basename(file).replace(/\.glb$/i, '.ctm.json'), file, args: a, ...(a.bump !== undefined ? { bump: a.bump } : {}) });
     // damage states / fracture: extra files next to the plain glb (which stays unchanged); built and
     // validated before anything is written, so a bad damage arg leaves the previous export intact
-    const dmg = wantsDamage(def, a) ? damageExport(this, def, build(this, def, { normal }), a, { file, scale }) : null;
+    let dmg = null;
+    if (wantsDamage(def, a)) {
+      // skinned models: every state is skinned on the one armature (the weights come from this build's skinned mesh)
+      const db = build(this, def, { normal });
+      dmg = damageExport(this, def, db, a, { file, scale, skinned: isSkinned(def) ? () => skinnedOf(skinCtx(BASE, this, db), def, db) : null });
+    }
     fs.writeFileSync(file, glb);
     if (ext) ext.after();
     if (v2) for (const [f, buf] of v2.side) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, buf); }

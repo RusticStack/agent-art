@@ -13,6 +13,7 @@ import { Mesh } from './model3d.js';
 import { faceBasis } from './ctm.js';
 import { mulberry32, hash3, BAYER4 } from './util.js';
 import { booleanMesh, manifoldStats } from './csg.js';
+import { closeOpenMesh } from './remesh.js';
 import { sweep } from './sweep.js';
 
 const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
@@ -93,7 +94,9 @@ export function normDamage(d) {
       roles[k] = [].concat(v);
     }
   }
-  return { kind, seed, states, rigid, roles, inner: d.inner ?? '#23262c', frame: d.frame ?? '#555a63', sparks: d.sparks !== false, palette: d.palette || null };
+  const close = d.close ?? 'auto';
+  if (!['auto', false].includes(close)) throw new Error('damage close must be "auto" (an open breach host is closed by the cleanup hole fill so the breach is a real boolean cut) or false (open hosts get the subdivide-and-drop hole)');
+  return { kind, seed, states, rigid, roles, inner: d.inner ?? '#23262c', frame: d.frame ?? '#555a63', sparks: d.sparks !== false, palette: d.palette || null, close };
 }
 function normRegions(v, sn) {
   const list = [].concat(v);
@@ -137,13 +140,14 @@ export function explode(mesh) {
   }
   return { faces, overlays };
 }
-/** Soup -> Mesh (unused vertices dropped). opts.uv1: write chart UVs (v.cu) as g.uv1; opts.dmg: per-vertex damage RGBA (v.dmg) as g.dmg; opts.morph: {name} = displaced positions as a morph target (rest = v.r). */
+/** Soup -> Mesh (unused vertices dropped). opts.uvd: write chart UVs (v.cu) as g.uvd (the damage mask UV set; its own TEXCOORD after any AO / lightmap UVs); opts.uv1: the same as g.uv1; opts.dmg: per-vertex damage RGBA (v.dmg) as g.dmg; opts.morph: {name} = displaced positions as a morph target (rest = v.r). */
 export function implode(soup, opts = {}) {
   const m = new Mesh();
   for (const F of soup.faces) {
     if (!F.T.length) continue;
     const g = m.group(F.tex), base = g.pos.length / 3, i0 = g.idx.length, map = new Map();
     if (opts.uv1 && !g.uv1) g.uv1 = [];
+    if (opts.uvd && !g.uvd) g.uvd = [];
     if (opts.dmg && !g.dmg) g.dmg = [];
     if (opts.morph && !g.morphs) g.morphs = [{ name: opts.morph.name, pos: [], nrm: [] }];
     for (const t of F.T) for (const k of t) if (!map.has(k)) {
@@ -152,6 +156,7 @@ export function implode(soup, opts = {}) {
       const P = opts.morph ? v.r : v.p, N = opts.morph ? (v.rn || v.n) : v.n;
       g.pos.push(P[0], P[1], P[2]); g.nrm.push(N[0], N[1], N[2]); g.uv.push(v.uv[0], v.uv[1]);
       if (opts.uv1) g.uv1.push(...(v.cu || [0, 0]));
+      if (opts.uvd) g.uvd.push(...(v.cu || [0, 0]));
       if (opts.dmg) g.dmg.push(...(v.dmg || [0, 0, 0, 0]));
       if (opts.morph) { g.morphs[0].pos.push(v.p[0], v.p[1], v.p[2]); g.morphs[0].nrm.push(v.n[0], v.n[1], v.n[2]); }
     }
@@ -161,10 +166,13 @@ export function implode(soup, opts = {}) {
   for (const O of soup.overlays) {
     if (!O.T.length) continue;
     const g = m.group(O.tex, true), base = g.pos.length / 3, map = new Map();
+    if (opts.morph && !g.morphs) g.morphs = [{ name: opts.morph.name, pos: [], nrm: [] }];
     for (const t of O.T) for (const k of t) if (!map.has(k)) {
       map.set(k, base + map.size);
       const v = O.V[k];
-      g.pos.push(v.p[0], v.p[1], v.p[2]); g.nrm.push(v.n[0], v.n[1], v.n[2]); g.uv.push(v.uv[0], v.uv[1]); g.uv0.push(v.uv0[0], v.uv0[1]); g.alpha.push(v.a);
+      if (opts.morph) { const P = v.r || v.p, N = v.rn || v.n; g.pos.push(P[0], P[1], P[2]); g.nrm.push(N[0], N[1], N[2]); g.morphs[0].pos.push(v.p[0], v.p[1], v.p[2]); g.morphs[0].nrm.push(v.n[0], v.n[1], v.n[2]); }
+      else { g.pos.push(v.p[0], v.p[1], v.p[2]); g.nrm.push(v.n[0], v.n[1], v.n[2]); }
+      g.uv.push(v.uv[0], v.uv[1]); g.uv0.push(v.uv0[0], v.uv0[1]); g.alpha.push(v.a);
       if (v.node !== undefined || g.vnode) { if (!g.vnode) g.vnode = new Array(g.pos.length / 3 - 1).fill(null); g.vnode.push(v.node ?? null); }
     }
     for (const t of O.T) g.idx.push(map.get(t[0]), map.get(t[1]), map.get(t[2]));
@@ -261,9 +269,10 @@ export function analyseParts(soup, def, spec) {
   const list = [...parts.values()].filter((P) => P.pi >= 0);
   const vol = (P) => P.max.reduce((s, v, k) => s * Math.max(0.5, v - P.min[k]), 1);
   const biggest = list.reduce((b, P) => (!b || vol(P) > vol(b) ? P : b), null);
+  // sizes first: the door leaf guess compares every part
+  for (const P of list) { P.size = P.max.map((v, k) => v - P.min[k]); P.center = P.min.map((v, k) => (v + P.max[k]) / 2); }
   for (const P of list) {
-    const size = P.max.map((v, k) => v - P.min[k]), srt = [...size].sort((a, b) => a - b);
-    P.size = size; P.center = P.min.map((v, k) => (v + P.max[k]) / 2);
+    const srt = [...P.size].sort((a, b) => a - b);
     let mainN = null, best = -1;
     for (const [k, a] of P.normals) if (a > best) { best = a; mainN = k.split(',').map((v) => Number(v) / 100); }
     P.mainN = norm(mainN || [0, 0, 1]);
@@ -765,8 +774,14 @@ export function damageState(built, def, spec, st, opts = {}) {
     const depth = through ? br.thick + 2 : Math.min(10 * S, br.thick * 0.5);
     const outline = br.jag.map((j, i) => { const ang = (i / br.jag.length) * Math.PI * 2; return add(br.c, add(mul(t, Math.cos(ang) * R * j), mul(b, Math.sin(ang) * R * j))); });
     const host = { faces: P.faces };
-    const hostMesh = implode({ faces: host.faces, overlays: [] });
-    const ms = manifoldStats(hostMesh);
+    let hostMesh = implode({ faces: host.faces, overlays: [] });
+    let ms = manifoldStats(hostMesh);
+    if ((ms.open || ms.nonManifold) && spec.close !== false) {
+      // open host (a plate made of separate faces, a part with a gap): close it with the #19 cleanup
+      // hole fill (no voxel fallback: the host keeps its look) so the breach is a real boolean cut
+      const c = closeOpenMesh(hostMesh, { voxel: false });
+      if (c) { hostMesh = c.mesh; ms = manifoldStats(hostMesh); stats.closed_hosts = (stats.closed_hosts || 0) + 1; }
+    }
     const cut = new Mesh();
     const top = outline.map((p) => add(p, mul(n, 1))), bot = outline.map((p) => sub(p, mul(n, depth)));
     const uvp = (p) => [dot(p, t) / (innerT.width || 1), -dot(p, b) / (innerT.height || 1)];
@@ -920,7 +935,7 @@ function deadTex(t, darken) {
 // ---------- intact blend mesh + masks + vertex channel ----------
 /**
  * Intact model prepared for a continuous blend: subdivided where the dents of the full feature
- * set land, per-face chart UVs (g.uv1 -> TEXCOORD_1), a "damage" morph target (dent displacement at
+ * set land, per-face chart UVs (g.uvd -> the first free TEXCOORD: 1, or after the AO / lightmap / extra UV sets), a "damage" morph target (dent displacement at
  * amount 1), optional per-vertex damage RGBA (g.dmg) and the RGBA threshold mask atlas.
  * Mask channels: R scorch+soot, G dent, B holes (bullets, cracks, glass holes, breach), A wear +
  * scratches; value = (1 - onset) x coverage, i.e. a texel is damaged once blend >= 1 - value/255.
@@ -947,7 +962,33 @@ export function damageMasks(built, def, spec, opts = {}) {
     }
     if (moved) renormal(F);
   }
-  for (const O of soup.overlays) for (const v of O.V) v.p = v.r.slice();
+  // model overlay shells (grime, moss, ...) follow the dent morph: subdivided where the dents land
+  // like the base faces, displaced by the same field with the rigidity of the nearest base vertex
+  const shellMorph = opts.morph !== false && opts.overlayMorph !== false && dents.length && soup.overlays.some((o) => o.T.length);
+  if (shellMorph) {
+    const cell = 8, near = new Map(), ck = (p) => p.map((x) => Math.floor(x / cell)).join(',');
+    for (const F of soup.faces) { const rg = rigid(F); for (const v of F.V) { const k = ck(v.r); if (!near.has(k)) near.set(k, []); near.get(k).push([v.r, rg]); } }
+    const rigAt = (p) => {
+      const c = p.map((x) => Math.floor(x / cell));
+      let best = Infinity, rg = 0.25;
+      for (let x = -1; x <= 1; x++) for (let y = -1; y <= 1; y++) for (let z = -1; z <= 1; z++) for (const [q, r] of near.get(`${c[0] + x},${c[1] + y},${c[2] + z}`) || []) { const d = len(sub(p, q)); if (d < best) { best = d; rg = r; } }
+      return rg;
+    };
+    const ob = { left: Math.max(2000, Math.min(30000, budget.left + 2000)) };
+    for (const O of soup.overlays) {
+      if (!O.T.length) continue;
+      if (O.V.some((v) => dents.some((d) => len(sub(v.r, d.c)) < d.r + 30))) subdivide(O, need, 6, ob);
+      let moved = false;
+      for (const v of O.V) {
+        let o = [0, 0, 0];
+        for (const d of dents) { const x = len(sub(v.r, d.c)) / d.r; if (x < 1) o = add(o, mul(d.dir, d.r * d.depth * d.rw * (1 - x * x) ** 2)); }
+        o = mul(o, 1 - rigAt(v.r));
+        if (o[0] || o[1] || o[2]) moved = true;
+        v.p = add(v.r, o);
+      }
+      if (moved) renormal(O);
+    }
+  } else for (const O of soup.overlays) for (const v of O.V) v.p = v.r.slice();
   wearEdges(soup);
   const holes = { ...fs, dents: fs.dents, wearW: 1 };
   const pack = packCharts(soup.faces.filter((F) => F.T.length), { texel: opts.texel ?? 1, maxSize: opts.maxSize ?? 1024 });
@@ -960,9 +1001,10 @@ export function damageMasks(built, def, spec, opts = {}) {
   if (opts.vertex) for (const F of soup.faces) for (const v of F.V) v.dmg = enc(v.r, F.rec.n, F).map((x) => x / 255);
   // faces whose chart stayed empty sample the blank texel block at the atlas origin
   for (const c of pack.charts) if (!c.used) for (const v of c.F.V) v.cu = pack.blankUV.slice();
-  // model overlay shells (grime, moss, ...) cannot carry the morph: they go to their own mesh
-  const mesh = implode({ faces: soup.faces, overlays: [] }, { uv1: true, dmg: !!opts.vertex, morph: opts.morph === false ? null : { name: 'damage' } });
-  const overlays = soup.overlays.some((o) => o.T.length) ? implode({ faces: [], overlays: soup.overlays }) : null;
+  // model overlay shells (grime, moss, ...): their own mesh (overlay primitives cannot share the
+  // base primitives' attributes), with the same "damage" morph so they stay on the dented surface
+  const mesh = implode({ faces: soup.faces, overlays: [] }, { uvd: true, dmg: !!opts.vertex, morph: opts.morph === false ? null : { name: 'damage' } });
+  const overlays = soup.overlays.some((o) => o.T.length) ? implode({ faces: [], overlays: soup.overlays }, shellMorph ? { morph: { name: 'damage' } } : {}) : null;
   const ch = { r: 0, g: 0, b: 0, a: 0 }, px = img.width * img.height;
   for (let i = 0; i < px; i++) { if (img.data[i * 4]) ch.r++; if (img.data[i * 4 + 1]) ch.g++; if (img.data[i * 4 + 2]) ch.b++; if (img.data[i * 4 + 3]) ch.a++; }
   return { mesh, overlays, mask: { key: `damage_mask:${def.name}`, name: 'damage_mask', width: img.width, height: img.height, data: img.data }, coverage: Object.fromEntries(Object.entries(ch).map(([k, v]) => [k, +(v / px).toFixed(4)])), texel_px: +pack.texel.toFixed(3), charts: pack.charts.length, fs };

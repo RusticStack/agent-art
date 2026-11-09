@@ -17,11 +17,18 @@ import { exportV2, finishV2 } from './matops.js';
 import { ROBUST_THRESHOLD } from './csg.js';
 import { simplifyMesh, switchDistance } from './lod.js';
 import { normLods, normLodScreen } from './modelexport.js';
+import { rigInfo } from './modelrig.js';
+import { splitRig, addRig, transferSkin } from './damagerig.js';
+import { skinScene } from './skin3d.js';
+import { validateGLB as validateSkinned } from './gltfvalidate.js';
+import { validateGLB as checkGLB } from './gltfcheck.js';
 import { isSkinned } from './skinops.js';
+import { bakeAO, normAO } from './bake.js';
+import { normLightmap, normThickness, bakeLighting } from './lightbake.js';
 
 const f6 = (v) => +(+v).toFixed(6);
 const groupsOf = (mesh) => [...mesh.groups.values()].filter((g) => g.idx.length);
-const DAMAGE_KEYS = ['states', 'kind', 'seed', 'rigid', 'roles', 'inner', 'frame', 'sparks', 'palette'];
+const DAMAGE_KEYS = ['states', 'kind', 'seed', 'rigid', 'roles', 'inner', 'frame', 'sparks', 'palette', 'close'];
 const ROBLOX_TRIS = 20000;
 /** Fracture work budget: sum over groups of (pieces + 3 x debris) booleans x part input triangles (~30 us each). */
 export const FRACTURE_BUDGET = 250000;
@@ -53,7 +60,7 @@ const colTex = (c, k) => ({ key: `chunkcol:${k}`, name: `chunk_${k}`, width: 1, 
 /** Normalize fracture groups: [{part, pieces?, method?, seed?, inside?, debris?, density?, group?, parent?}]. */
 export function normFracture(v, def) {
   const list = Array.isArray(v) ? v : v?.groups;
-  if (!Array.isArray(list) || !list.length || list.length > 16) throw new Error('fracture parts must be [{part:<name|index>, pieces?:8 (2-64), method?:"voronoi"|"slice", seed?, inside?:<texture>, debris?:0, density?:600 kg/m^3, group?, parent?:<group>}] (1-16 groups)');
+  if (!Array.isArray(list) || !list.length || list.length > 16) throw new Error('fracture parts must be [{part:<name|index>, pieces?:8 (2-64), method?:"voronoi"|"slice", seed?, inside?:<texture>, debris?:0, density?:600 kg/m^3, group?, parent?:<group>, close?:"auto"|"cleanup"|false}] (1-16 groups)');
   const names = new Set();
   const out = list.map((g0, i) => {
     const g = typeof g0 === 'string' || typeof g0 === 'number' ? { part: g0 } : g0;
@@ -71,7 +78,9 @@ export function normFracture(v, def) {
     if (!(density > 0)) throw new Error(`fracture ${i}: density must be > 0 (kg per m^3 = per unit^3)`);
     const boolean = g.boolean ?? 'auto';
     if (!['auto', 'bsp', 'robust'].includes(boolean)) throw new Error(`fracture ${i}: boolean must be auto (BSP for small parts, robust above ${ROBUST_THRESHOLD} triangles), bsp or robust`);
-    return { part: g.part, pi, group, method, pieces, boolean, seed: Math.round(Number(g.seed ?? 1)), inside: g.inside ?? '#3a3d44', debris: Math.max(0, Math.min(16, Math.round(Number(g.debris ?? 0)))), density, parent: g.parent ?? null };
+    const close = g.close ?? 'auto';
+    if (!['auto', 'cleanup', false].includes(close)) throw new Error(`fracture ${i}: close must be "auto" (open parts: cleanup hole fill, then voxel remesh), "cleanup" (hole fill only) or false (refuse open parts)`);
+    return { part: g.part, pi, group, method, pieces, boolean, seed: Math.round(Number(g.seed ?? 1)), inside: g.inside ?? '#3a3d44', debris: Math.max(0, Math.min(16, Math.round(Number(g.debris ?? 0)))), density, parent: g.parent ?? null, close };
   });
   for (const g of out) if (g.parent !== null && !names.has(g.parent)) throw new Error(`fracture group "${g.group}": parent "${g.parent}" is not a fracture group (${[...names].join(', ')})`);
   return out;
@@ -82,7 +91,7 @@ const texDigest = (h, t) => { h.update(`|${t.key}|${t.width}x${t.height}|`); if 
 /** Content key of one fracture job: the part mesh (positions, normals, uvs, textures) + the group options. */
 function fractureKey(mesh, g, inside) {
   const h = crypto.createHash('sha1');
-  h.update(JSON.stringify([g.pieces, g.method, g.seed, g.debris, g.group, g.boolean]));
+  h.update(JSON.stringify([g.pieces, g.method, g.seed, g.debris, g.group, g.boolean, ...(g.close !== 'auto' ? [g.close] : [])]));
   texDigest(h, inside);
   for (const gr of mesh.groups.values()) {
     texDigest(h, gr.tex);
@@ -107,7 +116,7 @@ export function runFracture(built, def, groups) {
     let res = FRACTURE_CACHE.get(key);
     if (res) { FRACTURE_CACHE.delete(key); FRACTURE_CACHE.set(key, res); } // LRU touch
     else {
-      res = fracturePart(mesh, { pieces: g.pieces, method: g.method, seed: g.seed, inside, debris: g.debris, name: g.group, boolean: g.boolean });
+      res = fracturePart(mesh, { pieces: g.pieces, method: g.method, seed: g.seed, inside, debris: g.debris, name: g.group, boolean: g.boolean, close: g.close });
       FRACTURE_CACHE.set(key, res);
       while (FRACTURE_CACHE.size > FRACTURE_CACHE_MAX) FRACTURE_CACHE.delete(FRACTURE_CACHE.keys().next().value);
     }
@@ -167,7 +176,6 @@ export function damageOps({ getModel, build, saveModel }) {
         saveModel(this, next, source, 'damage removed');
         return { model: def.name, damage: null };
       }
-      noSkin(def, 'damage');
       const input = { ...(def.damage || {}) };
       for (const k of DAMAGE_KEYS) if (a[k] !== undefined) { if (a[k] === null) delete input[k]; else input[k] = a[k]; }
       const spec = normDamage(input);
@@ -210,6 +218,7 @@ export function damageOps({ getModel, build, saveModel }) {
           group: g.group, part: g.part, parent: g.parent, method: g.method, boolean: g.boolean, seed: g.seed, chunks: g.result.chunks.filter((c) => c.level === 1).length, debris: g.result.chunks.filter((c) => c.level === 2).length,
           volume_units3: f6(g.result.volume_px3 / scale ** 3), chunk_volume_error: f6(g.result.error), watertight: g.result.chunks.every((c) => c.watertight), mass_kg: f6((g.result.volume_px3 / scale ** 3) * g.density),
           triangles: g.result.chunks.filter((c) => c.level === 1).reduce((s, c) => s + c.mesh.triangles, 0),
+          ...(g.result.closed ? { closed: g.result.closed } : {}),
         })),
         image: explodedImage(built, fr, a.view ?? 'game', a.size ?? 224), ms,
         next: `export {name:"${def.name}"} writes ${def.name}.damage.glb with <group>_chunk_NN nodes (pivot = centre of mass, collision hull children) + the manifest`,
@@ -240,8 +249,8 @@ export function wantsDamage(def, a) {
  * profile?:"roblox", mask_channels?:false, texel?:1, max_size?:1024}; lods / lod_screen / up from the export args.
  * -> {files, result, manifest}
  */
-export function damageExport(engine, def, built, a, { file, scale }) {
-  noSkin(def, 'damage export');
+export function damageExport(engine, def, built, a, { file, scale, skinned = null }) {
+  if (isSkinned(def) && !skinned) noSkin(def, 'damage export');
   const o = a.damage && typeof a.damage === 'object' ? a.damage : {};
   const texel = o.texel === undefined ? undefined : Number(o.texel);
   if (texel !== undefined && !(Number.isFinite(texel) && texel >= 0.05 && texel <= 64)) throw new Error('damage.texel must be a number 0.05..64 (model px per mask texel, default 1)');
@@ -277,19 +286,63 @@ export function damageExport(engine, def, built, a, { file, scale }) {
   }
   // ---- fracture
   const fr = def.fracture ? runFracture(built, def, normFracture(def.fracture.groups, def)) : [];
+  // ---- rigs: a rigid rig (named parts / sockets / clips) is kept in every state; a skinned model
+  // keeps its armature and every state mesh is skinned on it (weights from the intact skinned mesh)
+  const rinfo = skinned ? null : rigInfo(def, built);
+  let skinBase = null;
+  if (skinned) {
+    const bad = [lods && 'lods', roblox && 'profile "roblox"', fr.length && 'fracture', a.lightmap && 'lightmap', a.thickness && 'thickness'].filter(Boolean);
+    if (bad.length) throw new Error(`damage export of a skinned model: ${bad.join(', ')} not available (skinned exports have no LOD chain, Roblox damage profile or baked light; fracture chunks need a rigid copy)`);
+    const { S: SK, sk } = skinned();
+    const fps = Number(a.fps ?? 30);
+    if (!(fps >= 1 && fps <= 120)) throw new Error('fps must be 1..120');
+    skinBase = { sc: skinScene(def.name, SK, sk, { fps }), sk, bones: SK.bones.length, transfer: 0 };
+  }
 
   // ---- scene builder (shared by nodes / files / blend)
-  const scene = () => ({ meshes: [], nodes: [] });
+  const scene = () => {
+    const S = { meshes: [], nodes: [], anims: new Map() };
+    if (skinBase) {
+      // the armature (bones + sockets) first: the shared skin's joints and skeleton are these indices
+      const sc = skinBase.sc;
+      S.nodes = structuredClone(sc.nodes.slice(0, sc.meshNode));
+      S.skins = structuredClone(sc.skins);
+      S.armature = 0;
+    }
+    return S;
+  };
   const addMesh = (S, name, mesh) => { S.meshes.push({ name, groups: [...mesh.groups.values()] }); return S.meshes.length - 1; };
   const node = (S, n) => { S.nodes.push(n); return S.nodes.length - 1; };
-  const lodLevels = (mesh, keepFirst) => {
+  // carry: the blend mesh on every level (chart UVs, damage RGBA and the dent morph ride through the
+  // collapses); ratios are of the level-0 mesh, as for the states
+  const lodLevels = (mesh, carry = false) => {
     if (!lods) return null;
     const out = [{ level: 0, mesh, triangles: mesh.triangles, error: 0 }];
-    for (let i = 1; i < lods.length; i++) { const r = simplifyMesh(keepFirst || mesh, { ratio: lods[i], level: i, keepOverlays: i === 1 }); out.push({ level: i, mesh: r.mesh, triangles: r.triangles, error: r.error }); }
+    for (let i = 1; i < lods.length; i++) { const r = simplifyMesh(mesh, { ratio: lods[i], level: i, keepOverlays: i === 1, carry }); out.push({ level: i, mesh: r.mesh, triangles: r.triangles, error: r.error }); }
     let prev = 0;
     for (const L of out) { L.distance = L.level ? Math.max(prev, f6(switchDistance(L.error / scale, screen))) : 0; prev = L.distance; }
     return out;
   };
+  // rigid rig: the levels are made per rig node (each piece simplified in its rest frame)
+  const rigLevels = (mesh, carry = false) => {
+    if (!lods) return null;
+    const p0 = splitRig(mesh, rinfo);
+    const out = [{ level: 0, pieces: p0, triangles: mesh.triangles, error: 0 }];
+    for (let i = 1; i < lods.length; i++) {
+      const pieces = new Map();
+      let tris = 0, err = 0;
+      for (const [k, m] of p0) {
+        if (!m.triangles) continue;
+        const r = simplifyMesh(m, { ratio: lods[i], level: i, keepOverlays: i === 1, carry });
+        pieces.set(k, r.mesh); tris += r.triangles; err = Math.max(err, r.error);
+      }
+      out.push({ level: i, pieces, triangles: tris, error: err });
+    }
+    let prev = 0;
+    for (const L of out) { L.distance = L.level ? Math.max(prev, f6(switchDistance(L.error / scale, screen))) : 0; prev = L.distance; }
+    return out;
+  };
+  const levelsOf = (mesh, carry = false) => (rinfo ? rigLevels(mesh, carry) : lodLevels(mesh, carry));
   const capRoblox = (mesh, what) => {
     if (!roblox || mesh.triangles <= ROBLOX_TRIS) return { mesh, simplified: false };
     const r = simplifyMesh(mesh, { ratio: (ROBLOX_TRIS * 0.95) / mesh.triangles, level: 1, keepOverlays: false });
@@ -298,10 +351,36 @@ export function damageExport(engine, def, built, a, { file, scale }) {
   };
   const manifest = { model: def.name, generator: 'agent-art', px_per_unit: scale, up: a.up === 'z' ? 'z' : 'y', mode, profile: profile || 'web', default_state: 'intact', states: [], fracture: null, blend: null };
   /** One state (or intact) under a parent: node with mesh (or LOD children) + fx socket children. */
-  const stateNodes = (S, name, label, mesh, sockets, extras, levels) => {
+  const stateNodes = (S, name, label, mesh, sockets, extras, levels, overlays = null) => {
     const id = node(S, { name: `${name}_${label}`, children: [], extras: { damage_state: label, ...extras } });
     const rec = { name: label, node: `${name}_${label}`, triangles: mesh.triangles, ...extras };
-    if (levels) {
+    if (rinfo) {
+      // rigid rig: one rig copy per level, the state's mesh split over its nodes (rest frames)
+      const lv = levels || [{ level: 0, pieces: splitRig(mesh, rinfo), triangles: mesh.triangles }];
+      const ovp = overlays ? [{ pieces: splitRig(overlays.mesh, rinfo), suffix: 'overlays', extras: overlays.extras }] : [];
+      if (levels) rec.lods = [];
+      for (const L of lv) {
+        const prefix = levels ? `${name}_${label}_LOD${L.level}` : `${name}_${label}_rig`;
+        const r = addRig(S, def, rinfo, L.pieces, prefix, { addMesh, node, anims: S.anims, hidden: L.level > 0, extraPieces: L.level === 0 ? ovp : [] });
+        if (levels) S.nodes[r.root].extras = { ...S.nodes[r.root].extras, lod: L.level, distance: L.distance };
+        S.nodes[id].children.push(r.root);
+        if (levels) rec.lods.push({ level: L.level, node: prefix, triangles: L.triangles, distance: L.distance });
+        if (L.level === 0) rec.rig = { root: prefix, nodes: r.nodes.length, ...(ovp.length ? { overlays: 'per rig node: <node>_overlays' } : {}) };
+      }
+    } else if (skinBase) {
+      // skinned: the state mesh is a skinned mesh on the shared armature (skin 0)
+      let sm;
+      if (label === 'intact' && !blend) { sm = skinBase.sk.mesh; S.intactSkin = id; }
+      else { const t = transferSkin(skinBase.sk.mesh, mesh); sm = t.mesh; skinBase.transfer = Math.max(skinBase.transfer, t.max_distance); }
+      S.nodes[id].mesh = addMesh(S, `${name}_${label}`, sm);
+      S.nodes[id].skin = 0;
+      rec.skin = { skin: 0, weights: label === 'intact' && !blend ? 'bind (the skinned export)' : 'transferred from the intact bind mesh (nearest vertex)' };
+      if (overlays) {
+        const on = `${name}_${label}_overlays`;
+        S.nodes[id].children.push(node(S, { name: on, mesh: addMesh(S, on, transferSkin(skinBase.sk.mesh, overlays.mesh).mesh), skin: 0, extras: overlays.extras }));
+        rec.overlays_node = on;
+      }
+    } else if (levels) {
       rec.lods = [];
       for (const L of levels) {
         const lid = node(S, { name: `${name}_${label}_LOD${L.level}`, mesh: addMesh(S, `${name}_${label}_LOD${L.level}`, L.mesh), extras: { lod: L.level, distance: L.distance }, ...(L.level ? { lodHidden: true } : {}) });
@@ -324,11 +403,15 @@ export function damageExport(engine, def, built, a, { file, scale }) {
   const addStates = (S, parent, only) => {
     if (!spec) return;
     if (!only || only === 'intact') {
-      const { id, rec } = stateNodes(S, def.name, 'intact', intactMesh, [], { amount: 0, visible: true, ...(blend ? { blend: { morph: 'damage', uv_set: 1, mask: path.basename(`${base}.damage_mask.png`) } } : {}), ...(robloxIntact?.simplified ? { simplified_for_roblox: true } : {}) }, roblox ? null : lodLevels(intactMesh, blend ? built.mesh : null));
+      const shellMorph0 = blend?.overlays ? [...blend.overlays.groups.values()].some((g) => g.morphs) : false;
+      const ovr = blend?.overlays && !roblox && (rinfo || skinBase) ? { mesh: blend.overlays, extras: { overlays: true, ...(shellMorph0 ? { morph: 'damage' } : {}) } } : null;
+      const { id, rec } = stateNodes(S, def.name, 'intact', intactMesh, [], { amount: 0, visible: true, ...(blend ? { blend: { morph: 'damage', uv_set: 1, mask: path.basename(`${base}.damage_mask.png`) } } : {}), ...(robloxIntact?.simplified ? { simplified_for_roblox: true } : {}) }, roblox ? null : levelsOf(intactMesh, !!blend), ovr);
       if (parent !== null) S.nodes[parent].children.push(id);
-      if (blend?.overlays && !roblox) {
-        // the intact mesh's overlay shells (no morph targets): sibling mesh under the intact node
-        const oid = node(S, { name: `${def.name}_intact_overlays`, mesh: addMesh(S, `${def.name}_intact_overlays`, blend.overlays), extras: { overlays: true } });
+      if (blend?.overlays && !roblox && !ovr) {
+        // the intact mesh's overlay shells: sibling mesh under the intact node, with the same "damage"
+        // morph (weight = blend) so the shells stay on the dented surface
+        const shellMorph = [...blend.overlays.groups.values()].some((g) => g.morphs);
+        const oid = node(S, { name: `${def.name}_intact_overlays`, mesh: addMesh(S, `${def.name}_intact_overlays`, blend.overlays), extras: { overlays: true, ...(shellMorph ? { morph: 'damage' } : {}) } });
         (S.nodes[id].children || (S.nodes[id].children = [])).push(oid);
         rec.overlays_node = `${def.name}_intact_overlays`;
       }
@@ -339,7 +422,7 @@ export function damageExport(engine, def, built, a, { file, scale }) {
       let mesh = roblox ? bakeDecals(s) : s.mesh;
       let simplified = false;
       if (roblox) ({ mesh, simplified } = capRoblox(mesh, `state ${st.name}`));
-      const { id, rec } = stateNodes(S, def.name, st.name, mesh, s.sockets, { amount: st.amount, visible: false, features: Object.fromEntries(Object.entries(s.stats).filter(([, v]) => v)), ...(simplified ? { simplified_for_roblox: true } : {}) }, roblox ? null : lodLevels(mesh));
+      const { id, rec } = stateNodes(S, def.name, st.name, mesh, s.sockets, { amount: st.amount, visible: false, features: Object.fromEntries(Object.entries(s.stats).filter(([, v]) => v)), ...(simplified ? { simplified_for_roblox: true } : {}) }, roblox ? null : levelsOf(mesh));
       if (parent !== null) S.nodes[parent].children.push(id);
       if (!only) manifest.states.push(rec); else manifest._last = rec;
     }
@@ -353,7 +436,7 @@ export function damageExport(engine, def, built, a, { file, scale }) {
     for (const g of fr) {
       const id = node(S, { name: `${def.name}_${g.group}`, children: [], extras: { break_group: g.group, part: g.pi, parent_group: g.parent } });
       gid.set(g.group, id);
-      const rec = { group: g.group, node: `${def.name}_${g.group}`, part: g.part, parent: g.parent, method: g.method, boolean: g.boolean, seed: g.seed, pieces: g.pieces, density_kg_m3: g.density, volume: f6(g.result.volume_px3 / scale ** 3), mass_kg: f6((g.result.volume_px3 / scale ** 3) * g.density), chunk_volume_error: f6(g.result.error), chunks: [] };
+      const rec = { group: g.group, node: `${def.name}_${g.group}`, part: g.part, parent: g.parent, method: g.method, boolean: g.boolean, seed: g.seed, pieces: g.pieces, density_kg_m3: g.density, volume: f6(g.result.volume_px3 / scale ** 3), mass_kg: f6((g.result.volume_px3 / scale ** 3) * g.density), chunk_volume_error: f6(g.result.error), ...(g.result.closed ? { closed: g.result.closed } : {}), chunks: [] };
       const cnode = new Map();
       for (const c of g.result.chunks) {
         let m = c.mesh.clone().transform([1, 0, 0, -c.center[0], 0, 1, 0, -c.center[1], 0, 0, 1, -c.center[2]]);
@@ -374,17 +457,67 @@ export function damageExport(engine, def, built, a, { file, scale }) {
     for (const n of S.nodes) if (n.children && !n.children.length) delete n.children;
   };
   const glbOpts = { scale, up: a.up, name: def.name, ...(vertex ? { dmgAttr: vertex } : {}) };
-  // materials v2 (#15): the damage glbs carry the same material extensions / packing / tangents as
-  // the plain export. Vertex colour sets, extra UV sets, lightmaps and thickness stay on the plain
-  // export (TEXCOORD_1 / COLOR_0 belong to the damage masks here); the Roblox damage profile has its own path.
+  // materials v2 (#15): the damage glbs carry the same material extensions / packing / tangents,
+  // vertex colour sets and extra UV sets as the plain export. The damage mask UVs take the first free
+  // TEXCOORD after the AO / lightmap UVs (TEXCOORD_1) and uv2 / uv3, so baked AO, lightmaps and
+  // thickness work on damage exports too (baked per file: every state / LOD level / chunk occludes
+  // only itself, all share one lightmap). The Roblox damage profile has its own path (one UV set).
   const v2Args = { ...a };
-  for (const k of ['vertex_colors', 'uv2', 'uv3', 'lightmap', 'thickness', 'bake_ao', 'probes']) delete v2Args[k];
+  for (const k of ['probes']) delete v2Args[k];
+  const aoSpec = roblox ? null : normAO(a.bake_ao), lmSpec = roblox ? null : normLightmap(a.lightmap), thSpec = roblox ? null : normThickness(a.thickness);
+  if (aoSpec && a.bake_ao && typeof a.bake_ao === 'object' && a.bake_ao.bent) aoSpec.bent = true;
+  const bakeInfo = {};
+  /** Bake AO / lightmap / thickness on own copies of a file's meshes -> glb options. */
+  const bake = (S) => {
+    if (!aoSpec && !lmSpec && !thSpec) return null;
+    const meshes = S.meshes.map((m) => { const mm = new Mesh(); for (const g of m.groups) mm.groups.set(g.overlay ? `ov:${g.tex.key}` : g.tex.key, g); return mm.cloneFull(); });
+    const sets = meshes.map((mm, i) => ({ mm, i })).filter(({ mm, i }) => !/_collision$/.test(S.meshes[i].name) && [...mm.groups.values()].some((g) => !g.overlay && g.faces?.length)).map(({ mm }) => ({ meshes: [mm] }));
+    const out = {};
+    if (sets.length) {
+      if (lmSpec || thSpec || aoSpec?.bent) {
+        const r = bakeLighting(sets, { ao: aoSpec, lm: lmSpec, thickness: thSpec, lights: built.lights || [], bounds: built.mesh.bounds() });
+        if (r.ao) out.ao = r.ao;
+        for (const k of ['lightmap', 'bent', 'thickness']) if (r[k]) out[k] = r[k];
+        bakeInfo.lightmap = { size: r.stats.size, texel_px: r.stats.texel_px, charts: r.stats.charts, sets: sets.length };
+      } else {
+        const { stats, map } = bakeAO(sets, aoSpec);
+        if (map) out.ao = map;
+        bakeInfo.ao = { ...stats, sets: sets.length };
+      }
+    }
+    S.meshes = S.meshes.map((m, i) => ({ ...m, groups: [...meshes[i].groups.values()] }));
+    return out;
+  };
+  /** The damage mask UV set the writer picks for the blend mesh: after TEXCOORD_1 (AO / lightmap) and the uv2 / uv3 sets. */
+  const fixUvSet = (meshes, nodes) => {
+    const g = meshes.flatMap((m) => [...m.groups]).find((x) => x.uvd && !x.overlay);
+    if (!g) return;
+    const set = (g.uv1 ? 2 : 1) + (g.vattr ? Object.keys(g.vattr).filter((k) => k.startsWith('TEXCOORD_')).length : 0);
+    for (const n of nodes) if (n.extras?.blend) n.extras.blend.uv_set = set;
+    bakeInfo.uv_set = set;
+  };
   if (v2Args.profile === 'roblox') delete v2Args.profile;
   let v2Report = null;
+  let validation = null;
   const write = (S, f, extras) => {
-    const st = roblox ? null : exportV2(def, built, v2Args, { meshes: S.meshes, nodes: S.nodes, ext: null, scale, file: f, info: null });
-    const { glb, stats } = writeGLB(st ? { meshes: st.meshes, nodes: st.nodes } : S, { ...glbOpts, ...(st ? { ...st.glbOpts, v2: st.v2 } : {}), extras: { damage: extras } });
+    const baked = roblox ? null : bake(S);
+    const st = roblox ? null : exportV2(def, built, v2Args, { meshes: S.meshes, nodes: S.nodes, ext: baked ? { glbOpts: baked, meta: {} } : null, scale, file: f, info: null, skinned: !!skinBase });
+    fixUvSet(st ? st.meshes : S.meshes, st ? st.nodes : S.nodes);
+    // rig clips (merged over the states) + the skeleton clips (morph weights on the intact bind mesh only)
+    const animations = [...S.anims.values()];
+    if (skinBase) for (const an of skinBase.sc.animations) {
+      const ch = an.channels.flatMap((c) => (c.path !== 'weights' ? [c] : S.intactSkin !== undefined ? [{ ...c, node: S.intactSkin }] : []));
+      if (ch.length) animations.push({ ...an, channels: ch });
+    }
+    const sceneOut = { meshes: st ? st.meshes : S.meshes, nodes: st ? st.nodes : S.nodes, ...(animations.length ? { animations } : {}), ...(S.skins ? { skins: S.skins } : {}) };
+    const { glb, stats } = writeGLB(sceneOut, { ...glbOpts, ...(baked && baked.ao ? { ao: baked.ao } : {}), ...(st ? { ...st.glbOpts, v2: st.v2 } : {}), extras: { damage: extras } });
     if (st) { finishV2(st, glb, stats); v2Report = st.result.materials_v2; }
+    if (rinfo || skinBase) {
+      // rigged / skinned damage files go through both validators (node graph, animations, skins, attributes)
+      const v1 = checkGLB(glb), v2s = validateSkinned(glb);
+      if (!v1.ok || !v2s.ok) throw new Error(`damage export: ${path.basename(f)} failed glTF validation: ${[...(v1.errors || []), ...(v2s.errors || [])].slice(0, 4).join('; ')}`);
+      validation = 'ok';
+    }
     side.push([f, glb]);
     return { file: path.basename(f), bytes: glb.length, triangles: stats.triangles, nodes: stats.nodes, materials: stats.materials, ...(st ? { materials_v2: { valid: st.result.materials_v2.valid, extensions: st.result.materials_v2.extensions } } : {}) };
   };
@@ -392,6 +525,7 @@ export function damageExport(engine, def, built, a, { file, scale }) {
   if (mode === 'nodes' || roblox) {
     const S = scene();
     const root = node(S, { name: `${def.name}_damage`, children: [], extras: { damage_root: true, states: ['intact', ...states.map(({ st }) => st.name)], manifest: `${bn}.damage.json` } });
+    if (skinBase) S.nodes[root].children.push(S.armature);
     addStates(S, root);
     addFracture(S, root);
     const f = roblox ? `${base}.damage.roblox.glb` : `${base}.damage.glb`;
@@ -420,15 +554,18 @@ export function damageExport(engine, def, built, a, { file, scale }) {
   delete manifest._last;
   if (blend) {
     manifest.blend = {
-      node: `${def.name}_intact${lods ? '_LOD0' : ''}`, morph: 'damage', uv_set: 'TEXCOORD_1 (chart UVs, unique per face)', mask: path.basename(`${base}.damage_mask.png`), mask_size: [blend.mask.width, blend.mask.height], texel_px: blend.texel_px,
+      node: `${def.name}_intact${lods ? '_LOD0' : rinfo ? '_rig' : ''}`, morph: 'damage', uv_set: (bakeInfo.uv_set ?? 1) === 1 ? 'TEXCOORD_1 (chart UVs, unique per face)' : `TEXCOORD_${bakeInfo.uv_set} (chart UVs, unique per face; TEXCOORD_1 = the AO / lightmap UVs${bakeInfo.uv_set === 3 ? ', TEXCOORD_2 = uv2' : bakeInfo.uv_set > 3 ? ', TEXCOORD_2 / TEXCOORD_3 = uv2 / uv3' : ''})`, mask: path.basename(`${base}.damage_mask.png`), mask_size: [blend.mask.width, blend.mask.height], texel_px: blend.texel_px,
       channels: { r: 'scorch + soot', g: 'dent', b: 'holes (bullets, cracks, glass holes, breach)', a: 'edge wear + scratches' }, coverage: blend.coverage,
       encoding: 'threshold: a texel shows its damage once blend >= 1 - value/255 (value = (1 - onset) x coverage), so one blend 0..1 grows the damage continuously; dent morph weight = blend',
       ...(vertex ? { vertex: { attribute: vertex, channels: 'RGBA = scorch, dent, holes, wear (same encoding, 0..1)' } } : {}),
-      note: 'Geometry that changes topology (panel loss, glass holes, breaches, bends) lives in the state nodes; blend covers the surface + dents on the intact mesh (LOD0 only).',
+      note: `Geometry that changes topology (panel loss, glass holes, breaches, bends) lives in the state nodes; blend covers the surface + dents on the intact mesh${lods ? ' and every LOD level (each <name>_intact_LODn carries the morph and the mask UVs)' : ' (LOD0 only)'}${blend.overlays && [...blend.overlays.groups.values()].some((g) => g.morphs) ? '; the overlay shells node carries the same morph' : ''}.`,
     };
   }
+  if (rinfo) manifest.rig = { root: def.name, nodes: rinfo.nodes.map((n) => n.name), sockets: rinfo.sockets.map((s) => s.name), clips: Object.keys(def.clips || {}), validation, note: 'Every state (and LOD level) holds a copy of the rig: <model>_<state>_rig (LODs: <model>_<state>_LODn) with one node per rig node (<prefix>_<node>, rest TRS, its piece of the damaged mesh) and the socket nodes. One animation per clip drives the matching nodes of every state, so a damaged door opens and a wrecked turret turns; only the visible state shows.' };
+  if (skinBase) manifest.skin = { armature: def.name, bones: skinBase.bones, skin: 0, clips: skinBase.sc.animations.map((x) => x.name), weight_transfer_max_px: f6(skinBase.transfer), validation, note: 'Every state node is a skinned mesh on the one armature (skin 0, shared joints and inverse bind matrices). The intact state keeps the bind weights; damaged states take the weights of the nearest bind vertex, so dents, cuts and inner backing follow the bones. Shape (morph) weights animate the intact bind mesh only.' };
   if (roblox) manifest.roblox = { tri_limit: ROBLOX_TRIS, note: 'Each state and chunk node is its own MeshPart (<= 20k triangles, simplified when needed). Masks, morphs and the second UV set are dropped: decals are baked into a per-state colour atlas (TEXCOORD_0). Swap MeshParts (Transparency 1 / 0) to change state; fx sockets become Attachments.' };
-  if (v2Report) manifest.materials_v2 = { profile: v2Report.profile, extensions: v2Report.extensions, valid: v2Report.valid, note: "materials v2 as in the plain export; vertex colour sets, uv2 / uv3, lightmaps and thickness stay on the plain export (TEXCOORD_1 + COLOR_0 / _DAMAGE carry the damage masks here)" };
+  if (v2Report) manifest.materials_v2 = { profile: v2Report.profile, extensions: v2Report.extensions, valid: v2Report.valid, note: aoSpec || lmSpec || thSpec || a.vertex_colors || a.uv2 || a.uv3 ? 'materials v2 as in the plain export, with its vertex colour sets, uv2 / uv3, AO, lightmap and thickness (TEXCOORD_1); the damage masks sample their own UV set (blend.uv_set)' : "materials v2 as in the plain export; vertex colour sets, uv2 / uv3, lightmaps and thickness stay on the plain export (TEXCOORD_1 + COLOR_0 / _DAMAGE carry the damage masks here)" };
+  if (bakeInfo.ao || bakeInfo.lightmap) manifest.bake = { ...(bakeInfo.ao ? { ao: bakeInfo.ao } : {}), ...(bakeInfo.lightmap ? { lightmap: bakeInfo.lightmap } : {}), note: 'AO / lightmap on TEXCOORD_1 (occlusionTexture texCoord 1, material extras.lightMap), baked per file: every state, LOD level and chunk occludes only itself and they share one lightmap; the damage masks use blend.uv_set' };
   manifest.fx_kinds = FX_KINDS;
   manifest.usage = 'three.js: gltf.scene.getObjectByName("<model>_<state>") per state (extras.visible = default visibility; toggle .visible). fx sockets: child nodes "<model>_<state>_fx_<kind>_<n>" (userData.fx = spark|smoke|fire|steam|leak|flicker; -Z = emit direction). Blend: intact mesh morphTargetInfluences[dict.damage] = blend and a shader that samples the mask on uv1 (threshold encoding above). Fracture: hide the part, show <model>_<group> chunks; each chunk node origin = centre of mass, userData.mass_kg, child *_collision = convex hull (hidden).';
   const ms = Math.round(performance.now() - t0);

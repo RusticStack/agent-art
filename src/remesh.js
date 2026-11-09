@@ -16,6 +16,7 @@
 import { Mesh } from './model3d.js';
 import { soupOf, TriBVH, meshFromTris, attrsAt, pointOf, edgeMap, ekey, cleanupMesh, soupBounds, triNormal, sub3, cross3, dot3, norm3, len3, closestOnTri, hausdorff } from './meshkit.js';
 import { simplifySoup } from './simplify.js';
+import { manifoldStats } from './csg.js';
 
 const GEO_TEX = { key: 'remesh:geo', name: 'remesh', width: 1, height: 1, data: Uint8ClampedArray.from([200, 200, 200, 255]) };
 
@@ -415,6 +416,30 @@ export function quadRemesh(mesh, opts = {}) {
     mesh: out,
     stats: { quads: nQuads, triangles_left: nTris, faces: nQuads + nTris, quad_ratio: +(nQuads / Math.max(1, nQuads + nTris)).toFixed(3), source: mesh.triangles, feature_edges: feat.size, flips, symmetry: sym ? { axis: sym.axis, at } : null, valence: Object.fromEntries([...vh].sort((a, b) => a[0] - b[0])), cleanup: clean.report, ms: Math.round(t1 - t0) },
   };
+}
+
+/**
+ * Close an open / non-manifold part so booleans (fracture, breaches) can cut it: the #19 cleanup
+ * path first (weld + hole fill + winding), then a voxel remesh (fills any opening; textures are
+ * transferred) when allowed. A result counts only when it is closed and has volume.
+ * opts: {voxel?: true (allow the voxel fallback), resolution?: 48, minVolume?: px^3}.
+ * -> {mesh, method: "cleanup"|"voxel", before: {open, nonManifold}, after: {open, nonManifold}, ms} | null
+ */
+export function closeOpenMesh(mesh, opts = {}) {
+  const t0 = performance.now();
+  const before = manifoldStats(mesh);
+  const vol = (m) => { let v = 0; for (const g of m.groups.values()) { if (g.overlay) continue; for (let i = 0; i < g.idx.length; i += 3) { const a = g.idx[i] * 3, b = g.idx[i + 1] * 3, c = g.idx[i + 2] * 3; v += (g.pos[a] * (g.pos[b + 1] * g.pos[c + 2] - g.pos[b + 2] * g.pos[c + 1]) - g.pos[a + 1] * (g.pos[b] * g.pos[c + 2] - g.pos[b + 2] * g.pos[c]) + g.pos[a + 2] * (g.pos[b] * g.pos[c + 1] - g.pos[b + 1] * g.pos[c])) / 6; } } return v; };
+  const minVol = opts.minVolume ?? (() => { const b = mesh.bounds(), e = b.max.map((x, k) => x - b.min[k]); return Math.max(1e-4, 1e-3 * e[0] * e[1] * e[2]); })();
+  const ok = (m) => { const s = manifoldStats(m); return s.open === 0 && s.nonManifold === 0 && vol(m) > minVol ? s : null; };
+  const tries = [['cleanup', () => cleanupMesh(mesh, { weld: 1e-3, holes: 64, winding: true }).mesh]];
+  if (opts.voxel !== false) tries.push(['voxel', () => voxelRemesh(mesh, { resolution: opts.resolution ?? 48 }).mesh]);
+  for (const [method, run] of tries) {
+    let m;
+    try { m = run(); } catch { continue; }
+    const s = m && ok(m);
+    if (s) return { mesh: m, method, before: { open: before.open, nonManifold: before.nonManifold }, after: { open: s.open, nonManifold: s.nonManifold }, ms: Math.round(performance.now() - t0) };
+  }
+  return null;
 }
 
 /** Cleanup as a remesh method (meshkit cleanupMesh). */

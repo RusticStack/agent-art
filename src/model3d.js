@@ -154,6 +154,20 @@ export class Mesh {
     return this;
   }
   clone() { return new Mesh().add(this); }
+  /** Deep copy keeping every per-vertex extra (AO, lightmap / damage UVs, damage RGBA, morph targets, skin, rig nodes). */
+  cloneFull() {
+    const m = new Mesh();
+    const cp = (v) => (v && typeof v === 'object' && typeof v.length === 'number' ? Array.from(v) : v);
+    for (const [k, g] of this.groups) {
+      const o = { ...g, pos: cp(g.pos), nrm: cp(g.nrm), uv: cp(g.uv), idx: cp(g.idx) };
+      for (const key of ['uv0', 'alpha', 'ao', 'uv1', 'uvd', 'dmg', 'vnode']) if (g[key]) o[key] = cp(g[key]);
+      if (g.faces) o.faces = g.faces.map((f) => ({ ...f, n: f.n.slice() }));
+      if (g.morphs) o.morphs = g.morphs.map((t) => ({ name: t.name, pos: cp(t.pos), nrm: cp(t.nrm) }));
+      if (g.skin) o.skin = { j: cp(g.skin.j), w: cp(g.skin.w) };
+      m.groups.set(k, o);
+    }
+    return m;
+  }
   /** Each face gets props (part id, CTM tag, overlays, material key) unless already set. */
   tagFaces(props) {
     for (const g of this.groups.values()) if (g.faces) for (const f of g.faces) {
@@ -179,14 +193,15 @@ export function weld(g) {
   const q = (v) => Math.round(v * 1e5);
   const ov = !!g.overlay;
   // optional per-vertex data (baked AO, AO lightmap UVs, morph targets) joins the key only when present
-  const hasAO = !ov && !!g.ao, hasUV1 = !ov && !!g.uv1, morphs = !ov && g.morphs ? g.morphs : null, skin = g.skin || null, hasDmg = !ov && !!g.dmg;
+  const hasAO = !ov && !!g.ao, hasUV1 = !ov && !!g.uv1, morphs = g.morphs ? g.morphs : null, skin = g.skin || null, hasDmg = !ov && !!g.dmg, hasUVD = !ov && !!g.uvd;
   const va = !ov && g.vattr ? Object.entries(g.vattr) : null, vout = va ? va.map(() => []) : null; // materials v2 vertex data
-  const sj = [], sw = [], dmg = [], ao = [], uv1 = [], mpos = morphs ? morphs.map(() => []) : null, mnrm = morphs ? morphs.map(() => []) : null;
+  const sj = [], sw = [], dmg = [], ao = [], uv1 = [], uvd = [], mpos = morphs ? morphs.map(() => []) : null, mnrm = morphs ? morphs.map(() => []) : null;
   for (let i = 0; i < g.pos.length / 3; i++) {
     let key = `${q(g.pos[i * 3])},${q(g.pos[i * 3 + 1])},${q(g.pos[i * 3 + 2])},${q(g.nrm[i * 3])},${q(g.nrm[i * 3 + 1])},${q(g.nrm[i * 3 + 2])},${q(g.uv[i * 2])},${q(g.uv[i * 2 + 1])}`;
     if (ov) key += `,${q(g.uv0[i * 2])},${q(g.uv0[i * 2 + 1])},${q(g.alpha[i])}`;
     if (hasAO) key += `,a${q(g.ao[i])}`;
     if (hasUV1) key += `,l${q(g.uv1[i * 2])},${q(g.uv1[i * 2 + 1])}`;
+    if (hasUVD) key += `,c${q(g.uvd[i * 2])},${q(g.uvd[i * 2 + 1])}`;
     if (morphs) for (const t of morphs) key += `,m${q(t.pos[i * 3])},${q(t.pos[i * 3 + 1])},${q(t.pos[i * 3 + 2])}`;
     if (skin) for (let k = 0; k < 4; k++) key += `,s${skin.j[i * 4 + k]}:${skin.w[i * 4 + k]}`;
     if (va) for (const [k, a] of va) { key += `,${k}`; for (let c = 0; c < a.size; c++) key += `,${q(a.data[i * a.size + c])}`; }
@@ -198,6 +213,7 @@ export function weld(g) {
       if (ov) { uv0.push(g.uv0[i * 2], g.uv0[i * 2 + 1]); alpha.push(g.alpha[i]); }
       if (hasAO) ao.push(g.ao[i]);
       if (hasUV1) uv1.push(g.uv1[i * 2], g.uv1[i * 2 + 1]);
+      if (hasUVD) uvd.push(g.uvd[i * 2], g.uvd[i * 2 + 1]);
       if (va) va.forEach(([, a], k) => { for (let c = 0; c < a.size; c++) vout[k].push(a.data[i * a.size + c]); });
       if (hasDmg) dmg.push(g.dmg[i * 4], g.dmg[i * 4 + 1], g.dmg[i * 4 + 2], g.dmg[i * 4 + 3]);
       if (morphs) morphs.forEach((t, k) => { mpos[k].push(t.pos[i * 3], t.pos[i * 3 + 1], t.pos[i * 3 + 2]); mnrm[k].push(t.nrm[i * 3], t.nrm[i * 3 + 1], t.nrm[i * 3 + 2]); });
@@ -209,6 +225,7 @@ export function weld(g) {
   if (ov) Object.assign(out, { overlay: true, uv0: new Float32Array(uv0), alpha: new Float32Array(alpha) });
   if (hasAO) out.ao = new Float32Array(ao);
   if (hasUV1) out.uv1 = new Float32Array(uv1);
+  if (hasUVD) out.uvd = new Float32Array(uvd);
   if (hasDmg) out.dmg = new Float32Array(dmg);
   if (morphs) out.morphs = morphs.map((t, k) => ({ name: t.name, pos: new Float32Array(mpos[k]), nrm: new Float32Array(mnrm[k]) }));
   // skin weights (art_model skin): JOINTS_0 / WEIGHTS_0, 4 per vertex

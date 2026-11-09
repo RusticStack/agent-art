@@ -277,19 +277,28 @@ export function manifoldStats(mesh) {
   return { edges: E.size, open, nonManifold, flipped };
 }
 
-/** Keep only referenced vertices, each face's vertices contiguous again (face v/vc ranges stay valid). */
+/** Keep only referenced vertices, each face's vertices contiguous again (face v/vc ranges stay valid). Damage blend data (uvd, dmg, morphs) rides along when present. */
 export function compactGroup(g) {
   const pos = [], nrm = [], uv = [], idx = [], faces = [];
+  const uvd = g.uvd ? [] : null, dmg = g.dmg ? [] : null, morphs = g.morphs ? g.morphs.map((t) => ({ name: t.name, pos: [], nrm: [] })) : null;
   for (const f of g.faces) {
     const map = new Map(), base = pos.length / 3, i0 = idx.length;
     for (let i = f.i; i < f.i + f.ic; i++) {
       const v = g.idx[i];
-      if (!map.has(v)) { map.set(v, base + map.size); pos.push(g.pos[v * 3], g.pos[v * 3 + 1], g.pos[v * 3 + 2]); nrm.push(g.nrm[v * 3], g.nrm[v * 3 + 1], g.nrm[v * 3 + 2]); uv.push(g.uv[v * 2], g.uv[v * 2 + 1]); }
+      if (!map.has(v)) {
+        map.set(v, base + map.size); pos.push(g.pos[v * 3], g.pos[v * 3 + 1], g.pos[v * 3 + 2]); nrm.push(g.nrm[v * 3], g.nrm[v * 3 + 1], g.nrm[v * 3 + 2]); uv.push(g.uv[v * 2], g.uv[v * 2 + 1]);
+        if (uvd) uvd.push(g.uvd[v * 2], g.uvd[v * 2 + 1]);
+        if (dmg) for (let c = 0; c < 4; c++) dmg.push(g.dmg[v * 4 + c]);
+        if (morphs) morphs.forEach((t, k) => { for (let c = 0; c < 3; c++) { t.pos.push(g.morphs[k].pos[v * 3 + c]); t.nrm.push(g.morphs[k].nrm[v * 3 + c]); } });
+      }
       idx.push(map.get(v));
     }
     faces.push({ ...f, v: base, vc: map.size, i: i0, ic: idx.length - i0 });
   }
   Object.assign(g, { pos, nrm, uv, idx, faces });
+  if (uvd) g.uvd = uvd;
+  if (dmg) g.dmg = dmg;
+  if (morphs) g.morphs = morphs;
 }
 
 /**

@@ -46,18 +46,23 @@ class Heap {
 
 /**
  * Simplify a final (baked) mesh to about `ratio` of its triangles. opts: {ratio, level (for greeble
- * drop), max_error px (stop early), keepOverlays}. -> {mesh, triangles, source, error (px, max
+ * drop), max_error px (stop early), keepOverlays, carry (keep the damage blend data: chart UVs
+ * g.uvd and damage RGBA g.dmg are corner attributes like the UVs, morph targets move with their
+ * point; the blend mesh on every LOD level)}. -> {mesh, triangles, source, error (px, max
  * collapse error incl. dropped greebles), dropped_greebles}
  */
-export function simplifyMesh(src0, { ratio = 0.5, level = 1, maxError = Infinity, keepOverlays = false } = {}) {
+export function simplifyMesh(src0, { ratio = 0.5, level = 1, maxError = Infinity, keepOverlays = false, carry = false } = {}) {
   // hidden faces pressed together (abutting kit pieces) would pin every seam: drop them first
-  const src = mergeMesh(src0.clone(), { weld: 0, internal: true }).mesh;
+  const src = mergeMesh(carry ? src0.cloneFull() : src0.clone(), { weld: 0, internal: true }).mesh;
   const groups = [...src.groups.values()];
   const P = [], pid = new Map();
   const point = (x, y, z) => { const k = qkey(x, y, z); let i = pid.get(k); if (i === undefined) { i = P.length / 3; pid.set(k, i); P.push(x, y, z); } return i; };
   const T = []; // {p:[a,b,c], g, uv:[[u,v]x3], n:[[x,y,z]x3], f, alive}
   let dropErr = 0, droppedG = 0, total = 0;
   const out = new Mesh();
+  // carry: morph target names (every base group has the same targets) and per-point deltas
+  const mnames = carry ? (groups.find((g) => !g.overlay && g.morphs)?.morphs.map((t) => t.name) ?? null) : null;
+  const PD = new Map();
   groups.forEach((g, gi) => {
     if (g.overlay) {
       if (keepOverlays) out.add({ groups: new Map([[g.tex.key, g]]) });
@@ -71,7 +76,17 @@ export function simplifyMesh(src0, { ratio = 0.5, level = 1, maxError = Infinity
         const vs = [g.idx[i], g.idx[i + 1], g.idx[i + 2]];
         const p = vs.map((v) => point(g.pos[v * 3], g.pos[v * 3 + 1], g.pos[v * 3 + 2]));
         if (p[0] === p[1] || p[1] === p[2] || p[0] === p[2]) continue;
-        T.push({ p, g: gi, uv: vs.map((v) => [g.uv[v * 2], g.uv[v * 2 + 1]]), n: vs.map((v) => [g.nrm[v * 3], g.nrm[v * 3 + 1], g.nrm[v * 3 + 2]]), f, alive: true });
+        const t = { p, g: gi, uv: vs.map((v) => [g.uv[v * 2], g.uv[v * 2 + 1]]), n: vs.map((v) => [g.nrm[v * 3], g.nrm[v * 3 + 1], g.nrm[v * 3 + 2]]), f, alive: true };
+        if (carry) {
+          if (g.uvd) t.uvd = vs.map((v) => [g.uvd[v * 2], g.uvd[v * 2 + 1]]);
+          if (g.dmg) t.dmg = vs.map((v) => [0, 1, 2, 3].map((c) => g.dmg[v * 4 + c]));
+          if (mnames && g.morphs) {
+            // target normals blend per corner like the normals; position deltas belong to the point
+            t.mn = vs.map((v) => g.morphs.map((m) => [m.nrm[v * 3], m.nrm[v * 3 + 1], m.nrm[v * 3 + 2]]));
+            vs.forEach((v, k) => { if (!PD.has(p[k])) PD.set(p[k], g.morphs.map((m) => [m.pos[v * 3] - g.pos[v * 3], m.pos[v * 3 + 1] - g.pos[v * 3 + 1], m.pos[v * 3 + 2] - g.pos[v * 3 + 2]])); });
+          }
+        }
+        T.push(t);
       }
       if (drop) dropErr = Math.max(dropErr, f.gh ?? 0);
     }
@@ -185,6 +200,10 @@ export function simplifyMesh(src0, { ratio = 0.5, level = 1, maxError = Infinity
       t.uv[k] = [0, 1].map((c) => w[0] * t.uv[0][c] + w[1] * t.uv[1][c] + w[2] * t.uv[2][c]);
       const nn = [0, 1, 2].map((c) => w[0] * t.n[0][c] + w[1] * t.n[1][c] + w[2] * t.n[2][c]), nnl = Math.hypot(...nn) || 1;
       t.n[k] = nn.map((x) => x / nnl);
+      const lerp = (A) => A[0].map((_, c) => w[0] * A[0][c] + w[1] * A[1][c] + w[2] * A[2][c]);
+      if (t.uvd) t.uvd[k] = lerp(t.uvd);
+      if (t.dmg) t.dmg[k] = lerp(t.dmg).map((x) => Math.max(0, Math.min(1, x)));
+      if (t.mn) t.mn[k] = t.mn[k].map((_, m) => { const q = lerp([t.mn[0][m], t.mn[1][m], t.mn[2][m]]), l = Math.hypot(...q) || 1; return q.map((x) => x / l); });
       t.p[k] = v;
       inc[v].push(ti);
     }
@@ -201,6 +220,15 @@ export function simplifyMesh(src0, { ratio = 0.5, level = 1, maxError = Infinity
     if (!t.alive) continue;
     const g = groups[t.g], og = out.group(g.tex), base = og.pos.length / 3, i0 = og.idx.length;
     for (let k = 0; k < 3; k++) { const p = pos(t.p[k]); og.pos.push(p[0], p[1], p[2]); og.nrm.push(...t.n[k]); og.uv.push(...t.uv[k]); }
+    if (t.uvd) { if (!og.uvd) og.uvd = []; for (let k = 0; k < 3; k++) og.uvd.push(...t.uvd[k]); }
+    if (t.dmg) { if (!og.dmg) og.dmg = []; for (let k = 0; k < 3; k++) og.dmg.push(...t.dmg[k]); }
+    if (mnames) {
+      if (!og.morphs) og.morphs = mnames.map((name) => ({ name, pos: [], nrm: [] }));
+      for (let k = 0; k < 3; k++) {
+        const p = pos(t.p[k]), d = PD.get(t.p[k]);
+        og.morphs.forEach((m, j) => { const dd = d ? d[j] : [0, 0, 0], nn = t.mn ? t.mn[k][j] : t.n[k]; m.pos.push(p[0] + dd[0], p[1] + dd[1], p[2] + dd[2]); m.nrm.push(...nn); });
+      }
+    }
     og.idx.push(base, base + 1, base + 2);
     const n = triN(...t.p.map(pos)), l = Math.hypot(...n) || 1;
     const rec = { v: base, vc: 3, i: i0, ic: 3, n: n.map((x) => x / l), mode: 0 };
