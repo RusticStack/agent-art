@@ -148,7 +148,7 @@ test('ctm: tile selection for all 256 neighbour sets (47 blob), compact, horizon
   assert.throws(() => ctmTileFor(0, 'nope'), /unknown CTM method/);
 });
 
-test('ctm: generated tilesets (borders where unconnected), compact template -> 47, README reference matches', () => {
+test('ctm: generated tilesets (borders where unconnected), compact template -> 47, docs reference matches', () => {
   const T = 16, base = { width: T, height: T, data: new Uint8ClampedArray(T * T * 4).fill(200) };
   const border = { width: 2, style: 'line', color: [0, 0, 0, 255] };
   const full = generateCTM({ method: 'full', base, border });
@@ -176,8 +176,8 @@ test('ctm: generated tilesets (borders where unconnected), compact template -> 4
   for (const mth of CTM_METHODS.filter((x) => !['random', 'repeat', 'overlay'].includes(x))) assert.equal(generateCTM({ method: mth, base, border }).meta.count, methodMasks(mth).length);
   assert.throws(() => generateCTM({ method: 'full', base, border: { width: 8 } }), /below half/);
   assert.throws(() => generateCTM({ method: 'repeat', base: { width: 20, height: 16, data: new Uint8ClampedArray(20 * 16 * 4) }, tile: 16 }), /multiple/);
-  // README copy of the reference selection behaves identically
-  const readme = fs.readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  // docs/3d/README.md copy of the reference selection behaves identically
+  const readme = fs.readFileSync(new URL('../docs/3d/README.md', import.meta.url), 'utf8');
   const src = readme.slice(readme.indexOf('function ctmTileFor'), readme.indexOf('```', readme.indexOf('function ctmTileFor')));
   const fn = new Function(`${src}\nreturn ctmTileFor;`)();
   for (let m = 0; m < 256; m++) for (const mth of ['full', 'overlay', 'horizontal', 'vertical', 'horizontal+vertical', 'top']) assert.deepEqual(fn(m, mth), ctmTileFor(m, mth), `${mth} ${m}`);

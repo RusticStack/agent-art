@@ -28,7 +28,7 @@ Audio (SFX, music, mixing; you cannot hear, so read analyze/critique reports): a
 The user leaves review notes on assets in the web UI: art_review list (replies say when the asset you touch has open notes).
 Retire superseded art with art_cleanup (plan -> apply; soft delete to a trash, restore undoes it).
 Orient yourself with art_graph (summary / query: what is part of what, a few hundred chars) instead of art_info on everything; record relations with art_graph link / group / tag / note.
-Details on demand: art_help {topic: workflow|textures|characters|animation|rig|library|melee|skin2d|scenes|hires|minecraft|3d|materials|audio|music|mixing|perception|graph|planets|cleanup|fx} or {op:"<draw command>"}.`;
+Details on demand: art_help {topic: ${Object.keys(TOPICS).join('|')}}, {op:"<draw command>"} or {skill} (recipes).`;
 
 const S = {
   canvas: { type: 'string' },
@@ -131,7 +131,7 @@ export const TOOLS = [
   },
   {
     name: 'art_help',
-    description: 'Docs on demand: {op:"shade"} full options + example for a draw command; {topic} guides: workflow, textures, characters, animation, rig, library, scenes, hires, minecraft, 3d, audio, music, mixing, perception, graph, planets, fx, damage; {skill} step-by-step recipes.',
+    description: `Docs on demand: {op:"shade"} = draw op options + example; {topic}: ${Object.keys(TOPICS).join(' ')}; {skill} = step-by-step recipe.`,
     inputSchema: {
       type: 'object',
       properties: { op: { type: 'string' }, topic: { type: 'string', enum: ['index', 'ops', ...Object.keys(TOPICS)] }, skill: { type: 'string', enum: Object.keys(SKILLS) } },

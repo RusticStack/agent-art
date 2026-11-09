@@ -1,0 +1,91 @@
+# Agent Art
+
+> Agent Art (npm `@rusticstack/agent-art`) is an MCP server with a live web UI that lets AI agents make real game art: pixel-art sprites, rigged 8-direction characters and animations, tilesets, textures, icons, isometric and HD-2D scenes, low-poly glTF models, planets, combat effects, sound effects and music. It has 29 `art_*` tools, help topics served on demand through `art_help`, and step-by-step skills. Plain Node.js 20+, no dependencies.
+
+Install for Claude Code: `claude mcp add agent-art -s user -- npx -y @rusticstack/agent-art mcp`. Any MCP client (stdio): command `npx`, args `["-y", "@rusticstack/agent-art", "mcp"]`. Without MCP: `npx -y @rusticstack/agent-art tools` lists the tools and `npx -y @rusticstack/agent-art tool <art_tool> '<json>'` calls one. The web UI runs at http://localhost:7420.
+
+Workflow for a sprite: `art_palette ramp` -> flat silhouettes with `art_draw` -> `shade` -> `outline` -> detail with `grid` -> `art_critique` -> fix -> `art_view` / `art_export`. Anything with more than one view or frame: `art_rig`. Several characters sharing motion: `art_anim`. 3D: `art_model`. Read `art_help {topic}` before guessing options.
+
+## Docs
+
+- [README](https://github.com/RusticStack/agent-art/blob/main/README.md): quick start, a first asset in 5 calls, feature tour, tools table with every action, help topics, skills, CLI, web UI, configuration
+- [llms-full.txt](https://github.com/RusticStack/agent-art/blob/main/llms-full.txt): the full agent reference in one file, generated from the code: MCP server instructions, every tool with its parameters, every draw command, every help topic and every skill
+- [MCP server instructions and tool schemas](https://github.com/RusticStack/agent-art/blob/main/src/mcp.js): `INSTRUCTIONS` and `TOOLS`, the source of truth for tool capabilities
+- [CHANGELOG](https://github.com/RusticStack/agent-art/blob/main/CHANGELOG.md): every feature and behaviour change by release
+
+## Feature guides
+
+- [Characters, rigs and the animation library](https://github.com/RusticStack/agent-art/blob/main/docs/rig/README.md): `art_rig` templates, humanoid_hd, held weapons, depth order, 2D skinning; `art_anim` skeletons, clips, skins, batch, runtime weapon layers
+- [humanoid_hd step-by-step guide](https://github.com/RusticStack/agent-art/blob/main/docs/rig-hd-guide.md): drawing and animating a high-detail 8-direction character
+- [Melee](https://github.com/RusticStack/agent-art/blob/main/docs/melee/README.md): melee clip sets, paired takedowns, gun disarms, hit volumes, melee weapon models
+- [2D skinning](https://github.com/RusticStack/agent-art/blob/main/docs/skin2d/README.md): bending drawn sprites on rig bones, runtime format
+- [3D models](https://github.com/RusticStack/agent-art/blob/main/docs/3d/README.md): `art_model` kits, props, rigs and clips, sprite renders, ships and vehicles, hard-surface detail, render cost, CTM, ship interiors and megastructures
+- [Materials v2](https://github.com/RusticStack/agent-art/blob/main/docs/materials/README.md): PBR extensions, lightmaps, probes, parallax, packing, export profiles, three.js hookups
+- [Skeletal skinning in 3D](https://github.com/RusticStack/agent-art/blob/main/docs/skinning/README.md): skeletons, weights, blend shapes, retargeting, glTF skins
+- [Mesh processing and cluster LOD](https://github.com/RusticStack/agent-art/blob/main/docs/meshproc/README.md): booleans, remeshing, decimation, cluster LOD (.clod format), visibility
+- [Damage and destruction](https://github.com/RusticStack/agent-art/blob/main/docs/damage/README.md): damage states, fracture, damage exports
+- [First-person viewmodels](https://github.com/RusticStack/agent-art/blob/main/docs/fp/README.md): `art_fp` arms per handling class, gun sweeps, composite, check, hand-drawn 2D sources
+- [Combat effects](https://github.com/RusticStack/agent-art/blob/main/docs/fx/README.md): `art_fx` muzzle flashes, impacts, decals, explosions, metadata
+- [Planets and space](https://github.com/RusticStack/agent-art/blob/main/docs/planets/README.md): `art_planet` planets, systems, terrain, asteroids, skyboxes
+- [Sound effects and music](https://github.com/RusticStack/agent-art/blob/main/docs/audio/README.md): `art_audio` SFX, music notation, analysis and listener reports, export
+- [Web UI](https://github.com/RusticStack/agent-art/blob/main/docs/ui/README.md): timeline, viewers, layers view, asset graph, review notes
+- [Cleanup](https://github.com/RusticStack/agent-art/blob/main/docs/cleanup/README.md): `art_cleanup` plans, trash, restore, and the asset-type registration hook
+
+## Help topics
+
+Each is returned by `art_help {topic:"<name>"}` and is included in full in llms-full.txt.
+
+- workflow: good pixel art step by step
+- textures: tileable textures (blocks, floors, walls)
+- characters: characters and sprites
+- animation: frame animation, tags, export
+- scenes: 2.5D / HD-2D and isometric scenes
+- hires: high-resolution pixel art (128 px to 2048 px)
+- minecraft: Minecraft resource packs
+- rig: `art_rig` multi-view, multi-animation rigs
+- library: `art_anim` animation library
+- skin2d: `art_rig` 2D skinning
+- melee: melee clips, hit volumes, paired takedowns
+- 3d: `art_model` 3D models from pixel art
+- materials: materials v2 render data
+- damage: damage states and fracture
+- audio: `art_audio` SFX, instruments, analysis
+- music: music notation and genre recipes
+- mixing: mixing and mastering
+- perception: reading the audio analysis
+- planets: `art_planet` planets and space
+- fx: `art_fx` combat effects
+- fp: `art_fp` first-person viewmodels
+- graph: `art_graph` asset graph
+- cleanup: `art_cleanup` retiring assets
+
+## Skills
+
+Each is returned by `art_help {skill:"<name>"}`, served as an MCP prompt, and written as `agent-art-<name>/SKILL.md` by `agent-art skills --out DIR`.
+
+- tileable-texture: seamless block, floor and wall textures
+- sprite: one character, item, monster or prop sprite
+- rig: a character in several views and animations from one rig
+- rig-hd: high-detail 8-direction humanoid_hd characters
+- weapon-handling: characters and first-person arms holding guns
+- anim-library: many characters sharing one clip library, batch export
+- walk-cycle: a quick frame-by-frame walk without a rig
+- iso-scene: isometric maps and dioramas
+- hd2d-scene: layered 2.5D / HD-2D backgrounds
+- minecraft-pack: Minecraft Java resource packs
+- 3d-kit: HD-2D 3D environment kits and props
+- ship-model: spaceships and vehicles
+- hard-surface: greebles, trim sheets, PBR, baked AO, LODs, impostors
+- ships-structures: walkable ships, interiors, colonies, megastructures
+- fp-weapon: first-person gun and arms as a 3D rig or sprite layers
+- prop-rig: doors, chests, turrets and other rigid prop rigs
+- ui-icons: icon sets and HUD elements
+- sfx-pack: sound-effect packs with variants
+- music-track: loopable game music checked with the listener report
+- planets-space: planets, terrain, skyboxes, asteroid fields
+- combat-fx: muzzle flashes, impacts, explosions and other combat VFX
+
+## Optional
+
+- [Upgrading to 0.7](https://github.com/RusticStack/agent-art/blob/main/docs/upgrading-0.7.md): behaviour changes for assets made with 0.6
+- [npm package](https://www.npmjs.com/package/@rusticstack/agent-art)

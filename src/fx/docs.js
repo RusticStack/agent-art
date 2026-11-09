@@ -53,6 +53,7 @@ export const FX_SKILLS = {
   'combat-fx': {
     title: 'Combat visual effects for a pixel-art shooter (art_fx)',
     when: 'Muzzle flashes, tracers, casings, bullet impacts and decals, explosions, smoke, fire, sparks, alarms for a browser (three.js) or Roblox FPS / TPS with pixel-art sprites.',
+    desc: 'Makes seeded pixel-art combat effect flipbooks (muzzle flashes, tracers, casings, impacts, decals, explosions, smoke, fire, sparks, steam) with engine metadata for three.js or Roblox (art_fx). Use when asked for muzzle flashes, hit effects, explosions or other VFX sprites.',
     body: `1. Lock the look first: art_fx ${J({ action: 'make', type: 'muzzle', variant: 'rifle', view: 'side', seed: 3 })} and ${J({ action: 'make', type: 'impact', variant: 'metal' })}. Shift hue (hue:-8 warmer) or palette:"project:<name>" so effects share the game palette.
 2. Whole set in one call: ${J({ action: 'batch', preset: 'all', seed: 3, group: 'combat' })} -> read <group>_contact.png; remake single effects with another seed or size where they read badly at game scale (impacts must read at 1-2 px per detail in a 384x216 frame).
 3. First person: render the gun with art_model render {camera:"fp", size:[384,216]} (socket_muzzle per frame), then ${J({ action: 'preview', type: 'muzzle', variant: 'rifle', over: { canvas: 'ar_fire', anchor: 'socket_muzzle' } })}; make the fp variant with the same anchor / aim_deg for the game.

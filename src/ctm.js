@@ -9,7 +9,7 @@
 export const BITS = { n: 1, ne: 2, e: 4, se: 8, s: 16, sw: 32, w: 64, nw: 128 };
 export const CTM_METHODS = ['full', 'compact', 'horizontal', 'vertical', 'horizontal+vertical', 'top', 'random', 'repeat', 'overlay'];
 
-// ---- reference tile selection (copied verbatim into the README for engines; keep self-contained) ----
+// ---- reference tile selection (copied verbatim into docs/3d/README.md for engines; keep self-contained) ----
 /**
  * ctmTileFor(neighbors, method, opts) -> tile index into the tileset (compact: [tl, tr, br, bl]
  * indices of the 5 compact tiles). neighbors: 8-bit mask (N1 NE2 E4 SE8 S16 SW32 W64 NW128),
