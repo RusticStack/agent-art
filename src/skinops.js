@@ -16,6 +16,7 @@ import { evalClip } from './animlib.js';
 import { expandSkeleton, resolveSkeleton, bonesFromRig, bonesFromLibrary, retargetFrom2D, skelClipKeys, sampleSkelClip, poseState, solvePoseState, boneOffsets, SKELETON_TEMPLATE_NAMES } from './skeleton3d.js';
 import { skinMesh, deformMesh, skelSockets, skinScene, robloxProfile, ROBLOX_MAX_BONES } from './skin3d.js';
 import { validateGLB } from './gltfvalidate.js';
+import { validateGLB as checkGLB } from './gltfcheck.js';
 import { exportV2, finishV2 } from './matops.js';
 import { renderViews } from './raster3d.js';
 import { encodePNG } from './png.js';
@@ -179,7 +180,9 @@ export function assembleSkinned(ctx, def, built, { scale, up, file, args = {} })
   if (v2) scene.meshes = v2.meshes;
   const { glb, stats } = ctx.writeGLB(scene, { scale, up, name: def.name, extras: { skin: { bones: S.bones.length, clips: Object.keys(scene.clips), shapes: sk.morphNames, ...(roblox ? { profile: 'roblox' } : {}), ...(lodMeta.lods ? { lods: lodMeta.lods.levels.length } : {}) } }, ...bakeOpts, ...(v2 ? { ...v2.glbOpts, v2: v2.v2 } : {}) });
   const v = validateGLB(glb);
-  if (!v.ok) throw new Error(`skinned glb failed validation: ${v.errors.slice(0, 4).join('; ')}`);
+  // both validators (skins / animations / attributes, and the structural glTF check: empty meshes, accessors)
+  const c = checkGLB(glb);
+  if (!v.ok || !c.ok) throw new Error(`skinned glb failed validation: ${[...(v.errors || []), ...(c.errors || [])].slice(0, 4).join('; ')}`);
   if (v2) finishV2(v2, glb, stats);
   const f6 = (x) => +(+x).toFixed(6);
   const meta = {

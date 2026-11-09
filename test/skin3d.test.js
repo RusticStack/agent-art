@@ -575,3 +575,46 @@ test('preview channel on a skinned model renders the posed mesh; channel + clip 
   e.run('model_create', { name: 'box', parts: [{ type: 'box', name: 'a', w: 8, h: 8, d: 8, texture: '#888' }] });
   assert.throws(() => e.run('model_preview', { name: 'box', channel: 'albedo', parts: { a: { rot: [0, 45, 0] } } }), /skinned models only/);
 });
+
+test('subdivided skin keeps face records: skinned LODs, baked AO and damage LOD0 AO are not empty; both validators pass', async () => {
+  const { validateGLB: checkGLB } = await import('../src/gltfcheck.js');
+  const { subdivideMesh } = await import('../src/skin3d.js');
+  const { Mesh } = await import('../src/model3d.js');
+  // unit: every triangle stays in a face record that owns a contiguous vertex range
+  const m = new Mesh(), tex = { key: 't' };
+  m.face(tex, [[0, 0, 0], [4, 0, 0], [4, 4, 0], [0, 4, 0]], [0, 0, 1], [[0, 0], [1, 0], [1, 1], [0, 1]]);
+  m.face(tex, [[0, 0, 0], [0, 0, 4], [4, 0, 4]], [0, -1, 0], [[0, 0], [1, 0], [1, 1]]);
+  subdivideMesh(m, 2);
+  const g = m.groups.get('t');
+  assert.equal(g.faces.length, 2);
+  assert.equal(g.faces.reduce((s, f) => s + f.ic, 0), g.idx.length, 'faces cover every triangle');
+  for (const f of g.faces) for (let i = f.i; i < f.i + f.ic; i++) assert.ok(g.idx[i] >= f.v && g.idx[i] < f.v + f.vc, 'face-local vertices');
+  assert.equal(g.faces[1].v, g.faces[0].v + g.faces[0].vc);
+  // the snake skinned with subdivide:1
+  const e = new Engine({ home: tmp() }), dir = tmp();
+  const J = (b) => JSON.parse(b.toString('utf8', 20, 20 + b.readUInt32LE(12)));
+  const valid = (glb, what) => { const v = validateGLB(glb), c = checkGLB(glb); assert.ok(v.ok && c.ok, `${what}: ${[...(v.errors || []), ...(c.errors || [])].slice(0, 3).join('; ')}`); };
+  e.run('model_create', { name: 'snake', parts: [{ type: 'tube', path: [[0, 32, 0], [0, 20, 0], [0, 8, 0], [0, 2, 0]], r: 3, sides: 8, texture: '#c84', segments: 4 }] });
+  e.run('model_skeleton', { name: 'snake', skeleton: { template: 'chain', count: 3, from: [0, 32, 0], to: [0, 2, 0] } });
+  e.run('model_skin', { name: 'snake', skin: { method: 'heat', subdivide: 1 } });
+  let r = e.run('model_export', { name: 'snake', path: path.join(dir, 'lods.glb'), lods: [1, 0.5] });
+  let glb = fs.readFileSync(r.file), j = J(glb);
+  valid(glb, 'lods');
+  assert.equal(j.meshes.length, 2);
+  for (const mm of j.meshes) assert.ok(mm.primitives.length > 0, `${mm.name} has primitives`);
+  assert.ok(r.skin.lods[1] > 0 && r.skin.lods[1] < r.skin.lods[0], `${r.skin.lods}`);
+  r = e.run('model_export', { name: 'snake', path: path.join(dir, 'ao.glb'), bake_ao: true });
+  glb = fs.readFileSync(r.file); j = J(glb);
+  valid(glb, 'bake_ao');
+  assert.ok(j.meshes[0].primitives.every((p) => p.attributes.TEXCOORD_1 !== undefined), 'AO chart UVs');
+  assert.ok(r.skin.bake.size[0] * r.skin.bake.size[1] > 64, `AO map ${r.skin.bake.size}`);
+  e.run('model_damage', { name: 'snake', states: ['scuffed'], seed: 2 });
+  e.run('model_export', { name: 'snake', path: path.join(dir, 'd.glb'), bake_ao: true, damage: { lods: [1, 0.5] } });
+  const man = JSON.parse(fs.readFileSync(path.join(dir, 'd.damage.json'), 'utf8'));
+  glb = fs.readFileSync(path.join(dir, man.file)); j = J(glb);
+  valid(glb, 'damage');
+  for (const name of ['snake_intact_LOD0', 'snake_intact_LOD1']) {
+    const n = j.nodes.find((x) => x.name === name);
+    assert.ok(n && j.meshes[n.mesh].primitives.every((p) => p.attributes.TEXCOORD_1 !== undefined), `${name} AO`);
+  }
+});

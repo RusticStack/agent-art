@@ -105,9 +105,35 @@ export function subdivideMesh(mesh, n) {
       idx.push(a, ab, ca, ab, b, bc, ca, bc, c, ab, bc, ca);
     }
     g.idx = idx;
-    if (g.faces) g.faces = [];
+    if (g.faces) regroupFaces(g);
   }
   return mesh;
+}
+
+/**
+ * After a 1 -> 4 split the face records still hold the old index ranges and the new midpoints sit at
+ * the end of the vertex arrays. Renumber the vertices so each face owns a contiguous range again (its
+ * own vertices first, then its midpoints; a vertex two faces share is copied) and scale the index
+ * ranges by 4, so face consumers (AO / lightmap charts, LOD simplification, materials) see every face.
+ */
+function regroupFaces(g) {
+  const src = [], idx = new Array(g.idx.length), faces = [];
+  const take = (local, v) => { let n = local.get(v); if (n === undefined) { n = src.length; src.push(v); local.set(v, n); } return n; };
+  const covered = new Uint8Array(g.idx.length / 3);
+  for (const f of g.faces) {
+    const local = new Map(), base = src.length, i0 = f.i * 4, ic = f.ic * 4;
+    for (let v = f.v; v < f.v + f.vc; v++) take(local, v);
+    for (let i = i0; i < i0 + ic; i++) { idx[i] = take(local, g.idx[i]); covered[(i / 3) | 0] = 1; }
+    faces.push({ ...f, v: base, vc: src.length - base, i: i0, ic });
+  }
+  // triangles outside every face record keep their (shared) vertices
+  const rest = new Map();
+  for (let t = 0; t < covered.length; t++) if (!covered[t]) for (let k = 0; k < 3; k++) idx[t * 3 + k] = take(rest, g.idx[t * 3 + k]);
+  const pick = (arr, k) => { const out = new Array(src.length * k); src.forEach((v, n) => { for (let c = 0; c < k; c++) out[n * k + c] = arr[v * k + c]; }); return out; };
+  g.pos = pick(g.pos, 3); g.nrm = pick(g.nrm, 3); g.uv = pick(g.uv, 2);
+  if (g.vpi) g.vpi = pick(g.vpi, 1);
+  for (const t of g.morphs || []) { t.pos = pick(t.pos, 3); t.nrm = pick(t.nrm, 3); }
+  g.idx = idx; g.faces = faces;
 }
 
 /** Region selector -> strength 0..1 of a vertex (p, part index). */
