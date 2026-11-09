@@ -87,7 +87,8 @@ test('melee: clip sets per weapon, gun skeletons get butt-stroke / pistol whip, 
   assert.ok(sk.masks.upper.includes('shield'));
   const rf = setup(e, { name: 'rf', gun: 'rifle' });
   assert.equal(rf.set, 'rifle');
-  assert.ok(rf.clips.includes('butt_stroke') && !rf.clips.includes('disarm_front_attacker'));
+  // gun skeletons get the front disarm too (the victim's gun is taken or dropped)
+  assert.ok(rf.clips.includes('butt_stroke') && rf.clips.includes('disarm_front_attacker') && rf.clips.includes('disarm_front_victim'));
   assert.ok(setup(e, { name: 'pi', gun: 'pistol' }).clips.includes('pistol_whip'));
   assert.throws(() => e.run('anim_melee', { skeleton: 'kn', weapon: 'riot_shield' }), /shield:true/);
   assert.throws(() => e.run('anim_melee', { skeleton: 'kn', weapon: 'lightsaber' }), /melee weapons are/);

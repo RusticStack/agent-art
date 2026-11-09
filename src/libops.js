@@ -15,7 +15,7 @@ import { encodePNG } from './png.js';
 import { writeSkinGLB } from './gltfskin.js';
 import { compactCells } from './compact.js';
 import { registerAssetType } from './assettypes.js';
-import { meleeBatchAnim } from './meleeops.js';
+import { meleeBatchAnim, refitPaired, cellsOf } from './meleeops.js';
 import { meleeMeta, normalizeMelee } from './melee.js';
 
 const RIG_OPTS = ['sampling', 'secondary', 'feet', 'scale_children', 'weapon', 'variant_sets', 'depth', 'skin', 'constrain', 'limits'];
@@ -64,7 +64,18 @@ function skinClip(e, skin, clipName, view) {
   const getClip = (n) => {
     if (cache.has(n)) return cache.get(n);
     const c = loadClip(e, sk.name, n);
-    const r = !c ? null : prop || skin.retarget ? retargetClip(c, from, def, skin.map).clip : c;
+    let r = !c ? null : prop || skin.retarget ? retargetClip(c, from, def, skin.map).clip : c;
+    // per-skeleton takedowns: a paired pair on a proportioned skin is refit on its rig (offset + hand IK)
+    const pp = r?.melee?.paired;
+    if (pp && prop) {
+      const o = loadClip(e, sk.name, pp.partner);
+      if (o) {
+        const other = retargetClip(o, from, def, skin.map).clip;
+        const f = pp.role === 'attacker' ? refitPaired(rig, r, other, cellsOf(sk)) : refitPaired(rig, other, r, cellsOf(sk));
+        cache.set(f.att.name, f.att); cache.set(f.vic.name, f.vic);
+        r = pp.role === 'attacker' ? f.att : f.vic;
+      }
+    }
     cache.set(n, r);
     return r;
   };
@@ -310,8 +321,8 @@ export const LIB_OPS = {
           for (const clip of clips) for (const view of views) {
             const ck = `${clip}|${view}`;
             if (!clipPoses.has(ck)) {
-              const { fp, clip: mc, getClip } = skinClip(this, skin, clip, view);
-              clipPoses.set(ck, { fp, rots: a.stable === false ? null : stableRotations(rig, fp.poses, view, typeof a.stable === 'object' ? a.stable : {}), ...(mc.melee ? { melee: { clip: mc, getClip } } : {}) });
+              const { fp, clip: mc, getClip, def: cdef } = skinClip(this, skin, clip, view);
+              clipPoses.set(ck, { fp, rots: a.stable === false ? null : stableRotations(rig, fp.poses, view, typeof a.stable === 'object' ? a.stable : {}), ...(mc.melee ? { melee: { clip: mc, getClip, def: cdef } } : {}) });
             }
             const { fp, rots, melee } = clipPoses.get(ck);
             const frames = [], fronts = [], orders = [], sockets = [];
@@ -382,7 +393,7 @@ export const LIB_OPS = {
           }
           if (r.fp.events.length) anim.events = r.fp.events;
           if (a.order !== false) anim.order = orderRuns(r.orders);
-          if (r.melee) anim.melee = meleeBatchAnim(this, { sk, rig, clip: r.melee.clip, view: r.view, poses: r.fp.poses, pad, getClip: r.melee.getClip });
+          if (r.melee) anim.melee = meleeBatchAnim(this, { sk, rig, def: r.melee.def, clip: r.melee.clip, view: r.view, poses: r.fp.poses, pad, getClip: r.melee.getClip });
           entry.anims[key] = anim;
         }
         manifest[group][set] = entry;

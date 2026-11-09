@@ -13,6 +13,7 @@ import { MELEE_IDS, meleeWeapon, meleeCell, CM_PER_UNIT } from './meleekit.js';
 import { checkName } from './util.js';
 import { encodePNG } from './png.js';
 import { packImages } from './sheet.js';
+import { socketOf } from './weaponassets.js';
 
 const libDir = (e, ...p) => path.join(e.home, 'library', ...p);
 const readJSON = (f) => JSON.parse(fs.readFileSync(f, 'utf8'));
@@ -114,9 +115,10 @@ function poseAtT(rig, keys, t) {
 /**
  * Fit a paired clip pair on the skeleton rig: rigid contacts (a shield on a chest) and contacts
  * marked fit move the offset so they meet at the contact start; hand contacts get IK targets (frame px, every drawn view)
- * on the partner's contact point at each attacker key inside the contact window.
+ * on the partner's contact point at each attacker key inside the contact window. rigV: the victim's
+ * rig when the partners have different proportions (per-skeleton takedowns; default the same rig).
  */
-function fitPaired(rig, att, vic, cells) {
+function fitPaired(rig, att, vic, cells, rigV = rig) {
   const m = att.melee, p = m.paired;
   const u = (rig.frame[1] - 4) / 98;
   // a rigid contact (a shield) or one marked fit sets the offset so the authored poses meet there;
@@ -124,12 +126,12 @@ function fitPaired(rig, att, vic, cells) {
   for (const c of p.contacts || []) {
     if (/^hand_/.test(c.attacker) && !c.fit) continue;
     const t = c.t[0];
-    const AP = poseAtT(rig, att.keys, t), VP = poseAtT(rig, vic.keys, t);
+    const AP = poseAtT(rig, att.keys, t), VP = poseAtT(rigV, vic.keys, t);
     // per screen-spread view: the attacker's point x and the victim's point x before the partner shift
     const gaps = [];
     for (const view of rig.views.filter((w) => HD_VIEWS.includes(w) && !/^(front|back)$/.test(w))) {
-      const A = solvePose(rig, AP, view), V = solvePose(rig, VP, turnedView(view, p.facing));
-      const v = contactPoint(rig, V, c.victim, cells);
+      const A = solvePose(rig, AP, view), V = solvePose(rigV, VP, turnedView(view, p.facing));
+      const v = contactPoint(rigV, V, c.victim, cells);
       const a = c.attacker === 'shield' && cells?.shield ? faceAtY(shieldFace(rig, A, cells), v[1]) : contactPoint(rig, A, c.attacker, cells);
       const k = Math.cos(VIEW_YAW8[view] * D2R); // partner_dx per unit of forward offset (px / u)
       gaps.push({ ax: a[0], vx: v[0], k, w: view === 'side' ? 1 : 0 });
@@ -155,11 +157,11 @@ function fitPaired(rig, att, vic, cells) {
     for (const k of att.keys) {
       const kf = k.t * (n - 1);
       if (kf < f0 - 1e-3 || kf > f1 + 1e-3) continue;
-      const VP = poseAtT(rig, vic.keys, k.t);
+      const VP = poseAtT(rigV, vic.keys, k.t);
       for (const view of views) {
         const po = pairedOut(rig, { ...p, role: 'attacker' }, view, 2);
-        const V = solvePose(rig, VP, po.partner_view);
-        const [x, y] = contactPoint(rig, V, c.victim, cells);
+        const V = solvePose(rigV, VP, po.partner_view);
+        const [x, y] = contactPoint(rigV, V, c.victim, cells);
         const target = [Math.round((x + po.partner_dx) * 100) / 100, Math.round(y * 100) / 100];
         const bend = c.attacker === 'hand_b' ? (view === 'front' ? 1 : -1) : view === 'front' ? -1 : view === 'back' ? 1 : -1;
         const spec = { target, bend, weight: 1 };
@@ -171,6 +173,110 @@ function fitPaired(rig, att, vic, cells) {
       }
     }
   }
+}
+
+/**
+ * Per-skeleton takedowns: refit a paired pair (retargeted to a skin's proportions, or attacker and
+ * victim with different proportions) on their own rigs: the offset of fit / rigid contacts and the
+ * hand IK targets inside the contact windows are solved again. Copies; -> {att, vic, offset}
+ */
+export function refitPaired(rigA, att, vic, cells, rigV = rigA) {
+  const a = structuredClone(att), v = structuredClone(vic);
+  // drop the hand IK targets the first fit put inside the contact windows (frame px of the old rigs):
+  // the fit measures the authored poses again
+  const n = a.frames;
+  for (const c of a.melee.paired.contacts || []) {
+    if (!/^hand_/.test(c.attacker)) continue;
+    const f0 = frameOfT(c.t[0], n), f1 = frameOfT(c.t[1], n);
+    for (const k of a.keys) {
+      const kf = k.t * (n - 1);
+      if (kf < f0 - 1e-3 || kf > f1 + 1e-3 || !k.parts) continue;
+      if (k.parts.ik) { delete k.parts.ik[c.attacker]; if (!Object.keys(k.parts.ik).length) delete k.parts.ik; }
+      for (const [vw, o] of Object.entries(k.parts.views || {})) {
+        if (o.ik) { delete o.ik[c.attacker]; if (!Object.keys(o.ik).length) delete o.ik; }
+        if (!Object.keys(o).length) delete k.parts.views[vw];
+      }
+      if (k.parts.views && !Object.keys(k.parts.views).length) delete k.parts.views;
+    }
+  }
+  fitPaired(rigA, a, v, cells, rigV);
+  return { att: a, vic: v, offset: a.melee.paired.offset };
+}
+
+// ---------- disarm transfer (gun disarm_front) ----------
+const n180 = (r) => ((((r + 180) % 360) + 360) % 360) - 180;
+/** Screen angle (deg) of a part in a solved frame, mirrored like the weapon sockets. */
+function partRot(s, part) {
+  let rot = s.world[part].rot;
+  if (s.world[part].flip) rot = 180 - rot;
+  if (s.flip) rot = 180 - rot;
+  return n180(rot);
+}
+/**
+ * Per-frame track of the disarmed gun of a paired pair with melee.paired.transfer, in the attacker's
+ * frame px (no pad): {owner: victim | attacker | world, state: held | grabbed | dropped, x, y (the
+ * gun's grip_main), rot (weapon-cell rotation, as the runtime weapon sockets), pitch (sheet
+ * column)}. Before the transfer the gun is the victim's (its weapon solver socket); after it the
+ * attacker's main hand carries it with the grip offset it had at the transfer (take), or it lies
+ * where the victim's drop state puts it (drop).
+ */
+export function transferTrack(e, rig, def, att, vic, getClip, sk, view, rigV = rig, defV = def, lat = null) {
+  const p = att.melee.paired, tr = p.transfer, n = att.frames;
+  const po = pairedOut(rig, { ...p, role: 'attacker' }, view, 2);
+  const A = clipFrames(e, rig, def, att, getClip, sk, view), V = clipFrames(e, rigV, defV, vic, getClip, sk, po.partner_view);
+  const f0 = frameOfT(tr.t, n), fg = frameOfT(tr.grab ?? 0, n);
+  const gunAt = (P, f) => { const s = solvePose(rigV, P, po.partner_view); const q = socketOf(rigV, s, { order: [] }, { view: po.partner_view }); return { x: q.x + po.partner_dx + (lat ? lat[f] : 0), y: q.y, rot: q.rot, pitch: q.pitch, s }; };
+  const handAt = (P) => { const s = solvePose(rig, P, view); const q = contactPoint(rig, s, tr.hand, null); return { x: q[0], y: q[1], rot: partRot(s, tr.hand) }; };
+  // the gun's grip offset in the taking hand: where the victim's hand still holds it (the frame before the transfer)
+  const fT = Math.max(0, f0 - 1), g0 = gunAt(V[fT], fT), h0 = handAt(A[fT]);
+  const c0 = Math.cos(-h0.rot * D2R), s0 = Math.sin(-h0.rot * D2R);
+  const off = [(g0.x - h0.x) * c0 - (g0.y - h0.y) * s0, (g0.x - h0.x) * s0 + (g0.y - h0.y) * c0], drot = g0.rot - h0.rot;
+  const track = A.map((Pa, f) => {
+    if (f < f0 || tr.mode === 'drop') {
+      const g = gunAt(V[f], f);
+      return f < f0 ? { owner: 'victim', state: f >= fg ? 'grabbed' : 'held', x: r1(g.x), y: r1(g.y), rot: r1(g.rot), pitch: g.pitch } : { owner: 'world', state: 'dropped', x: r1(g.x), y: r1(g.y), rot: r1(g.rot), pitch: g.pitch };
+    }
+    const h = handAt(Pa), c = Math.cos(h.rot * D2R), s = Math.sin(h.rot * D2R);
+    return { owner: 'attacker', state: 'held', x: r1(h.x + off[0] * c - off[1] * s), y: r1(h.y + off[0] * s + off[1] * c), rot: r1(n180(drot + h.rot)), pitch: g0.pitch };
+  });
+  // how far the taking hand is from the gun's grip when it takes it (frame px)
+  track.grip = r1(Math.hypot(g0.x - h0.x, g0.y - h0.y));
+  return track;
+}
+/**
+ * Disarm checks: the victim's hands let go after the transfer; take: the attacker's hand is at the
+ * gun when it takes it (the gun then rides that hand); drop: the gun lands and lies still, and it
+ * does not jump before the transfer.
+ */
+function checkTransfer(e, rig, def, att, vic, getClip, sk, views, tol, rigV = rig, defV = def) {
+  const issues = [], p = att.melee.paired, tr = p.transfer, n = att.frames;
+  const u = (rig.frame[1] - 4) / 98, jumpTol = Math.max(tol * 3, u * 12), gripTol = Math.max(tol * 3, u * 10);
+  const f0 = frameOfT(tr.t, n), fFree = frameOfT(Math.min(1, tr.t + 0.08), n);
+  let jump = 0, held = 0, released = true, grip = 0, rest = 0;
+  for (const view of views) {
+    const lat = deepView(rig, view) ? lateralFit(pairedTrack(e, rig, def, att, vic, getClip, sk, view, cellsOf(sk), rigV, defV), n) : null;
+    const T = transferTrack(e, rig, def, att, vic, getClip, sk, view, rigV, defV, lat);
+    // before the transfer the gun rides the victim's weapon socket: no frame-to-frame jumps
+    for (let f = 1; f < f0; f++) jump = Math.max(jump, Math.hypot(T[f].x - T[f - 1].x, T[f].y - T[f - 1].y));
+    if (tr.mode === 'take') grip = Math.max(grip, T.grip);
+    // drop: once fallen (the last quarter) the gun lies still
+    else for (let f = Math.max(f0 + 1, Math.round(n * 0.75)); f < n; f++) rest = Math.max(rest, Math.hypot(T[f].x - T[f - 1].x, T[f].y - T[f - 1].y));
+    if (T.slice(0, f0).some((q) => q.owner !== 'victim') || T.slice(f0).some((q) => q.owner !== (tr.mode === 'drop' ? 'world' : 'attacker'))) issues.push(`${view}: transfer owners out of order`);
+    held = Math.max(held, T.filter((q) => q.state === 'grabbed').length);
+    // the victim's hands are off the gun once the release has played (take: the gun is hidden on the victim)
+    const po = pairedOut(rig, { ...p, role: 'attacker' }, view, 2);
+    const V = clipFrames(e, rigV, defV, vic, getClip, sk, po.partner_view);
+    for (let f = fFree; f < n; f++) {
+      const pl = solvePose(rigV, V[f], po.partner_view).weapon?.s?.pl;
+      if (!pl || pl.lock.main >= 0.5 || pl.lock.support >= 0.5 || (tr.mode === 'take' && pl.hidden < 0.5)) released = false;
+    }
+  }
+  if (grip > gripTol) issues.push(`the taking hand is ${r1(grip)} px from the gun at the transfer (tolerance ${r1(gripTol)})`);
+  if (rest > tol) issues.push(`the dropped gun still moves ${r1(rest)} px per frame at the end (tolerance ${r1(tol)})`);
+  if (jump > jumpTol) issues.push(`disarmed gun jumps ${r1(jump)} px between frames (tolerance ${r1(jumpTol)})`);
+  if (!released) issues.push('the victim still holds the gun after the transfer');
+  if (!held) issues.push('the gun is never grabbed before the transfer');
+  return { issues, metrics: { transfer_frame: f0, transfer_mode: tr.mode, transfer_jump_px: r1(jump), transfer_jump_tolerance_px: r1(jumpTol), ...(tr.mode === 'take' ? { transfer_grip_px: r1(grip), transfer_grip_tolerance_px: r1(gripTol) } : { drop_rest_px: r1(rest) }), victim_released: released } };
 }
 
 // ---------- shared clip evaluation ----------
@@ -192,7 +298,7 @@ function subPoses(rig, clip, getClip, sk, k) {
  * hit volumes per active frame in the set's frame px (pad), swept polygons, body-space volumes,
  * root motion, paired offsets for this view, weapon sockets. -> object | null
  */
-export function meleeBatchAnim(e, { skin, sk, rig, clip, view, poses, pad, getClip }) {
+export function meleeBatchAnim(e, { skin, sk, rig, def, clip, view, poses, pad, getClip }) {
   if (!clip?.melee) return null;
   const k = SWEEP_SUB;
   const sources = hitSources(rig, clip.melee, cellsOf(sk));
@@ -205,6 +311,20 @@ export function meleeBatchAnim(e, { skin, sk, rig, clip, view, poses, pad, getCl
   if (sk.melee?.weapon && rig.parts.weapon) {
     const socket = poses.map((P) => weaponSocket(rig, P, view, pad));
     if (socket.some((q) => !q.hidden)) anim.socket = socket;
+  }
+  const pp = clip.melee.paired;
+  const att = pp && def ? (pp.role === 'attacker' ? clip : getClip(pp.partner)) : null, vic = pp && def ? (pp.role === 'attacker' ? getClip(pp.partner) : clip) : null;
+  if (att && vic) {
+    const aView = pp.role === 'attacker' ? view : turnedView(view, -pp.facing);
+    // front / back: the partner's per-frame sideways staging that makes the contacts meet (lateralFit)
+    const lat = deepView(rig, aView) ? lateralFit(pairedTrack(e, rig, def, att, vic, getClip, sk, aView, cellsOf(sk)), att.frames) : null;
+    if (lat && anim.paired && lat.some((v) => v)) anim.paired.partner_dx_track = lat.map((v) => r1(anim.paired.partner_dx + (pp.role === 'attacker' ? v : -v)));
+    // gun disarm: the disarmed gun's track for the runtime weapon layers of both actors (this clip's frame)
+    if (pp.transfer && rig.weapon) {
+      const po = pairedOut(rig, { ...att.melee.paired, role: 'attacker' }, aView, 2);
+      const dx = (f) => (pp.role === 'attacker' ? 0 : -(po.partner_dx + (lat ? lat[f] : 0)));
+      anim.transfer = { mode: pp.transfer.mode, frame: frameOfT(pp.transfer.t, clip.frames), track: transferTrack(e, rig, def, att, vic, getClip, sk, aView, rig, def, lat).map((q, f) => ({ ...q, x: r1(q.x + dx(f) + pad[0]), y: r1(q.y + pad[1]) })) };
+    }
   }
   return anim;
 }
@@ -297,24 +417,24 @@ function checkClip(e, rig, def, clip, getClip, sk, views, tol) {
 }
 
 /** Feet (bottom centre of each foot cell) and contact points of a paired pair, per frame, in the attacker's frame px. */
-function pairedTrack(e, rig, def, att, vic, getClip, sk, view, cells) {
+function pairedTrack(e, rig, def, att, vic, getClip, sk, view, cells, rigV = rig, defV = def) {
   const p = att.melee.paired;
   const po = pairedOut(rig, { ...p, role: 'attacker' }, view, 2);
-  const A = clipFrames(e, rig, def, att, getClip, sk, view), V = clipFrames(e, rig, def, vic, getClip, sk, po.partner_view);
+  const A = clipFrames(e, rig, def, att, getClip, sk, view), V = clipFrames(e, rigV, defV, vic, getClip, sk, po.partner_view);
   const feet = rig.feet || ['foot_f', 'foot_b'];
-  const foot = (solved, n, dx) => { const q = contactPoint(rig, solved, n, cells); const pp = partIn(rig, n, solved.src); return [q[0] + dx, solved.world[n].y + (pp.h - 1 - pp.pivot[1])]; };
+  const foot = (r, solved, n, dx) => { const q = contactPoint(r, solved, n, cells); const pp = partIn(r, n, solved.src); return [q[0] + dx, solved.world[n].y + (pp.h - 1 - pp.pivot[1])]; };
   return A.map((Pa, f) => {
-    const sa = solvePose(rig, Pa, view), sv = solvePose(rig, V[f], po.partner_view);
+    const sa = solvePose(rig, Pa, view), sv = solvePose(rigV, V[f], po.partner_view);
     return {
-      a: Object.fromEntries(feet.map((n) => [n, foot(sa, n, 0)])), v: Object.fromEntries(feet.map((n) => [n, foot(sv, n, po.partner_dx)])),
+      a: Object.fromEntries(feet.map((n) => [n, foot(rig, sa, n, 0)])), v: Object.fromEntries(feet.map((n) => [n, foot(rigV, sv, n, po.partner_dx)])),
       contacts: (p.contacts || []).map((c) => {
-        const q = contactPoint(rig, sv, c.victim, cells), v = [q[0] + po.partner_dx, q[1]];
+        const q = contactPoint(rigV, sv, c.victim, cells), v = [q[0] + po.partner_dx, q[1]];
         if (c.attacker === 'shield' && cells?.shield) {
           // a shield meets the victim with its face: the gap between the face line and the victim
           // part's cell outline (0 when they touch or overlap)
           const face = shieldFace(rig, sa, cells);
-          const pp = partIn(rig, c.victim, sv.src);
-          const box = [[0, 0], [pp.w, 0], [pp.w, pp.h], [0, pp.h]].map((uv) => { const k = cellPoint(rig, sv, c.victim, uv); return [k[0] + po.partner_dx, k[1]]; });
+          const pp = partIn(rigV, c.victim, sv.src);
+          const box = [[0, 0], [pp.w, 0], [pp.w, pp.h], [0, pp.h]].map((uv) => { const k = cellPoint(rigV, sv, c.victim, uv); return [k[0] + po.partner_dx, k[1]]; });
           return { c, a: nearestOn(face, v), v, gap: segPolyGap(face, box) };
         }
         return { c, a: contactPoint(rig, sa, c.attacker, cells), v };
@@ -323,8 +443,43 @@ function pairedTrack(e, rig, def, att, vic, getClip, sk, view, cells) {
   });
 }
 
-/** Paired alignment: planted feet do not slide (each actor and against each other), contacts meet. */
-function checkPaired(e, rig, def, att, vic, getClip, sk, views, tol, cells) {
+/**
+ * Front / back views: the partners stand in depth on one screen column, and the mirrored side views
+ * swap a character's handedness (a 2.5D arm swings in the side plane, it cannot reach across the
+ * body), so the partner is staged sideways (screen x) until the contact points meet: each contact
+ * window gets the midrange of its screen x gaps, frames between windows ease (smoothstep), frames
+ * before the first / after the last hold. -> per-frame px added to partner_dx in that view (all 0
+ * when the clip has no contacts)
+ */
+export function lateralFit(tr, n) {
+  const wins = [];
+  (tr[0]?.contacts || []).forEach((c0, i) => {
+    const f0 = frameOfT(c0.c.t[0], n), f1 = Math.min(tr.length - 1, frameOfT(c0.c.t[1], n));
+    let lo = Infinity, hi = -Infinity;
+    for (let f = f0; f <= f1; f++) { const c = tr[f].contacts[i]; if (c.gap !== undefined) continue; const d = c.a[0] - c.v[0]; lo = Math.min(lo, d); hi = Math.max(hi, d); }
+    if (lo !== Infinity) wins.push({ f0, f1, v: (lo + hi) / 2 });
+  });
+  if (!wins.length) return tr.map(() => 0);
+  wins.sort((a, b) => a.f0 - b.f0 || a.f1 - b.f1);
+  return tr.map((_, f) => {
+    const inside = wins.filter((w) => f >= w.f0 && f <= w.f1);
+    if (inside.length) return r1(inside.reduce((s, w) => s + w.v, 0) / inside.length);
+    const prev = wins.filter((w) => w.f1 < f).pop(), next = wins.find((w) => w.f0 > f);
+    if (!prev) return r1(next.v);
+    if (!next) return r1(prev.v);
+    const t = (f - prev.f1) / (next.f0 - prev.f1), s = t * t * (3 - 2 * t);
+    return r1(prev.v + (next.v - prev.v) * s);
+  });
+}
+const latMax = (L) => L.reduce((m, v) => (Math.abs(v) > Math.abs(m) ? v : m), 0);
+const deepView = (rig, view) => /^(front|back)$/.test(rig.mirror[view] || view);
+
+/**
+ * Paired alignment: planted feet do not slide (each actor and against each other), contacts meet in
+ * every view. Front / back views overlap the partners on screen, so their contacts are measured in
+ * 3D: screen x / y of that view + the depth (the forward gap) from the side view.
+ */
+function checkPaired(e, rig, def, att, vic, getClip, sk, views, tol, cells, rigV = rig, defV = def) {
   const issues = [];
   const n = att.frames;
   if (vic.frames !== n) issues.push(`attacker ${n} frames, victim ${vic.frames}`);
@@ -332,10 +487,14 @@ function checkPaired(e, rig, def, att, vic, getClip, sk, views, tol, cells) {
   const gy = Math.max(...(rig.feet || ['foot_f', 'foot_b']).map((f) => { const pp = partIn(rig, f, 'side'); return ground.world[f].y + pp.h - 1 - pp.pivot[1]; }));
   const contactTol = Math.max(tol * 2, ((rig.frame[1] - 4) / 98) * 4);
   let slide = 0, rel = 0, worstContact = 0, sink = 0;
+  const byView = {}, lateral = {};
+  let sideTr = null;
+  const sideTrack = () => sideTr || (sideTr = pairedTrack(e, rig, def, att, vic, getClip, sk, 'side', cells, rigV, defV));
   // after the release frame the victim is free (a fall): its feet may drag, they only must not sink
   const release = att.melee.paired.release !== undefined ? frameOfT(att.melee.paired.release, n) : n;
   for (const view of views) {
-    const tr = pairedTrack(e, rig, def, att, vic, getClip, sk, view, cells);
+    const tr = pairedTrack(e, rig, def, att, vic, getClip, sk, view, cells, rigV, defV);
+    if (view === 'side') sideTr = tr;
     const planted = (q) => q[1] >= gy - 1.5;
     if (view === 'side') {
       for (let f = 0; f < tr.length; f++) for (const who of ['a', 'v']) for (const q of Object.values(tr[f][who])) sink = Math.max(sink, q[1] - gy);
@@ -351,19 +510,27 @@ function checkPaired(e, rig, def, att, vic, getClip, sk, views, tol, cells) {
         if (planted(qa) && planted(qa0) && planted(qv) && planted(qv0)) rel = Math.max(rel, Math.abs((qa[0] - qv[0]) - (qa0[0] - qv0[0])));
       }
     }
-    // front / back: the partners stand in depth and overlap on screen; contacts are checked where
-    // the pair spreads across the screen (side, front_side, back_side and mirrors)
-    if (/^(front|back)$/.test(rig.mirror[view] || view)) continue;
-    for (let f = 0; f < tr.length; f++) for (const c of tr[f].contacts) {
-      if (f < frameOfT(c.c.t[0], n) || f > frameOfT(c.c.t[1], n)) continue;
-      worstContact = Math.max(worstContact, c.gap ?? Math.hypot(c.a[0] - c.v[0], c.a[1] - c.v[1]));
-    }
+    // front / back: the partners stand in depth and overlap on screen: the screen gap of this view
+    // plus the depth gap (forward axis) from the side view
+    const deep = deepView(rig, view), lat = deep ? lateralFit(tr, n) : null;
+    if (deep) lateral[view] = latMax(lat);
+    let vw = 0;
+    for (let f = 0; f < tr.length; f++) tr[f].contacts.forEach((c, i) => {
+      if (f < frameOfT(c.c.t[0], n) || f > frameOfT(c.c.t[1], n)) return;
+      let d = c.gap ?? Math.hypot(c.a[0] - c.v[0], c.a[1] - c.v[1]);
+      if (deep) { const s = sideTrack()[f].contacts[i]; d = c.gap !== undefined ? Math.hypot(c.gap, s.gap ?? 0) : Math.hypot(c.a[0] - c.v[0] - lat[f], c.a[1] - c.v[1], s.a[0] - s.v[0]); }
+      vw = Math.max(vw, d);
+    });
+    byView[view] = r1(vw);
+    worstContact = Math.max(worstContact, vw);
   }
   if (slide > tol) issues.push(`a planted foot slides ${r1(slide)} px`);
   if (rel > tol) issues.push(`feet slide against each other by ${r1(rel)} px`);
-  if (worstContact > contactTol) issues.push(`contact points ${r1(worstContact)} px apart (tolerance ${r1(contactTol)})`);
   if (sink > tol) issues.push(`a foot sinks ${r1(sink)} px below the ground`);
-  return { issues, metrics: { foot_slide_px: r1(slide), feet_relative_px: r1(rel), foot_sink_px: r1(Math.max(0, sink)), contact_px: r1(worstContact), contact_tolerance_px: r1(contactTol), ...(release < n ? { release_frame: release } : {}) } };
+  for (const [v, d] of Object.entries(byView)) if (d > contactTol) issues.push(`${v}: contact points ${d} px apart${/^(front|back)$/.test(rig.mirror[v] || v) ? ' in 3D (screen + side-view depth)' : ''} (tolerance ${r1(contactTol)})`);
+  const metrics = { foot_slide_px: r1(slide), feet_relative_px: r1(rel), foot_sink_px: r1(Math.max(0, sink)), contact_px: r1(worstContact), contact_tolerance_px: r1(contactTol), contact_by_view: byView, ...(Object.keys(lateral).length ? { lateral_px: lateral } : {}), ...(release < n ? { release_frame: release } : {}) };
+  if (att.melee.paired.transfer && rig.weapon) { const t = checkTransfer(e, rig, def, att, vic, getClip, sk, views, tol, rigV, defV); issues.push(...t.issues); Object.assign(metrics, t.metrics); }
+  return { issues, metrics };
 }
 
 // ---------- world sheets ----------
@@ -435,7 +602,9 @@ export const MELEE_OPS = {
     sk.def = def;
     if (mp.parts.shield) for (const m of ['upper', 'arms', 'all']) if (sk.masks[m] && !sk.masks[m].includes('shield')) sk.masks[m] = [...sk.masks[m], 'shield'];
     sk.melee = { ...(weapon ? { weapon, cell: mp.cell } : {}), ...(shield ? { shield: true, shield_cell: mp.shieldCell } : {}), kind: undefined };
-    const lib = meleeLibrary(def, { weapon, shield, clips: a.clips });
+    if (a.disarm !== undefined && !['take', 'drop'].includes(a.disarm)) throw new Error('disarm must be "take" (the attacker takes the gun, default) or "drop" (it falls) for the gun disarm_front');
+    if (a.disarm !== undefined && !sk.def.weapon) throw new Error('disarm:"take"|"drop" is for gun skeletons (melee sets disarm the weapon by dropping it)');
+    const lib = meleeLibrary(def, { weapon, shield, clips: a.clips, disarm: a.disarm });
     sk.melee.kind = lib.kind;
     const rig = normalizeRig(def);
     // paired: fit offsets and hand contacts on this skeleton
@@ -466,6 +635,17 @@ export const MELEE_OPS = {
       ({ rig, def } = getRig(this, skin.rig));
       if (skin.proportions && Object.keys(skin.proportions).length) { const raw = getClip; getClip = (n) => { const c = raw(n); return c ? retargetClip(c, sk.def, def, skin.map).clip : null; }; }
     } else { def = sk.def; rig = normalizeRig(def); }
+    // per-skeleton takedowns: a victim skin with its own proportions; paired pairs are refit on the two rigs
+    const vSkin = a.victim_skin !== undefined ? loadSkin(this, a.victim_skin, 'victim_skin') : null;
+    let rigV = rig, defV = def, getClipV = getClip;
+    if (vSkin) {
+      if (vSkin.skeleton !== sk.name) throw new Error(`victim_skin "${a.victim_skin}" is on skeleton "${vSkin.skeleton}", not "${sk.name}"`);
+      ({ rig: rigV, def: defV } = getRig(this, vSkin.rig));
+      const raw = (n) => loadClip(this, sk.name, n);
+      getClipV = vSkin.proportions && Object.keys(vSkin.proportions).length ? (n) => { const c = raw(n); return c ? retargetClip(c, sk.def, defV, vSkin.map).clip : null; } : raw;
+    }
+    const propOf = (s) => (s?.proportions && Object.keys(s.proportions).length ? s.proportions : null);
+    const refit = !!(propOf(skinDef) || propOf(vSkin));
     const tol = a.tolerance ?? 2;
     if (!(typeof tol === 'number' && Number.isFinite(tol) && tol >= 0)) throw new Error(`"tolerance" must be a finite number >= 0 px (got ${JSON.stringify(a.tolerance)})`);
     const asked = a.clips !== undefined ? [].concat(a.clips) : null;
@@ -477,18 +657,20 @@ export const MELEE_OPS = {
     const clips = {};
     let fails = 0;
     for (const n of names) {
-      const clip = getClip(n);
-      const r = checkClip(this, rig, def, clip, getClip, sk, views, tol);
+      let clip = getClip(n);
       const p = clip.melee.paired;
+      let vic = p?.role === 'attacker' ? getClipV(p.partner) : null, refitOffset = null;
+      if (p?.role === 'attacker' && vic && refit) { const f = refitPaired(rig, clip, vic, cells, rigV); clip = f.att; vic = f.vic; refitOffset = f.offset; }
+      const r = checkClip(this, rig, def, clip, getClip, sk, views, tol);
       if (p?.role === 'attacker') {
-        const vic = getClip(p.partner);
         if (!vic) r.issues.push(`paired partner "${p.partner}" missing`);
-        else { const pr = checkPaired(this, rig, def, clip, vic, getClip, sk, views, tol, cells); r.issues.push(...pr.issues); Object.assign(r.metrics, pr.metrics); }
+        else { const pr = checkPaired(this, rig, def, clip, vic, getClip, sk, views, tol, cells, rigV, defV); r.issues.push(...pr.issues); Object.assign(r.metrics, pr.metrics); }
+        if (refitOffset) r.metrics.refit_offset = refitOffset;
       }
       if (r.issues.length) fails++;
       clips[n] = { pass: !r.issues.length, ...r.metrics, ...(r.issues.length ? { issues: r.issues } : {}) };
     }
-    return { skeleton: sk.name, ...(a.skin ? { skin: a.skin } : {}), pass: fails === 0, clips_checked: names.length, failing: fails, tolerance_px: tol, views, clips };
+    return { skeleton: sk.name, ...(a.skin ? { skin: a.skin } : {}), ...(vSkin ? { victim_skin: a.victim_skin } : {}), ...(refit ? { refit: 'paired pairs solved on the skins\' proportions (offset + hand IK)' } : {}), pass: fails === 0, clips_checked: names.length, failing: fails, tolerance_px: tol, views, clips };
   },
 
   /** World sheets of melee weapons (rows = views, columns = pitch, grip on one pixel) + manifest/melee_weapons.json. */
@@ -533,16 +715,28 @@ export const MELEE_OPS = {
     const view = a.view ?? 'side';
     const A = getRig(this, skinA.rig), V = getRig(this, skinV.rig);
     const getClip = (n) => loadClip(this, sk.name, n);
-    const po = pairedOut(A.rig, att.melee.paired, view, att.frames);
-    const pa = clipFrames(this, A.rig, A.def, att, getClip, sk, view), pv = clipFrames(this, V.rig, V.def, vic, getClip, sk, po.partner_view);
+    // per-skeleton takedowns: skins with proportions get the pair retargeted and refit on their rigs
+    const propOf = (s) => (s.proportions && Object.keys(s.proportions).length ? s.proportions : null);
+    let attC = att, vicC = vic, refit = null;
+    if (propOf(skinA) || propOf(skinV)) {
+      const rA = propOf(skinA) ? retargetClip(att, sk.def, A.def, skinA.map).clip : att, rV = propOf(skinV) ? retargetClip(vic, sk.def, V.def, skinV.map).clip : vic;
+      const f = refitPaired(A.rig, rA, rV, cellsOf(sk), V.rig);
+      attC = f.att; vicC = f.vic; refit = f.offset;
+    }
+    const po = pairedOut(A.rig, attC.melee.paired, view, attC.frames);
+    const pa = clipFrames(this, A.rig, A.def, attC, getClip, sk, view), pv = clipFrames(this, V.rig, V.def, vicC, getClip, sk, po.partner_view);
     const [W, H] = A.rig.frame;
-    const dx = Math.round(po.partner_dx);
-    const padL = Math.ceil(W / 2) + Math.max(0, -dx), padR = Math.ceil(W / 2) + Math.max(0, dx), padT = Math.ceil(H / 4), padB = 4;
+    // front / back: the per-frame lateral staging of the manifest (partner_dx_track)
+    const lat = deepView(A.rig, view) ? lateralFit(pairedTrack(this, A.rig, A.def, attC, vicC, getClip, sk, view, cellsOf(sk), V.rig, V.def), attC.frames) : null;
+    const dxs = pa.map((_, f) => Math.round(po.partner_dx + (lat ? lat[f] : 0)));
+    const dlo = Math.min(...dxs), dhi = Math.max(...dxs);
+    const padL = Math.ceil(W / 2) + Math.max(0, -dlo), padR = Math.ceil(W / 2) + Math.max(0, dhi), padT = Math.ceil(H / 4), padB = 4;
     const pad = [padL, padT, padR, padB];
     const FW = W + padL + padR, FH = H + padT + padB;
     const cache = new Map(), cacheV = new Map();
     const frames = pa.map((Pa, f) => {
       const ia = renderPose(A.rig, A.d, Pa, view, cache, { pad });
+      const dx = dxs[f];
       const iv = renderPose(V.rig, V.d, pv[f], po.partner_view, cacheV, { pad: [padL + dx, padT, padR - dx, padB].map((x) => Math.max(0, x)) });
       const out = new Uint8ClampedArray(FW * FH * 4);
       const over = (img) => { for (let i = 0; i < img.length; i += 4) if (img[i + 3]) out.set(img.subarray(i, i + 4), i); };
@@ -557,7 +751,7 @@ export const MELEE_OPS = {
     this.changed(d, { op: 'paired', source, label: `paired ${pair} ${view}`, structural: true });
     const shown = frames.filter((_, i) => i % Math.max(1, Math.round(frames.length / 8)) === 0).map((img, i) => ({ img: { width: FW, height: FH, data: img }, label: String(i * Math.max(1, Math.round(frames.length / 8))) }));
     const sheet = packImages(shown, { labels: true, checker: true, columns: Math.min(4, shown.length) });
-    return { canvas, frames: frames.length, size: `${FW}x${FH}`, partner_view: po.partner_view, partner_dx: po.partner_dx, order: po.order, sync_frame: po.sync_frame, image: encodePNG(sheet.width, sheet.height, sheet.data) };
+    return { canvas, frames: frames.length, size: `${FW}x${FH}`, pad, partner_view: po.partner_view, partner_dx: po.partner_dx, ...(lat && lat.some((v) => v) ? { partner_dx_track: dxs } : {}), order: po.order, sync_frame: po.sync_frame, ...(refit ? { refit_offset: refit } : {}), image: encodePNG(sheet.width, sheet.height, sheet.data) };
   },
 };
 

@@ -326,7 +326,7 @@ function pairedLibrary(kind, guard, rest, opts = {}) {
     });
   }
   // 2. front disarm + strike (facing each other): grab the weapon wrist, strike it, the weapon drops
-  // (melee and unarmed sets: a gun skeleton keeps both hands on its gun in the carry states)
+  // (melee and unarmed sets; gun skeletons: 2b)
   if (!gun) {
     const vAim = V({ arm_f: [-80, -90, -90], arm_b: [-70, -88, -88], chest: { rot: 4 }, ...vArmed });
     const vGrabbed = V({ pelvis: { x: 1, y: 3 }, arm_f: [-90, -95, -95], arm_b: [-40, -70, -70], chest: { rot: 6 }, ...vArmed });
@@ -342,6 +342,40 @@ function pairedLibrary(kind, guard, rest, opts = {}) {
       contacts: [{ t: [0.3, 0.45], attacker: 'hand_f', victim: 'hand_f', fit: true }, { t: [0.5, 0.54], attacker: 'hand_b', victim: 'hand_f' }],
       melee: { damage: 'blunt', stamina: 14, windup: [0, 0.28], active: [[0.46, 0.56]], impact: [0.5], hits: [{ part: 'hand_b', line: 'fist' }], interrupt: { attacker: [[0, 0.28]], victim: [[0, 0.25]] }, sfx: [[0.3, 'grab_gear'], [0.5, 'punch_heavy']], vfx: [[0.5, 'impact_blunt']], events: [[0.42, 'disarm']] },
       victim_melee: { kind: 'reaction', direction: 'front', events: [[0.42, 'disarm']], drops_weapon: 0.42 },
+    });
+  }
+  // 2b. front disarm on a gun skeleton (every handling class: long guns and pistols): the victim
+  // holds its gun (rifle ready_low / pistol compressed); the attacker, own gun slung / holstered, grabs the
+  // gun hand, the victim's hands let go at the transfer, the gun goes to the attacker's main hand
+  // (disarm:"take", default) or falls (disarm:"drop"); a strike follows. The per-frame gun track
+  // (owner, state, socket) is exported for runtime weapon layers on both actors.
+  if (gun) {
+    const take = opts.disarm !== 'drop';
+    const hold = { carry: kind === 'rifle' ? 'ready_low' : 'compressed' };
+    const gone = { carry: take ? 'holster' : 'drop' };
+    const free = vFree;
+    const vAim = V({ chest: { rot: 4 }, ...hold });
+    const vGrabbed = V({ pelvis: { x: 1, y: 3 }, chest: { rot: 6 }, ...hold });
+    const vLetGo = V({ pelvis: { x: 1.5, y: 3.1 }, chest: { rot: 4 }, arm_f: [-70, -80, -60], arm_b: [-30, -60, -60], ...gone });
+    const vStruck = V({ pelvis: { x: 5, y: 3.6 }, torso: { rot: -6 }, chest: { rot: -6 }, neck: { rot: -6 }, head: { rot: -16, variant: 'blink' }, arm_f: [-84, -82, -50], arm_b: [10, -20, -20], ...gone });
+    const vStumble = up(V({ pelvis: { x: -4.5, y: 2.8 }, torso: { rot: -14 }, chest: { rot: -8 }, head: { rot: -18 }, arm_f: [10, -10, -10], arm_b: [25, 0, 0], ...gone }), 'f', -4);
+    const vBack = V({ pelvis: { x: -6, y: 3.6 }, torso: { rot: -10 }, chest: { rot: -6 }, head: { rot: -12 }, arm_f: [10, -10, -10], arm_b: [20, 0, 0], ...gone, ...feet(-8, 0) });
+    // the grabbing arm bent at the elbow: IK slack to reach the gun hand in every view
+    const aGrab = A({ pelvis: { x: 3, y: 4.2 }, arm_f: [-52, -100, -100], arm_b: [20, -60, -70], ...free });
+    const aStrike = A({ pelvis: { x: 14, y: 6 }, torso: { rot: 18 }, chest: { rot: 16 }, arm_f: [-60, -70, -70], arm_b: [-80, -96, -110], ...free });
+    // holding the taken gun low in the main hand (the runtime layer draws it on the exported track)
+    const aHold = A({ pelvis: { x: 4, y: 3 }, chest: { rot: 4 }, arm_f: [-40, -62, -62], arm_b: GUARD_B, ...free });
+    const T0 = 0.43;
+    out.push({
+      name: 'disarm_front', offset: [40, 0], facing: 180, frames: 24, fps: 16, sync: 0.3,
+      attacker: [[guard, 0], [aGrab, 0.3, 'linear'], [aGrab, 0.4], [aStrike, 0.5, 'linear'], [aStrike, 0.58], [take ? aHold : guard, 1]],
+      victim: take
+        ? [[vAim, 0], [vAim, 0.22], [vGrabbed, 0.3, 'linear'], [vGrabbed, 0.42], [vLetGo, T0, 'step'], [vStruck, 0.5, 'linear'], [vStruck, 0.56], [vStumble, 0.66], [vBack, 0.78], [vBack, 1]]
+        : [[vAim, 0], [vAim, 0.22], [vGrabbed, 0.3, 'linear'], [vGrabbed, 0.42], [vStruck, 0.5, 'linear'], [vStruck, 0.56], [vStumble, 0.66], [vBack, 0.78], [vBack, 1]],
+      contacts: [{ t: [0.3, 0.39], attacker: 'hand_f', victim: 'hand_f', fit: true }, { t: [0.5, 0.54], attacker: 'hand_b', victim: 'chest' }],
+      transfer: { t: T0, mode: take ? 'take' : 'drop', from: 'victim', hand: 'hand_f', grab: 0.3 },
+      melee: { damage: 'blunt', stamina: 14, windup: [0, 0.28], active: [[0.46, 0.56]], impact: [0.5], hits: [{ part: 'hand_b', line: 'fist' }], interrupt: { attacker: [[0, 0.28]], victim: [[0, 0.25]] }, sfx: [[0.3, 'grab_gear'], [0.5, 'punch_heavy']], vfx: [[0.5, 'impact_blunt']], events: [[0.42, 'disarm']] },
+      victim_melee: { kind: 'reaction', direction: 'front', events: [[0.42, 'disarm']], ...(take ? { weapon_taken: T0 } : { drops_weapon: T0 }) },
     });
   }
   // 3. shield bash knockdown (facing each other): step in behind the shield, bash, the victim goes down
@@ -422,7 +456,7 @@ export function meleeMeta(m, extra = {}) {
 
 /**
  * The melee clip library for a skeleton definition (px keys), the paired definitions, and the
- * hit-source geometry. opts: {weapon, shield, clips?:[names]} -> {clips:[clip], kind}
+ * hit-source geometry. opts: {weapon, shield, clips?:[names], disarm?: take|drop (gun skeletons)} -> {clips:[clip], kind}
  */
 export function meleeLibrary(def, opts = {}) {
   const kind = meleeKind(def, opts.weapon);
@@ -437,8 +471,8 @@ export function meleeLibrary(def, opts = {}) {
     const melee = meleeMeta(c.melee, { set: kind, ...(opts.weapon ? { weapon: opts.weapon } : {}) });
     out.push({ name: c.name, keys: keysOf(ctx, c.keys), frames: c.frames, fps: c.fps, loop: false, plant: c.plant, secondary: true, melee });
   }
-  for (const p of pairedLibrary(kind, guard, rest, { shield: !!opts.shield })) {
-    const pair = { offset: p.offset, facing: p.facing, sync: p.sync, ...(p.release !== undefined ? { release: p.release } : {}), contacts: p.contacts };
+  for (const p of pairedLibrary(kind, guard, rest, { shield: !!opts.shield, disarm: opts.disarm })) {
+    const pair = { offset: p.offset, facing: p.facing, sync: p.sync, ...(p.release !== undefined ? { release: p.release } : {}), contacts: p.contacts, ...(p.transfer ? { transfer: p.transfer } : {}) };
     const am = meleeMeta(p.melee, { set: kind, ...(opts.weapon ? { weapon: opts.weapon } : {}), paired: { role: 'attacker', partner: `${p.name}_victim`, ...pair } });
     const vm = meleeMeta({ damage: null, stamina: 0, ...p.victim_melee }, { paired: { role: 'victim', partner: `${p.name}_attacker`, ...pair } });
     out.push({ name: `${p.name}_attacker`, keys: keysOf(ctx, p.attacker), frames: p.frames, fps: p.fps, loop: false, plant: false, secondary: true, melee: am });
