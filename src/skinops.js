@@ -176,9 +176,10 @@ export function assembleSkinned(ctx, def, built, { scale, up, file, args = {} })
   if (args.profile === 'roblox') roblox = robloxProfile(scene, S, { maxBones: Math.round(Number(args.max_bones ?? ROBLOX_MAX_BONES)), r15: !!args.r15 });
   // materials v2 (extensions, packing, tangents, vertex colours, profiles) on the skinned scene, as on static exports
   scene.meshes = scene.meshes.map((m) => ({ ...m, groups: [...m.groups] }));
-  const v2 = exportV2(def, built, args, { meshes: scene.meshes, nodes: scene.nodes, ext: null, scale, file, info: null, skinned: true });
+  // the baked maps go in as ext so the material writer sees them (lightMap / thickness extras; profiles drop them)
+  const v2 = exportV2(def, built, args, { meshes: scene.meshes, nodes: scene.nodes, ext: { glbOpts: bakeOpts, meta: {} }, scale, file, info: null, skinned: true });
   if (v2) scene.meshes = v2.meshes;
-  const { glb, stats } = ctx.writeGLB(scene, { scale, up, name: def.name, extras: { skin: { bones: S.bones.length, clips: Object.keys(scene.clips), shapes: sk.morphNames, ...(roblox ? { profile: 'roblox' } : {}), ...(lodMeta.lods ? { lods: lodMeta.lods.levels.length } : {}) } }, ...bakeOpts, ...(v2 ? { ...v2.glbOpts, v2: v2.v2 } : {}) });
+  const { glb, stats } = ctx.writeGLB(scene, { scale, up, name: def.name, extras: { skin: { bones: S.bones.length, clips: Object.keys(scene.clips), shapes: sk.morphNames, ...(roblox ? { profile: 'roblox' } : {}), ...(lodMeta.lods ? { lods: lodMeta.lods.levels.length } : {}) } }, ...(v2 ? { ...v2.glbOpts, v2: v2.v2 } : bakeOpts) });
   const v = validateGLB(glb);
   // both validators (skins / animations / attributes, and the structural glTF check: empty meshes, accessors)
   const c = checkGLB(glb);

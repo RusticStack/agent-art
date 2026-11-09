@@ -618,3 +618,21 @@ test('subdivided skin keeps face records: skinned LODs, baked AO and damage LOD0
     assert.ok(n && j.meshes[n.mesh].primitives.every((p) => p.attributes.TEXCOORD_1 !== undefined), `${name} AO`);
   }
 });
+
+test('skinned plain export: baked lightmap / thickness reach the materials (extras.lightMap / thicknessTexture on TEXCOORD_1)', async () => {
+  const { validateGLB: checkGLB } = await import('../src/gltfcheck.js');
+  const e = new Engine({ home: tmp() }), dir = tmp();
+  const J = (b) => JSON.parse(b.toString('utf8', 20, 20 + b.readUInt32LE(12)));
+  e.run('model_create', { name: 'snake', parts: [{ type: 'tube', path: [[0, 32, 0], [0, 20, 0], [0, 8, 0], [0, 2, 0]], r: 3, sides: 8, color: '#e0b090', material: 'skin', segments: 4 }] });
+  e.run('model_skeleton', { name: 'snake', skeleton: { template: 'chain', count: 3, from: [0, 32, 0], to: [0, 2, 0] } });
+  e.run('model_skin', { name: 'snake', skin: { method: 'heat' } });
+  const r = e.run('model_export', { name: 'snake', path: path.join(dir, 'lm.glb'), lightmap: true, thickness: true });
+  const glb = fs.readFileSync(r.file), j = J(glb);
+  const v = validateGLB(glb), c = checkGLB(glb);
+  assert.ok(v.ok && c.ok, [...(v.errors || []), ...(c.errors || [])].slice(0, 3).join('; '));
+  assert.ok(j.meshes[0].primitives.every((p) => p.attributes.TEXCOORD_1 !== undefined && p.attributes.JOINTS_0 !== undefined));
+  for (const m of j.materials) {
+    assert.equal(m.extras?.lightMap?.texCoord, 1, `${m.name} lightMap`);
+    assert.equal(m.extras?.thicknessTexture?.texCoord, 1, `${m.name} thicknessTexture`);
+  }
+});
