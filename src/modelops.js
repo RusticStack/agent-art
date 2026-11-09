@@ -28,6 +28,9 @@ import { bakeAO } from './bake.js';
 import { WALK_KINDS, navMesh } from './walk.js';
 import { addMarkerNodes, markerMeta, splitScene, materialize, sceneTriangles, sceneDrawCalls, normBudget, ROBLOX_TRIS, moodOpts, budgetReport } from './modelkit.js';
 import { damageOps, damageExport, wantsDamage, damagedBuilt } from './damageops.js';
+import { uvOps, applyUnwrap, unwrapSummary, anchorOf } from './uvops.js';
+import { normUnwrap, storedUnwrap } from './uvunwrap.js';
+import { cohesionCheck } from './uvcheck.js';
 
 const NAME_RE = /^[A-Za-z0-9_\-.]{1,64}$/;
 
@@ -105,7 +108,9 @@ export function texResolver(engine, { normal = false, bump = null } = {}) {
     // surface data layers (height, metal, rough) never reach the colour either
     const has = (n) => (ref.layer === undefined || ref.layer === null) && d.layers.some((l) => l.name === n);
     // an "ao" layer (materials v2: material occlusion, ORM red) is a data layer too, when present
-    let data = grab(d, ref.layer, has('ao') ? ['emissive', 'height', 'metal', 'rough', 'ao'] : ['emissive', 'height', 'metal', 'rough']);
+    // atlas canvases (art_model unwrap): the hidden masks / guide layers never reach the texture
+    const dataLayers = has('ao') ? ['emissive', 'height', 'metal', 'rough', 'ao'] : ['emissive', 'height', 'metal', 'rough'];
+    let data = grab(d, ref.layer, d.meta?.uv ? [...dataLayers, 'masks', 'guide'] : dataLayers);
     let heightData = has('height') ? grab(d, 'height') : null, metalData = has('metal') ? grab(d, 'metal') : null, roughData = has('rough') ? grab(d, 'rough') : null;
     let aoData = has('ao') ? grab(d, 'ao') : null;
     let emissive = null, nmap = null;
@@ -191,11 +196,18 @@ export function texResolver(engine, { normal = false, bump = null } = {}) {
 const greebleKinds = (engine) => Object.fromEntries([...models(engine).values()].filter((m) => typeof m.greeble_kind === 'string').map((m) => [m.greeble_kind, m.name]));
 function build(engine, def, opts = {}) {
   const tex = opts.tex || texResolver(engine, opts);
-  const r = buildModel(def, { tex, getModel: (n) => getModel(engine, n), instances: opts.instances, greebleKinds: () => greebleKinds(engine), baked: (n) => loadBaked(modelDir(engine), n), ...(def.materials ? { materials: def.materials } : {}) });
+  // unwrap (one atlas for the model): every copy needs its own texels, so no instances / GPU instancing
+  const uw = !!def.unwrap && !opts.noUnwrap;
+  const r = buildModel(def, { tex, getModel: (n) => getModel(engine, n), instances: uw ? false : opts.instances, greebleKinds: () => greebleKinds(engine), baked: (n) => loadBaked(modelDir(engine), n), ...(def.materials ? { materials: def.materials } : {}) });
   // GPU-instanced greebles stay separate only for export (EXT_mesh_gpu_instancing); previews,
   // renders and summaries see them merged
-  if (r.gpu && !opts.keepGpu) { for (const it of r.gpu) for (const M of it.mats) r.mesh.add(it.mesh.clone().transform(M)); delete r.gpu; }
-  return { ...r, tex };
+  if (r.gpu && (!opts.keepGpu || uw)) { for (const it of r.gpu) for (const M of it.mats) r.mesh.add(it.mesh.clone().transform(M)); delete r.gpu; }
+  const out = { ...r, tex };
+  if (uw) {
+    applyUnwrap(engine, def, out, { isSkinned });
+    if (out.unwrap && opts.instances) out.unwrap.notes = ['instances off: an unwrapped model has unique texels per copy'];
+  }
+  return out;
 }
 /** Variant model for a morph / preview: {model:"other"} or {set:{part:{..}}} patched over def. */
 const variantOf = (engine, def) => (spec) => (spec.model ? getModel(engine, spec.model) : applyPatch(def, { set: spec.set }));
@@ -229,6 +241,7 @@ function summary(def, built) {
     ...(warnings.length ? { warnings } : {}),
     ...(rigOf(def, built) ? { rig: rigSummary(def, rigOf(def, built)) } : {}),
     ...(def.skeleton ? { skeleton: skeletonInfo(def) } : {}),
+    ...unwrapSummary(def, built),
   };
 }
 /** Rig node tree of a built model (cached on the build), or null for plain models. */
@@ -422,7 +435,13 @@ function placeFrames(engine, outName, FW, FH, tag, imgs, { durations, loop, proj
 }
 
 /** Model-level options kept on create/update (besides name and parts). */
-export const MODEL_KEYS = ['grid', 'scale', 'origin', 'notes', 'project', 'overlays', 'uv_origin', 'rig', 'sockets', 'poses', 'clips', 'weapon', 'arms', 'merge', 'morphs', 'cull', 'greeble_kind', 'fp', 'skeleton', 'skin', 'materials', 'melee', 'damage', 'fracture'];
+export const MODEL_KEYS = ['grid', 'scale', 'origin', 'notes', 'project', 'overlays', 'uv_origin', 'rig', 'sockets', 'poses', 'clips', 'weapon', 'arms', 'merge', 'morphs', 'cull', 'greeble_kind', 'fp', 'skeleton', 'skin', 'materials', 'melee', 'damage', 'fracture', 'unwrap'];
+/** unwrap on create / update: validated early, stored without the action-only keys (null removes it). */
+const withUnwrap = (a) => {
+  if (a.unwrap === undefined || a.unwrap === null || a.unwrap === false) return a.unwrap === false ? { ...a, unwrap: null } : a;
+  normUnwrap(a.unwrap);
+  return { ...a, unwrap: storedUnwrap(a.unwrap) };
+};
 
 /** Part index from a number or a part name. */
 function partIndex(parts, k, what) {
@@ -510,7 +529,8 @@ export const MODEL_OPS = {
         : `texture:"${name}" on floor/wall/box parts (world-tiled faces); touching same-${meta.connect} faces connect across pieces`,
     };
   },
-  model_create(a, source) {
+  model_create(a0, source) {
+    const a = withUnwrap(a0);
     if (!NAME_RE.test(a.name || '')) throw new Error('model "name" must be 1-64 chars of letters, digits, _ - .');
     if (models(this).has(a.name) && !a.overwrite) throw new Error(`Model "${a.name}" exists (overwrite:true replaces it; art_model update changes it)`);
     const hint = shipLengthHint(a);
@@ -541,7 +561,8 @@ export const MODEL_OPS = {
     }
     return { model: def.name, ...partsBrief(s, def.name), next };
   },
-  model_update(a, source) {
+  model_update(a0, source) {
+    const a = withUnwrap(a0);
     const def = getModel(this, a.name);
     const next = applyPatch(def, a);
     const s = summary(next, build(this, next));
@@ -825,7 +846,7 @@ export const MODEL_OPS = {
       const probe = build(this, def);
       for (const c of probe.tex.used) if (!this.docs.has(`${c}_n`) && !/_n$/.test(c)) this.run('normal_map', { canvas: c }, 'agent');
     }
-    const { glb, stats, built, info, rigClips, ctm, ctmNames, ext, v2, kit } = assembleGLB(this, def, { normal, instances: !!a.instances, scale, up: a.up, atlas: !!a.atlas, ctmFile: path.basename(file).replace(/\.glb$/i, '.ctm.json'), file, args: a, ...(a.bump !== undefined ? { bump: a.bump } : {}) });
+    const { glb, stats, built, info, rigClips, ctm, ctmNames, ext, v2, kit, uv } = assembleGLB(this, def, { normal, instances: !!a.instances, scale, up: a.up, atlas: !!a.atlas, ctmFile: path.basename(file).replace(/\.glb$/i, '.ctm.json'), file, args: a, ...(a.bump !== undefined ? { bump: a.bump } : {}) });
     // damage states / fracture: extra files next to the plain glb (which stays unchanged); built and
     // validated before anything is written, so a bad damage arg leaves the previous export intact
     let dmg = null;
@@ -857,16 +878,20 @@ export const MODEL_OPS = {
       ...(v2 ? v2.meta : {}),
       ...(kit ? kit.meta : {}),
       ...(dmg ? { damage: { manifest: path.basename(file).replace(/\.glb$/i, '.damage.json'), files: dmg.result.damage.files } } : {}),
+      ...(uv ? { uv } : {}),
     };
     const metaFile = file.replace(/\.glb$/i, '.meta.json');
     fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2));
-    return { file, meta: metaFile, ...(ctmFile ? { ctm: ctmFile } : {}), bytes: glb.length, triangles: stats.triangles, vertices: stats.vertices, materials: stats.materials, nodes: stats.nodes, bounds_units: stats.bounds, atlased: stats.atlased, ...(info ? { animations: Object.keys(rigClips), sockets: info.sockets.map((s) => s.name) } : {}), ...(ext ? ext.result : {}), ...(v2 ? v2.result : {}), ...(kit ? kit.result : {}), ...(dmg ? dmg.result : {}) };
+    const coh = exportCohesion(this, def, built);
+    const uvNote = uv && a.bake_ao && uv.cohesion.includes('ao') ? `AO is already painted into ${uv.canvas}; bake_ao adds engine AO on top: use strength 0.5 or drop it` : null;
+    return { file, meta: metaFile, ...(ctmFile ? { ctm: ctmFile } : {}), ...(uv ? { unwrap: { canvas: uv.canvas, size: uv.size } } : {}), ...(coh ? { cohesion: coh } : {}), ...(uvNote ? { unwrap_note: uvNote } : {}), bytes: glb.length, triangles: stats.triangles, vertices: stats.vertices, materials: stats.materials, nodes: stats.nodes, bounds_units: stats.bounds, atlased: stats.atlased, ...(info ? { animations: Object.keys(rigClips), sockets: info.sockets.map((s) => s.name) } : {}), ...(ext ? ext.result : {}), ...(v2 ? v2.result : {}), ...(kit ? kit.result : {}), ...(dmg ? dmg.result : {}) };
   },
   ...MODEL_EXTRA_OPS,
   ...skinOps({ getModel, saveModel, build, variantOf: (engine, def) => variantOf(engine, def), writeGLB }),
   ...meshOpsFor({ getModel, build, saveModel, modelDir, hasModel: (engine, n) => models(engine).has(n) }),
   ...kitOps({ getModel, saveModel, build, models }),
   ...damageOps({ getModel, build, saveModel }),
+  ...uvOps({ getModel, saveModel, build, isSkinned }),
 };
 /** Helpers the skinning ops share with the rest of art_model. */
 const BASE = { getModel, saveModel, build, variantOf: (engine, def) => variantOf(engine, def), writeGLB };
@@ -1057,6 +1082,8 @@ export function assembleGLB(engine, def0, { normal = false, instances = false, s
   const ctmNames = Object.keys(ctm);
   let extras = ctmNames.length ? { ctm: { file: ctmFile || `${def.name}.ctm.json`, tilesets: ctmNames } } : undefined;
   if (info) extras = { ...(extras || {}), rig: { nodes: info.nodes.length, sockets: info.sockets.map((s) => s.name), clips: Object.keys(rigClips) } };
+  const uvx = uvExtras(engine, built);
+  if (uvx) extras = { ...(extras || {}), uv: uvx };
   // surface / render-cost extras (only when asked for: plain exports are unchanged); side files are written by ext.after()
   const ext = wantsExtras(def, built, args) ? exportExtras(engine, def, built, args, { scale, file, info, meshes, nodes, writeGLB, variantDef: variantOf(engine, def), buildDef: (d) => build(engine, d, { tex: built.tex, normal, keepGpu }) }) : null;
   if (ext) ({ meshes, nodes } = ext);
@@ -1107,5 +1134,25 @@ export function assembleGLB(engine, def0, { normal = false, instances = false, s
   const { glb, stats } = writeGLB({ meshes, nodes, animations }, { scale, up, atlas, name: def.name, extras, ...(v2 ? { ...v2.glbOpts, v2: v2.v2 } : ext ? ext.glbOpts : {}) });
   if (v2) finishV2(v2, glb, stats);
   const kit = Object.keys(kitMeta).length || Object.keys(kitResult).length ? { meta: kitMeta, result: kitResult } : null;
-  return { glb, stats, built, info, rigClips, ctm, ctmNames, ext, v2, kit };
+  return { glb, stats, built, info, rigClips, ctm, ctmNames, ext, v2, kit, uv: uvx };
+}
+/** Atlas facts for the glTF asset extras / meta (art_model unwrap), or null. */
+function uvExtras(engine, built) {
+  const u = built.unwrap;
+  if (!u || !u.canvas || u.stale || u.missing || u.error) return null;
+  const b = engine.docs.get(u.canvas)?.meta?.uv?.baked || {};
+  return { canvas: u.canvas, size: u.size, texel_px: u.texel, islands: u.islands, hash: u.hash, cohesion: b.passes || [] };
+}
+/** Export reply: the cohesion report when it fails (multi-part textured models only). */
+function exportCohesion(engine, def, built) {
+  try {
+    if (built.mesh.faces.length > 5000) return null;
+    const parts = new Set();
+    for (const g of built.mesh.groups.values()) if (!g.overlay && g.faces && g.tex.width * g.tex.height > 1) for (const f of g.faces) if (f.pi !== undefined) parts.add(f.pi);
+    if (parts.size < 2 && !def.unwrap) return null;
+    const doc = built.unwrap?.canvas ? engine.docs.get(built.unwrap.canvas) : null;
+    const r = cohesionCheck(def, built, { anchor: anchorOf(def, built), atlasDoc: doc?.meta?.uv ? doc : null, full: true });
+    if (r.pass) return null;
+    return { pass: false, score: r.score, issues: r.issues.slice(0, 3).map((x) => `${x.id}: ${x.detail}`), fix: r.issues.find((x) => x.level === 'error')?.fix };
+  } catch { return null; }
 }

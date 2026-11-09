@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 export const VERSION = JSON.parse(fs_v.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 import { encodeGIF } from './gif.js';
+import { encodePNG } from './png.js';
 import { assetIndex } from './assets.js';
 import { assembleGLB, modelDefs, modelThumbnail } from './modelops.js';
 import { getAudio } from './audio/ops.js';
@@ -169,7 +170,7 @@ export function startServer(engine, { port, host = '127.0.0.1' }) {
         }
         return sendBin(res, 'image/png', snap.png, { 'cache-control': 'private, max-age=86400' });
       }
-      s = p.match(/^\/api\/model\/([^/]+)\/(glb|thumb\.png|info)$/);
+      s = p.match(/^\/api\/model\/([^/]+)\/(glb|thumb\.png|uv\.png|info)$/);
       if (s) {
         const name = decodeURIComponent(s[1]);
         let def = modelDefs(engine).get(name);
@@ -177,6 +178,17 @@ export function startServer(engine, { port, host = '127.0.0.1' }) {
         if (snapId) { const sn = engine.activity.snapshot(snapId); if (sn?.def) def = sn.def; }
         if (!def) return sendJSON(res, 404, { ok: false, error: `No model "${name}"` });
         if (s[2] === 'info') return sendJSON(res, 200, engine.peek('model_info', { name }));
+        if (s[2] === 'uv.png') {
+          // atlas of art_model unwrap: ?layer=texture (what the model uses, default) | base | cohesion | paint | masks | guide | ...
+          const cname = (def.unwrap && typeof def.unwrap === 'object' && def.unwrap.canvas) || `${name}_uv`;
+          const d = def.unwrap ? engine.docs.get(cname) : null;
+          if (!d?.meta?.uv) return sendJSON(res, 404, { ok: false, error: `model "${name}" has no UV atlas (art_model unwrap {name:"${name}"})` });
+          const ln = url.searchParams.get('layer') || 'texture';
+          const l = ln === 'texture' ? null : d.layers.find((x) => x.name === ln);
+          if (ln !== 'texture' && !l) return sendJSON(res, 404, { ok: false, error: `atlas ${cname} has no layer "${ln}" (layers: texture, ${d.layers.map((x) => x.name).join(', ')})` });
+          const data = l ? l.data : d.composite({ exclude: ['emissive', 'height', 'metal', 'rough', 'masks', 'guide'] });
+          return sendBin(res, 'image/png', encodePNG(d.width, d.height, data));
+        }
         if (s[2] === 'thumb.png') {
           const key = `${def.updated || 0}`;
           let t = modelThumbs.get(name);
