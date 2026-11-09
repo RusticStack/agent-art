@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.10.0
 
 Fixes the known limits of art_fx, damage and melee from 0.9.0. Everything that does not use a changed feature is byte-identical to 0.9.0: `test/limits.test.js` checks 260 digests (damage exports of rig-less models, art_fx sheets and metadata, the 0.9.0 audio recipes, knife and rifle melee clips and a knife batch manifest) against `test/fixtures/limits-golden-0.9.json`, recorded on 0.9.0.
 
