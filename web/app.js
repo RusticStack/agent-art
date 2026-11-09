@@ -5,7 +5,8 @@ import './src/styles/tokens.css';
 import './src/styles/base.css';
 import './src/styles/viewers.css';
 import './src/styles/legacy-shell.css';
-import { $, el, api, getJSON, postJSON, store, debounce, toast, onToast, splitId, enc, KIND_ICON } from './ui/util.js';
+import { $, el, api, getJSON, store, toast, onToast, splitId, KIND_ICON } from './ui/util.js';
+import { api as rest } from './src/lib/api/client.ts';
 import { Browser } from './ui/browser.js';
 import { Timeline } from './ui/timeline.js';
 import { Inspector, reviewDialog } from './ui/inspector.js';
@@ -21,6 +22,15 @@ import { ExportViewer as ExportViewerTS } from './src/viewers/export/ExportViewe
 import { GraphViewer as GraphViewerTS } from './src/viewers/graph/GraphViewer.ts';
 import { LayersViewer as LayersViewerTS } from './src/viewers/layers/LayersViewer.ts';
 import { cleanupPanel } from './ui/cleanup.js';
+import { assets } from './src/state/assets.svelte.ts';
+import { uiState } from './src/state/uiState.svelte.ts';
+import { reviews, ACTIVE_REVIEW } from './src/state/reviews.svelte.ts';
+import { activity } from './src/state/activity.svelte.ts';
+import { editor } from './src/state/editor.svelte.ts';
+import { workspace } from './src/state/workspace.svelte.ts';
+import { connection } from './src/state/connection.svelte.ts';
+import * as live from './src/state/live.svelte.ts';
+import { watch } from './src/state/legacyWatch.svelte.ts';
 
 const CanvasViewer = adapt(CanvasViewerTS);
 const AnimViewer = adapt(AnimViewerTS);
@@ -33,38 +43,37 @@ const ProjectViewer = adapt(ProjectViewerTS);
 const ExportViewer = adapt(ExportViewerTS);
 const GraphViewer = adapt(GraphViewerTS);
 
-const ACTIVE_REVIEW = new Set(['open', 'in_progress', 'reopened']);
-
 class App {
   constructor() {
     this.api = api;
-    this.assets = null;
-    this.uiState = { hidden: [], pinned: [] };
-    this.hiddenSet = new Set();
-    this.solo = new Set();
-    this.reviews = [];
-    this.reviewCounts = {};
-    this.approvedSet = new Set();
-    this.tool = 'pencil';
-    this.color = { hex: '#4a7c3a', hex8: '#4a7c3aff' };
-    this.reviewMode = false;
-    this.followMode = store.get('follow', null) ?? (() => { try { return localStorage.getItem('agent-art-follow'); } catch { return null; } })() ?? 'canvas';
-    if (this.followMode === 'asset') this.followMode = 'canvas';
+    workspace.navigator = (t, o) => { void this.open(t, o); };
+    workspace.dialogOpen = () => !!document.querySelector('.modal:not(#help)');
     this.slots = { A: { host: $('slotA'), viewer: null, target: null, tabs: $('tabsA'), title: $('titleA') }, B: { host: $('slotB'), viewer: null, target: null, tabs: $('tabsB'), title: $('titleB') } };
-    this.lastAgent = 0;
     this.browser = new Browser($('browser'), this);
     this.timeline = new Timeline($('timelinePane'), this);
     this.inspector = new Inspector($('inspector'), this);
-    this.refreshAssetsSoon = debounce(() => this.refreshAssets(), 350);
-    this.refreshReviewsSoon = debounce(() => this.refreshReviews(), 200);
     this.setupLayout();
     this.setupTopbar();
     this.setupKeys();
     onToast((text, kind) => this.toast(text, kind));
   }
+  // ---------- state lives in the stores (web/src/state); these getters keep the legacy surface ----------
+  get assets() { return assets.index; }
+  get flags() { return { superseded: { has: (id) => assets.isSuperseded(id) }, orphans: { has: (id) => assets.isOrphan(id) } }; }
+  get uiState() { return { hidden: [...uiState.hidden], pinned: uiState.pinned }; }
+  get hiddenSet() { return uiState.hidden; }
+  get solo() { return uiState.solo; }
+  get reviews() { return reviews.list; }
+  get reviewCounts() { return reviews.counts; }
+  get approvedSet() { return reviews.approved; }
+  get tool() { return editor.tool; }
+  get color() { return editor.color; }
+  get reviewMode() { return editor.reviewMode; }
+  get followMode() { return workspace.followMode; }
+  get comparing() { return workspace.comparing; }
   get current() { return this.slots.A.target; }
   get currentId() { return this.current ? this.idOf(this.current) : null; }
-  get following() { return this.followMode !== 'off'; }
+  get following() { return workspace.following; }
 
   // ---------- ids, visibility, pins ----------
   idOf(t) {
@@ -72,44 +81,33 @@ class App {
     if (t.kind === 'graph') return 'graph';
     return `${t.kind}:${t.name}`;
   }
-  isHidden(id) { return this.hiddenSet.has(id); }
-  isPinned(id) { return this.uiState.pinned.includes(id); }
-  async saveUiState() {
-    this.uiState.hidden = [...this.hiddenSet];
-    const r = await postJSON('/api/ui-state', this.uiState).catch(() => null);
-    if (!r?.ok) toast('Could not save the hidden / pinned state', 'error');
-  }
+  isHidden(id) { return uiState.isHidden(id); }
+  isPinned(id) { return uiState.isPinned(id); }
   toggleHidden(id) {
-    if (this.hiddenSet.has(id)) this.hiddenSet.delete(id); else this.hiddenSet.add(id);
-    this.saveUiState();
+    void uiState.toggleHidden(id);
     this.browser.render();
     this.timeline.render();
     if (this.current) this.inspector.show(this.current);
   }
   togglePinned(id) {
-    const i = this.uiState.pinned.indexOf(id);
-    if (i >= 0) this.uiState.pinned.splice(i, 1); else this.uiState.pinned.unshift(id);
-    this.saveUiState();
+    void uiState.togglePinned(id);
     this.browser.render();
     if (this.current) this.inspector.show(this.current);
   }
-  onSoloChange() { this.browser.render(); }
+  toggleSolo(id) { uiState.toggleSolo(id); this.browser.render(); }
+  clearSolo() { uiState.clearSolo(); this.browser.render(); }
 
-  // ---------- data ----------
-  async refreshAssets() {
-    try { this.assets = await getJSON('/api/assets'); } catch { return; }
-    this.flags = { superseded: new Set(this.assets.flags?.superseded || []), orphans: new Set(this.assets.flags?.orphans || []) };
+  // ---------- data (the stores fetch; these re-render the legacy DOM) ----------
+  async refreshAssets() { await assets.refresh(); }
+  renderAssets() {
     this.browser.render();
+    if (!this.assets) return;
     $('wsPath').textContent = this.assets.home;
     $('wsPath').title = `workspace: ${this.assets.home}`;
   }
-  async refreshReviews() {
-    const r = await getJSON('/api/reviews').catch(() => null);
-    if (!r) return;
-    this.reviews = r.reviews || [];
-    this.reviewCounts = r.counts || {};
-    this.approvedSet = new Set(r.approved || []);
-    const open = this.reviews.filter((x) => ACTIVE_REVIEW.has(x.status)).length;
+  async refreshReviews() { await reviews.refresh(); }
+  renderReviews() {
+    const open = reviews.openCount;
     $('reviewCount').textContent = open ? String(open) : '';
     $('reviewCount').hidden = !open;
     this.browser.render();
@@ -119,14 +117,12 @@ class App {
 
   // ---------- tools / colour ----------
   setTool(t) {
-    this.tool = t;
+    editor.setTool(t);
     for (const s of Object.values(this.slots)) s.viewer?.setToolUI?.(t);
   }
   setColor(hex) {
-    const h = hex.length === 9 ? hex : hex.slice(0, 7) + 'ff';
-    this.color = { hex: h.slice(0, 7), hex8: h };
-    for (const s of Object.values(this.slots)) s.viewer?.setColorUI?.(h);
-    if (this.tool === 'eraser' || this.tool === 'picker' || this.tool === 'hand') this.setTool('pencil');
+    editor.setColor(hex);
+    for (const s of Object.values(this.slots)) s.viewer?.setColorUI?.(editor.color.hex8);
   }
 
   // ---------- viewers ----------
@@ -168,11 +164,12 @@ class App {
       s.viewer?.destroy();
       s.host.innerHTML = '';
       s.viewer = new Cls(s.host, { app: this, readOnly: slot === 'B', slot });
+      workspace.registerViewer(slot, s.viewer);
     }
     s.target = target;
+    workspace.open(target, { slot, history });
     this.renderTabs(slot);
     if (slot === 'A') {
-      if (history) this.setHash(target);
       this.browser.markActive(this.currentId);
       this.inspector.show(target.kind === 'graph' ? { kind: 'graph' } : target);
       if (this.timeline.f.current) this.timeline.render();
@@ -208,14 +205,6 @@ class App {
     if (t.kind === 'rig') { this.open({ kind: 'rig', name: t.name, view: v === 'layers' ? 'layers' : undefined }, { slot }); return; }
     this.open({ ...t, view: v }, { slot });
   }
-  setHash(t) {
-    let h = '';
-    if (t.snap) return;
-    if (t.kind === 'canvas') h = enc(t.name);
-    else if (t.kind === 'graph') h = 'graph';
-    else h = `${t.kind}:${enc(t.name)}`;
-    if (location.hash.slice(1) !== h) history.replaceState(null, '', '#' + h);
-  }
   fromHash() {
     const h = decodeURIComponent(location.hash.slice(1));
     if (!h) return null;
@@ -225,11 +214,11 @@ class App {
     return { kind: 'canvas', name: h };
   }
   setCompare(on) {
-    this.comparing = on;
+    workspace.setCompare(on);
     $('viewers').classList.toggle('compare', on);
     $('slotWrapB').hidden = !on;
     $('compareBtn').classList.toggle('on', on);
-    if (!on && this.slots.B.viewer) { this.slots.B.viewer.destroy(); this.slots.B.viewer = null; this.slots.B.target = null; this.slots.B.host.innerHTML = ''; }
+    if (!on && this.slots.B.viewer) { this.slots.B.viewer.destroy(); this.slots.B.viewer = null; workspace.registerViewer('B', null); this.slots.B.target = null; this.slots.B.host.innerHTML = ''; }
     if (on && !this.slots.B.target) this.slots.B.host.replaceChildren(el('div.empty-note', { text: 'Alt+click (or Shift+click) an asset in the browser, or ⇆ on a timeline entry, to compare it here.' }));
     window.dispatchEvent(new Event('resize'));
   }
@@ -240,26 +229,19 @@ class App {
   }
 
   // ---------- review ----------
-  reviewMarks(t) {
-    const id = `${t.kind}:${t.name}`;
-    return this.reviews.filter((r) => r.asset === id && ['open', 'in_progress', 'reopened', 'fixed'].includes(r.status)).map((r) => ({ id: r.id, status: r.status, region: r.target?.region, frame: r.target?.frame, time: r.target?.time }));
-  }
+  reviewMarks(t) { return reviews.marks(t); }
   async reviewPrompt(t) {
     const r = await reviewDialog(this, t);
     if (r) { toast(`Review note ${r.id} added — the agent sees it in art_review list and in replies about this asset`, 'ok'); this.setReviewMode(false); }
   }
   setReviewMode(on) {
-    this.reviewMode = on;
+    editor.setReviewMode(on);
     $('reviewBtn').classList.toggle('on', on);
     document.body.classList.toggle('review-mode', on);
     for (const s of Object.values(this.slots)) s.viewer?.setToolUI?.(this.tool);
   }
   /** Asset ids for "compare with" suggestions. */
-  assetChoices() {
-    const a = this.assets;
-    if (!a) return [];
-    return [...a.canvases.map((c) => `canvas:${c.name}`), ...a.models.map((m) => `model:${m.name}`), ...a.rigs.map((r) => `rig:${r.name}`), ...a.audio.map((s) => `audio:${s.name}`)];
-  }
+  assetChoices() { return assets.choices(); }
   reviewTarget(asset, t = {}) {
     const [k, n] = splitId(asset);
     if (k === 'canvas') return { kind: 'canvas', name: n, frame: t.frame, tag: t.tag, view: t.tag && t.view ? 'anim' : undefined };
@@ -279,62 +261,32 @@ class App {
     this.inspector.show({ kind: k, name: n });
   }
 
-  // ---------- live events ----------
-  connect() {
-    const es = new EventSource('/api/events');
-    es.onopen = () => this.setStatus();
-    es.onerror = () => { $('status').className = 'status down'; $('statusText').textContent = 'disconnected — retrying'; };
-    es.onmessage = (m) => this.onEvent(JSON.parse(m.data));
-  }
-  onEvent(ev) {
-    if (ev.type === 'hello') { this.setStatus(); return; }
-    if (ev.type === 'activity') {
-      this.timeline.upsert(ev.entry);
-      if (ev.entry.source !== 'user') { this.lastAgent = Date.now(); this.setStatus(); }
-      if (ev.entry.type === 'op' && ev.entry.source === 'agent' && ev.entry.ok !== false) this.follow(ev.entry);
+  // ---------- live events (state/live routes them to the stores; this re-renders the legacy DOM) ----------
+  afterEvent(ev) {
+    this.setStatus();
+    if (ev.type === 'hello') return;
+    if (ev.type === 'activity') { this.timeline.upsert(ev.entry); return; }
+    if (ev.type === 'resync') {
+      this.timeline.entries.clear(); this.timeline.order = [];
+      this.timeline.load(activity.all());
       return;
     }
-    if (ev.type === 'ui-state') { this.loadUiState(); return; }
-    if (ev.type === 'graph') {
-      if (ev.review || ev.action === 'approve') this.refreshReviewsSoon();
-      this.refreshAssetsSoon();
-    }
-    if (['change', 'deleted', 'model', 'audio', 'project'].includes(ev.type)) this.refreshAssetsSoon();
     if (ev.type === 'change' && ev.source === 'agent') this.browser.flash(`canvas:${ev.canvas}`);
-    for (const s of Object.values(this.slots)) s.viewer?.onEvent?.(ev);
     if (ev.type === 'change' && this.current?.kind === 'canvas' && this.current.name === ev.canvas && !this.current.snap && this.current.view && this.current.view !== 'edit') this.inspector.refreshFor({ name: ev.canvas });
   }
   /** Follow mode: open whatever the agent is touching (skips hidden / non-solo assets). */
-  follow(entry) {
-    if (!this.following || document.querySelector('.modal:not(#help)')) return;
-    const ok = (a) => !this.isHidden(`${a.kind}:${a.name}`) && (!this.solo.size || this.solo.has(`${a.kind}:${a.name}`)) && !a.deleted;
-    const list = (entry.assets || []).filter((a) => ['canvas', 'model', 'audio', 'rig'].includes(a.kind) && ok(a));
-    const a = list.find((x) => x.kind === 'canvas' && x.after) || list.find((x) => x.after) || list[0];
-    if (!a) return;
-    if (this.followMode === 'project') {
-      const c = a.kind === 'canvas' && this.assets?.canvases.find((x) => x.name === a.name);
-      const proj = c?.project;
-      if (proj && !(this.current?.kind === 'project' && this.current.name === proj)) this.open({ kind: 'project', name: proj });
-      return;
-    }
-    const cur = this.current;
-    const t = a.kind === 'rig' ? { kind: 'canvas', name: `${a.name}_parts` } : { kind: a.kind, name: a.name };
-    if (cur && !cur.snap && cur.kind === t.kind && cur.name === t.name) return;
-    // stay in the same viewer mode when following within canvases (animation stays animation)
-    if (cur?.kind === 'canvas' && t.kind === 'canvas' && cur.view && cur.view !== 'layers') t.view = cur.view;
-    this.open(t);
-  }
+  follow(entry) { workspace.follow(entry); }
   setStatus() {
-    const busy = Date.now() - this.lastAgent < 2500;
-    $('status').className = 'status ' + (busy ? 'busy' : 'ok');
-    $('statusText').textContent = busy ? 'agent is working…' : 'live';
+    $('status').className = connection.pillClass;
+    $('statusText').textContent = connection.label;
   }
-  async loadUiState() {
-    const s = await getJSON('/api/ui-state').catch(() => null);
-    if (!s) return;
-    this.uiState = { hidden: s.hidden || [], pinned: s.pinned || [] };
-    this.hiddenSet = new Set(this.uiState.hidden);
-    this.browser.render();
+  async loadUiState() { await uiState.load(); }
+  /** Store changes -> legacy DOM. */
+  watchStores() {
+    watch(() => assets.rev, () => this.renderAssets());
+    watch(() => reviews.rev, () => this.renderReviews());
+    watch(() => [uiState.hidden, uiState.pinned, uiState.solo], () => this.browser.render());
+    watch(() => connection.label, () => this.setStatus());
   }
 
   // ---------- chrome ----------
@@ -348,8 +300,8 @@ class App {
     const fs = $('followMode');
     fs.value = this.followMode;
     const sync = () => { $('followBtn').classList.toggle('on', this.following); $('followBtn').textContent = this.following ? '◉ Follow' : '○ Follow'; fs.value = this.followMode; };
-    fs.onchange = () => { this.followMode = fs.value; store.set('follow', this.followMode); try { localStorage.setItem('agent-art-follow', fs.value); } catch { /* ignore */ } sync(); };
-    $('followBtn').onclick = () => { this.followMode = this.following ? 'off' : store.get('followOn', 'canvas'); if (this.following) store.set('followOn', this.followMode); store.set('follow', this.followMode); sync(); };
+    fs.onchange = () => { workspace.setFollowMode(fs.value); sync(); };
+    $('followBtn').onclick = () => { workspace.toggleFollow(); sync(); };
     sync();
     $('compareBtn').onclick = () => this.setCompare(!this.comparing);
     $('closeB').onclick = () => this.setCompare(false);
@@ -364,7 +316,7 @@ class App {
     $('toggleSide').onclick = () => this.togglePane('side');
   }
   showReviewList() {
-    const list = this.reviews.slice().sort((a, b) => Number(ACTIVE_REVIEW.has(b.status)) - Number(ACTIVE_REVIEW.has(a.status)) || b.updated - a.updated);
+    const list = reviews.sortedAll();
     const dlg = el('div.modal', { on: { click: (e) => { if (e.target === dlg) dlg.remove(); } } },
       el('div.modal-card.wide', {}, el('div.pane-head', {}, el('h3', { text: `Review notes · ${list.filter((r) => ACTIVE_REVIEW.has(r.status)).length} open` }), el('div.spacer'), el('button.btn.small', { text: '✕', on: { click: () => dlg.remove() } })),
         el('div.review-list', {}, ...(list.length ? list.map((r) => { const c = this.inspector.reviewCard(r); c.addEventListener('click', (e) => { if (e.target.closest('button,a')) dlg.remove(); }); return el('div', {}, el('div.mono.small.muted', { text: r.asset }), c); }) : [el('div.muted', { text: 'No review notes yet. Press M, then drag a box (or click a pin) on what needs fixing.' })]))));
@@ -448,13 +400,18 @@ class App {
   }
 
   async boot() {
-    setInterval(() => this.setStatus(), 1000);
-    await Promise.all([this.loadUiState(), this.refreshAssets(), this.refreshReviews()]);
+    this.watchStores();
+    live.onAfterEvent((ev) => this.afterEvent(ev));
+    const health = rest.health().catch(() => null);
+    await Promise.all([uiState.load(), assets.refresh(), reviews.refresh()]);
+    this.renderAssets(); this.renderReviews(); this.browser.render();
     try {
       const { entries } = await getJSON('/api/activity?limit=600');
+      activity.load(entries);
       this.timeline.load(entries);
     } catch { /* older server */ }
-    this.connect();
+    connection.serverPid = (await health)?.pid ?? null;
+    live.start();
     const t = this.fromHash();
     const a = this.assets;
     if (t && (t.kind !== 'canvas' || a?.canvases.some((c) => c.name === t.name))) this.open(t, { history: false });

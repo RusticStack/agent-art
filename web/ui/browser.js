@@ -19,7 +19,7 @@ export class Browser {
     this.filter = '';
     this.search = el('input.search', { type: 'search', placeholder: 'Filter assets  ( / )', on: { input: () => { this.filter = this.search.value.trim().toLowerCase(); this.render(); } } });
     this.hiddenBtn = el('button.btn.small.icon', { title: 'Show hidden assets', on: { click: () => { this.showHidden = !this.showHidden; store.set('showHidden', this.showHidden); this.render(); } } });
-    this.soloBtn = el('button.btn.small', { text: 'Clear solo', hidden: true, on: { click: () => { this.app.solo.clear(); this.app.onSoloChange(); } } });
+    this.soloBtn = el('button.btn.small', { text: 'Clear solo', hidden: true, on: { click: () => { this.app.clearSolo(); } } });
     this.newBtn = el('button.btn.small', { text: '+ New', title: 'New canvas', on: { click: () => this.toggleNew() } });
     this.newForm = this.buildNewForm();
     this.selectMode = false;
@@ -249,7 +249,7 @@ export class Browser {
     }
     if (act === 'eye') { this.app.toggleHidden(id); return; }
     if (act === 'pin') { this.app.togglePinned(id); return; }
-    if (act === 'solo') { if (this.app.solo.has(id)) this.app.solo.delete(id); else this.app.solo.add(id); this.app.onSoloChange(); return; }
+    if (act === 'solo') { this.app.toggleSolo(id); return; }
     const open = JSON.parse(row.dataset.open || 'null');
     if (!open || open.kind === 'none') { if (row.querySelector('.twisty')?.textContent) { this.expanded.has(id) ? this.expanded.delete(id) : this.expanded.add(id); this.render(); } return; }
     if (e.altKey || e.shiftKey) { this.app.open(open, { slot: 'B' }); return; }
