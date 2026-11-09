@@ -488,7 +488,7 @@ test('review fixes: AO + instances valid glTF, GPU greeble unit normals, part st
 });
 
 test('docs: art_help 3d covers the new surface and render-cost features', () => {
-  const t = helpText({ topic: '3d' });
+  const t = helpText({ topic: '3d', full: true });
   for (const k of ['greeble', 'tube', 'trim', 'boolean', 'morphs', 'bake_ao', 'lods', 'impostor', 'collision', 'cull', 'material', 'bump']) assert.ok(t.includes(k), k);
   assert.ok(Object.keys(MATERIAL_PRESETS).every((p) => t.includes(p)));
 });

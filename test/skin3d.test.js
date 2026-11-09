@@ -504,7 +504,7 @@ test('art_model skeleton / skin / weights are wired into MCP and help', () => {
   const t = TOOLS.find((x) => x.name === 'art_model');
   for (const a of ['skeleton', 'skin', 'weights']) assert.ok(t.inputSchema.properties.action.enum.includes(a), a);
   for (const p of ['skeleton', 'skin', 'retarget', 'profile', 'bones', 'bone']) assert.ok(t.inputSchema.properties[p], p);
-  assert.match(helpText({ topic: '3d' }), /SKINNING/);
+  assert.match(helpText({ topic: '3d', full: true }), /SKINNING/);
 });
 
 test('skin smooth / paint iterations are bounded; chain template count / height / length must be numbers', () => {

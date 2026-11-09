@@ -166,8 +166,8 @@ test('fx: tool, help topic and skill are wired', () => {
   const t = TOOLS.find((x) => x.name === 'art_fx');
   assert.ok(t);
   assert.deepEqual(t.inputSchema.properties.action.enum, ['make', 'batch', 'preview', 'list', 'export']);
-  assert.match(helpText({ topic: 'fx' }), /ParticleEmitter/);
-  assert.match(helpText({ topic: 'fx' }), /THREE\.AdditiveBlending/);
+  assert.match(helpText({ topic: 'fx', full: true }), /ParticleEmitter/);
+  assert.match(helpText({ topic: 'fx', full: true }), /THREE\.AdditiveBlending/);
   assert.ok(SKILLS['combat-fx']);
   for (const tp of FX_TYPES) assert.ok(FX[tp].variants.length >= 1);
 });

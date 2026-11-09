@@ -405,7 +405,7 @@ test('vertex data: paint + masks colour sets, UV2 / UV3 consecutive, AO in masks
 });
 
 test('help, tool schema and the UI: materials topic, art_model material action, /api/model/<name>/glb?profile=three, viewer channel dropdown', async () => {
-  const help = helpText({ topic: 'materials' });
+  const help = helpText({ topic: 'materials', full: true });
   for (const k of ['painted_hull', 'brushed_metal', 'glass_canopy', 'cloth', 'neon', 'KHR_materials_emissive_strength', 'lightmap', 'probes', 'displace', 'roblox', 'unity_mask', 'channel']) assert.ok(help.includes(k), `materials help mentions ${k}`);
   const { TOOLS } = await import('../src/mcp.js');
   const tool = TOOLS.find((t) => t.name === 'art_model');

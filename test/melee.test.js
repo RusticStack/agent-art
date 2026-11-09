@@ -321,7 +321,7 @@ test('melee: art_anim actions, art_model melee templates and the help topic over
   assert.match(JSON.stringify(c), /"pass\\?":true/);
   const m = await runTool('art_model', { action: 'create', name: 'vb', template: 'melee_vibro_blade' }, call);
   assert.doesNotMatch(JSON.stringify(m), /error/i);
-  const help = helpText({ topic: 'melee' });
+  const help = helpText({ topic: 'melee', full: true });
   for (const s of ['hits', 'sweep', 'paired', 'root_motion', 'THREE.JS', 'ROBLOX', 'melee_world']) assert.ok(help.includes(s), s);
 });
 

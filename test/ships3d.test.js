@@ -346,7 +346,7 @@ test('plain models are untouched: no expansion, no extra nodes, identical bytes 
 });
 
 test('docs: art_help 3d lists the kit, the skill exists', () => {
-  const t = helpText({ topic: '3d' });
+  const t = helpText({ topic: '3d', full: true });
   for (const k of ['SHIPS + STRUCTURES', 'hull {length', 'landing_gear {', 'engine_room {', 'market_stall {', 'generate {kind:"interior"', 'budget {name', 'mood']) assert.ok(t.includes(k), k);
   assert.ok(SKILLS['ships-structures']);
 });

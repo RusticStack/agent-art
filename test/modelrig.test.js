@@ -345,7 +345,7 @@ test('art_rig animate ik_from: hands follow a rendered gun clip\'s anchors frame
 });
 
 test('docs: art_help 3d covers rigs, clips and pre-rendered sprites; schema lists the new actions', () => {
-  const help = helpText({ topic: '3d' });
+  const help = helpText({ topic: '3d', full: true });
   for (const k of ['RIGS & CLIPS', 'PRE-RENDERED SPRITES', 'socket_grip_r', 'fp_rifle', 'reload_empty', 'ik_from', 'sweep', 'quantize', 'Motor6D']) assert.ok(help.includes(k), `art_help 3d mentions ${k}`);
   const tool = TOOLS.find((t) => t.name === 'art_model');
   for (const a of ['pose', 'animate', 'render']) assert.ok(tool.inputSchema.properties.action.enum.includes(a));

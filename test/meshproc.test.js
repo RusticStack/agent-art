@@ -309,7 +309,7 @@ test('art_model boolean / remesh / decimate / cluster_lod / visibility (MCP), de
   e.run('model_delete', { name: 'ship_union_dec' });
   assert.ok(!fs.existsSync(path.join(home, 'models', 'ship_union_dec.mesh.bin')));
   // docs
-  const help = helpText({ topic: '3d' });
+  const help = helpText({ topic: '3d', full: true });
   for (const w of ['MESH PROCESSING', 'cluster_lod', 'remesh', 'decimate', 'visibility', 'clodselect']) assert.ok(help.includes(w), w);
 });
 

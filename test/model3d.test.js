@@ -302,7 +302,7 @@ test('art_model through runTool (MCP path), help topic and skill', async () => {
   // persisted: a fresh engine on the same home sees the model
   assert.ok(new Engine({ home: e.home }).run('model_list').models.length === 1);
   assert.ok(TOOLS.some((t) => t.name === 'art_model'));
-  assert.match(helpText({ topic: '3d' }), /gothic|Gothic/);
+  assert.match(helpText({ topic: '3d', full: true }), /gothic|Gothic/);
   assert.ok(SKILLS['3d-kit']);
 });
 
@@ -542,7 +542,7 @@ test('origin hint, art_help 3d and the art_model schema document the ship kit', 
   assert.doesNotMatch(c.next, /origin:"bottom"/, 'centred kit pieces get no hint');
   const b = e.run('model_update', { name: 'ship', origin: 'bottom' });
   assert.deepEqual(b.bounds_px.min, [-4, 0, -4]);
-  const help = helpText({ topic: '3d' });
+  const help = helpText({ topic: '3d', full: true });
   for (const k of ['wedge', 'taper', 'bevel', 'r_top', 'loft', 'scale_end', '"zy"', 'mirror', 'pivot', 'X then Y then Z', 'about', 'origin:"bottom"', 'wrap', 'u_offset', 'inset', 'glass', 'opacity', 'BLEND']) assert.ok(help.includes(k), `art_help 3d mentions ${k}`);
   const tool = TOOLS.find((t) => t.name === 'art_model');
   for (const k of ['wedge', 'loft', 'inset', 'glass', 'mirror', 'pivot', 'about']) assert.ok(tool.description.includes(k), `art_model description mentions ${k}`);
