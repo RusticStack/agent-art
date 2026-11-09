@@ -449,3 +449,37 @@ test('breach on an open host (close:auto): the hole-fill caps that made it cutta
   assert.ok(tris > 0);
   assert.equal(caps, 0, `${caps} cap triangles on the open ends`);
 });
+
+test('fracture debris: rest world of every chunk node (debris under its level-1 chunk, skinned or not, nodes / files) is its centre', async () => {
+  const { validateGLB: validateSkin } = await import('../src/gltfvalidate.js');
+  const e = new Engine({ home: tmp() }), dir = tmp();
+  const JS = (b) => JSON.parse(b.toString('utf8', 20, 20 + b.readUInt32LE(12)));
+  const local = (n) => {
+    if (n.matrix) return n.matrix;
+    const [x, y, z, w] = n.rotation || [0, 0, 0, 1], t = n.translation || [0, 0, 0];
+    return [1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w), 0, 2 * (x * y - z * w), 1 - 2 * (x * x + z * z), 2 * (y * z + x * w), 0, 2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y), 0, t[0], t[1], t[2], 1];
+  };
+  const mm = (A, B) => { const r = new Array(16).fill(0); for (let c = 0; c < 4; c++) for (let rr = 0; rr < 4; rr++) for (let k = 0; k < 4; k++) r[c * 4 + rr] += A[k * 4 + rr] * B[c * 4 + k]; return r; };
+  e.run('model_create', { name: 'snake', parts: [{ type: 'tube', path: [[0, 32, 0], [0, 20, 0], [0, 8, 0], [0, 2, 0]], r: 3, sides: 8, texture: '#c84', segments: 4 }, { type: 'box', w: 6, h: 6, d: 6, at: [0, 8, 4], color: '#888' }] });
+  e.run('model_skeleton', { name: 'snake', skeleton: { template: 'chain', count: 3, from: [0, 32, 0], to: [0, 2, 0] } });
+  e.run('model_skin', { name: 'snake', skin: { method: 'heat' } });
+  e.run('model_fracture', { name: 'snake', groups: [{ part: 1, pieces: 4, seed: 1, debris: 2 }] });
+  e.run('model_create', { name: 'crate', origin: 'bottom', parts: [{ type: 'box', id: 'body', w: 24, h: 24, d: 24, color: '#a84' }] });
+  e.run('model_fracture', { name: 'crate', groups: [{ part: 'body', pieces: 6, seed: 3, debris: 2 }] });
+  for (const nm of ['snake', 'crate']) for (const mode of ['nodes', 'files']) {
+    e.run('model_export', { name: nm, path: path.join(dir, `${nm}_${mode}.glb`), damage: { mode } });
+    const man = JSON.parse(fs.readFileSync(path.join(dir, `${nm}_${mode}.damage.json`), 'utf8'));
+    const glb = fs.readFileSync(path.join(dir, mode === 'files' ? man.fracture.file : man.file)), J = JS(glb);
+    const v = validateSkin(glb), c = validateGLB(glb);
+    assert.ok(v.ok && c.ok, `${nm}/${mode}: ${[...(v.errors || []), ...(c.errors || [])].slice(0, 3).join('; ')}`);
+    const par = new Map(); J.nodes.forEach((n, i) => (n.children || []).forEach((ch) => par.set(ch, i)));
+    const W = (i) => (par.has(i) ? mm(W(par.get(i)), local(J.nodes[i])) : local(J.nodes[i]));
+    const chunks = man.fracture.groups.flatMap((g) => g.chunks);
+    assert.ok(chunks.filter((ch) => ch.level === 2).length === 6, `${nm}: 2 x 3 debris`);
+    for (const ch of chunks) {
+      const M = W(J.nodes.findIndex((n) => n.name === ch.node));
+      for (let a = 0; a < 3; a++) assert.ok(Math.abs(M[12 + a] - ch.center[a]) < 1e-4, `${nm}/${mode} ${ch.name}: rest ${M.slice(12, 15)} vs centre ${ch.center}`);
+      for (const k of [0, 5, 10]) assert.ok(Math.abs(M[k] - 1) < 1e-4, `${nm}/${mode} ${ch.name}: no rotation at rest`);
+    }
+  }
+});

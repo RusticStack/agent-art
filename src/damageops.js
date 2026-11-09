@@ -493,12 +493,15 @@ export function damageExport(engine, def, built, a, { file, scale, skinned = nul
       const id = node(S, { name: `${def.name}_${g.group}`, children: [], extras: { break_group: g.group, part: g.pi, parent_group: g.parent } });
       gid.set(g.group, id);
       const rec = { group: g.group, node: `${def.name}_${g.group}`, part: g.part, parent: g.parent, method: g.method, boolean: g.boolean, seed: g.seed, pieces: g.pieces, density_kg_m3: g.density, volume: f6(g.result.volume_px3 / scale ** 3), mass_kg: f6((g.result.volume_px3 / scale ** 3) * g.density), chunk_volume_error: f6(g.result.error), ...(g.result.closed ? { closed: g.result.closed } : {}), chunks: [] };
-      const cnode = new Map();
+      const cnode = new Map(), ccenter = new Map(g.result.chunks.map((c) => [c.name, c.center]));
       for (const c of g.result.chunks) {
+        // debris hangs under its level-1 chunk node (origin on that chunk's centre, no rotation at rest,
+        // skinned or not): its translation is relative to the parent chunk's centre
+        const pc = c.parent ? ccenter.get(c.parent) : null, at = pc ? c.center.map((v, k) => v - pc[k]) : c.center;
         let m = c.mesh.clone().transform([1, 0, 0, -c.center[0], 0, 1, 0, -c.center[1], 0, 0, 1, -c.center[2]]);
         if (roblox) m = capRoblox(m, `chunk ${c.name}`).mesh;
         const cn = `${def.name}_${c.name}`;
-        const id2 = node(S, { name: cn, mesh: addMesh(S, cn, m), translation: c.center, children: [], extras: { chunk: c.name, break_group: g.group, level: c.level, parent_chunk: c.parent, mass_kg: f6((c.volume_px3 / scale ** 3) * g.density) } });
+        const id2 = node(S, { name: cn, mesh: addMesh(S, cn, m), translation: at, children: [], extras: { chunk: c.name, break_group: g.group, level: c.level, parent_chunk: c.parent, mass_kg: f6((c.volume_px3 / scale ** 3) * g.density) } });
         if (c.hull) {
           const hm = c.hull.clone().transform([1, 0, 0, -c.center[0], 0, 1, 0, -c.center[1], 0, 0, 1, -c.center[2]]);
           S.nodes[id2].children.push(node(S, { name: `${cn}_collision`, mesh: addMesh(S, `${cn}_collision`, hm), proxy: true, extras: { collision: true, proxy: 'hull', visible: false } }));
