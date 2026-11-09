@@ -67,6 +67,12 @@ export class AppPage {
   modelChannel(): Locator { return this.slot('A').locator('.model-viewer .vtoolbar select[title^="Material channel"]'); }
   modelClip(): Locator { return this.slot('A').locator('.model-viewer .vtoolbar select[title^="Clip"]'); }
   modelToggle(label: string): Locator { return this.slot('A').locator('.model-viewer label.toggle', { hasText: label }).locator('input'); }
+  rigMode(): Locator { return this.slot('A').locator('.rig-viewer .vtoolbar select').first(); }
+  rigCanvas(): Locator { return this.slot('A').locator('canvas.rig-canvas'); }
+  stackRows(): Locator { return this.slot('A').locator('.stack-list > .stack-row'); }
+  layersCanvas(): Locator { return this.slot('A').locator('canvas.layers-canvas'); }
+  hoverInfo(): Locator { return this.slot('A').locator('.hover-info'); }
+  flagButton(): Locator { return this.slot('A').locator('.layers-viewer .vtoolbar button.warn'); }
   frameLabel(): Locator { return this.slot('A').locator('.frames-controls .mono'); }
   swapButton(): Locator { return this.page.locator('#swapB'); }
   closeCompareButton(): Locator { return this.page.locator('#closeB'); }

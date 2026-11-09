@@ -140,3 +140,5 @@ button.ov-tile { text-align: left; }
 .graph-viewer > .vstatus[hidden] { display: none; }
 .model-stage canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .vstatus .btn.small { flex: none; }
+.stack-row button.sname { background: none; border: 0; padding: 0; text-align: left; cursor: pointer; min-width: 0; color: inherit; font: inherit; }
+.stack-row .act { padding: 0; justify-content: center; }

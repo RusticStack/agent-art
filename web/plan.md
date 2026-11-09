@@ -2371,3 +2371,10 @@ Deviations from the plan, smallest correct change each, in step order.
 - **Step 8, render loop.** One `animate` loop that renders only when dirty, playing or damping; it stops while the tab is hidden or the context is lost.
 - **Step 8, e2e canvas reads.** `model3d.spec.ts` reads pixels from element screenshots instead of `canvas.toDataURL()`: the WebGL canvas has no `preserveDrawingBuffer`, so `toDataURL` between frames is blank.
 - **Step 8, keys.** Arrow keys orbit and `+` / `=` / `-` dolly while the 3D canvas has focus (new, plan 5.7 keyboard access).
+- **Steps 5–11, acceptance grep.** `rg "ctx\.app|this\.app" web/src/viewers` also matches method names such as `this.applyTool` / `this.applyFilter`; the check used is `rg "ctx\.app\b|this\.app\b" web/src/viewers` (empty).
+- **Step 7, stack rows.** A row stays `div.stack-row` (a button row would nest the eye / solo buttons, invalid HTML); the name is `button.sname` with `aria-pressed`, eye and solo are icon buttons with `aria-pressed`; clicking anywhere on the row still selects.
+- **Step 7, selection outline.** Built as an ImageData of width × (height × scale) scaled horizontally, which reproduces legacy's max(1, scale/4) edge strip; the overlap hatch is 1:1.
+- **Step 7, flag frame.** The flag draft always uses the absolute frame of the output canvas (legacy sent the position within the tag when the clip's canvas was not the opened one).
+- **Step 7, reloads.** Periodic and `resync` reloads of the layers view keep the chosen clip / view / frame; the rig viewer applies a target's `mode` / `clip` only for a new target.
+- **Step 7, images.** A failed pose / skin / parts / clip image shows its error in the stage without rethrowing; only a failed rig load rethrows. Clip stepping (buttons, `,` `.`, scrubber) pauses playback; Space resumes.
+- **Step 7, small changes.** The layers clamp note goes on the source line (no `.vstatus` there); the weights URL comes from `rigWeights()` (same parameters, different order); canvas-mode layers keep one bitmap per layer instead of an atlas.
