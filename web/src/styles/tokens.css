@@ -1,0 +1,67 @@
+/* Agent Art web UI design tokens: dark, dense, tool-like (Aseprite / Blender outliner / CI log).
+   Existing names are kept (viewer code and inline styles use them). Values marked "was" change in step 20. */
+:root {
+  color-scheme: dark;
+
+  /* surfaces */
+  --bg: #0f1114;            /* app background, centre column */
+  --bg2: #15171c;           /* toolbars, status bars, inputs, cards on panels */
+  --panel: #1a1d23;         /* side panes, top bar, dialogs */
+  --panel2: #20242b;        /* controls, hover rows */
+  --panel3: #262b33;        /* control hover */
+  --stage: #101216;         /* behind pixel art */
+  --canvas-bg: #15171c;     /* 2D canvas fills: waveform, lanes, 3D clear colour */
+  --checker-a: #3a3d44; --checker-b: #2c2f35;
+  --line: #2a2f38;          /* separators */
+  --line2: #353b46;         /* control borders */
+  --line3: #4a5260;         /* control border hover */
+  --scrim: rgba(0, 0, 0, .55);
+
+  /* text */
+  --text: #e6e9ef;
+  --text2: #cbd2dc;         /* secondary body text */
+  --muted: #8b93a1;         /* becomes #9aa3b2 in step 20 */
+  --dim: #5b6372;           /* becomes #7f8898 in step 20 (too low contrast for text) */
+
+  /* brand and state */
+  --accent: #f5a524; --accent-fg: #ffd28a; --accent-bg: #2b2410; --accent-bg2: #3b2a08; --accent-ink: #111111;
+  --blue: #38bdf8;   --blue-fg: #9edcff;   --blue-bg: #0b2534;   --blue-line: #1c6d93;
+  --green: #22c55e;  --green-fg: #86efac;  --green-bg: #0f2a19;  --green-line: #1f7a43;
+  --red: #e5484d;    --red-fg: #fca5a5;    --red-bg: #2a1416;    --red-line: #7a2a2f;
+  --warn-fg: #fcd34d; --warn-line: #8a5a10;
+  --violet: #a78bfa;
+  --focus: #7cc7ff;
+
+  /* asset kinds */
+  --k-canvas: #38bdf8; --k-layer: #64748b; --k-anim: #a78bfa; --k-frame: #64748b; --k-rig: #f472b6; --k-rigpart: #f9a8d4;
+  --k-model: #f5a524; --k-modelpart: #fcd34d; --k-audio: #2dd4bf; --k-export: #94a3b8; --k-project: #e5484d;
+  --k-group: #c084fc; --k-file: #94a3b8; --k-palette: #22c55e; --k-graph: #c084fc;
+
+  /* space: 4 px grid */
+  --s-1: 2px; --s-2: 4px; --s-3: 6px; --s-4: 8px; --s-5: 10px; --s-6: 12px; --s-7: 16px; --s-8: 24px; --s-9: 32px;
+
+  /* radius */
+  --r-1: 3px; --r-2: 4px; --r-3: 6px; --r-4: 8px; --r-5: 10px; --r-pill: 999px;
+
+  /* type */
+  --font-ui: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
+  --fs-1: 10px; --fs-2: 11px; --fs-3: 12px; --fs-4: 13px; --fs-5: 15px; --fs-6: 18px;
+  --lh: 1.4; --lh-tight: 1.15;
+
+  /* control metrics */
+  --h-control: 28px; --h-control-sm: 24px; --h-row: 28px; --h-topbar: 42px; --h-panehead: 34px; --h-toolbar: 38px; --h-status: 22px;
+  --hit-min: 24px;          /* minimum pointer target; 36px in the narrow layout */
+
+  /* elevation and motion */
+  --shadow-1: 0 2px 8px rgba(0, 0, 0, .35);
+  --shadow-2: 0 20px 60px rgba(0, 0, 0, .5);
+  --shadow-drawer: 0 0 30px rgba(0, 0, 0, .6);
+  --t-fast: 80ms; --t-med: 160ms; --t-slow: 500ms; --ease: cubic-bezier(.2, .8, .2, 1);
+
+  /* layout defaults (overridden inline by the splitters) */
+  --browser-w: 280px; --side-w: 360px; --insp-h: 46vh; --bottom-h: 260px;
+
+  /* layers */
+  --z-splitter: 2; --z-sticky: 1; --z-drawer: 20; --z-scrim: 19; --z-dialog: 50; --z-toast: 60; --z-tooltip: 70;
+}

@@ -70,6 +70,14 @@ export class AppPage {
   toasts(): Locator { return this.page.locator('#toasts .toast'); }
   async openCleanup() { await this.topButton('cleanup').click(); await expect(this.dialog()).toBeVisible(); }
   async press(key: string) { await this.page.keyboard.press(key); }
+  /** Parts that differ between runs (clock times, durations, the temp workspace path): masked in shots. */
+  volatile(): Locator[] {
+    return [this.workspacePath(), this.page.locator('.tl-time'), this.page.locator('.tl-ms')];
+  }
+  /** Wait until every visible image has decoded. */
+  async imagesDecoded() {
+    await this.page.waitForFunction(() => [...document.images].filter((i) => i.offsetParent !== null).every((i) => i.complete && (i.naturalWidth > 0 || i.classList.contains('gone'))));
+  }
   /** Move focus off any input so global shortcuts apply. */
   async blur() { await this.page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.()); }
 }

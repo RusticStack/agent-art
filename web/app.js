@@ -1,6 +1,10 @@
 // Agent Art web UI: watch everything the agent does (activity timeline, asset browser, viewers for
 // canvases, animations, rigs, 3D models, audio, exports and the asset graph), compare states side by
 // side, leave review notes, and paint along. All changes go through the same API as the agent.
+import './src/styles/tokens.css';
+import './src/styles/base.css';
+import './src/styles/viewers.css';
+import './src/styles/legacy-shell.css';
 import { $, el, api, getJSON, postJSON, store, debounce, toast, onToast, splitId, enc, KIND_ICON } from './ui/util.js';
 import { Browser } from './ui/browser.js';
 import { Timeline } from './ui/timeline.js';
