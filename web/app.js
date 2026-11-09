@@ -15,16 +15,18 @@ import { AnimViewer as AnimViewerTS } from './src/viewers/anim/AnimViewer.ts';
 import { SheetViewer as SheetViewerTS } from './src/viewers/sheet/SheetViewer.ts';
 import { RigViewer } from './ui/viewers/rig.js';
 import { ModelViewer } from './ui/viewers/model.js';
-import { AudioViewer } from './ui/viewers/audio.js';
+import { AudioViewer as AudioViewerTS } from './src/viewers/audio/AudioViewer.ts';
 import { ProjectViewer } from './ui/viewers/project.js';
 import { ExportViewer } from './ui/viewers/export.js';
-import { GraphViewer } from './ui/viewers/graph.js';
+import { GraphViewer as GraphViewerTS } from './src/viewers/graph/GraphViewer.ts';
 import { LayersViewer } from './ui/viewers/layers.js';
 import { cleanupPanel } from './ui/cleanup.js';
 
 const CanvasViewer = adapt(CanvasViewerTS);
 const AnimViewer = adapt(AnimViewerTS);
 const SheetViewer = adapt(SheetViewerTS);
+const AudioViewer = adapt(AudioViewerTS);
+const GraphViewer = adapt(GraphViewerTS);
 
 const ACTIVE_REVIEW = new Set(['open', 'in_progress', 'reopened']);
 

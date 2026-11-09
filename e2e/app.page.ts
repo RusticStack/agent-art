@@ -57,6 +57,10 @@ export class AppPage {
   animCells(s: 'A' | 'B' = 'A'): Locator { return this.slot(s).locator('canvas.anim-cell'); }
   animPlayButton(): Locator { return this.slot('A').locator('.anim-viewer .vtoolbar button[title^="Play / pause"]'); }
   sheetCanvas(s: 'A' | 'B' = 'A'): Locator { return this.slot(s).locator('canvas.sheet-canvas'); }
+  audioPlay(s: 'A' | 'B' = 'A'): Locator { return this.slot(s).locator('.audio-viewer .vtoolbar .btn.primary'); }
+  audioWave(s: 'A' | 'B' = 'A'): Locator { return this.slot(s).locator('canvas.wave'); }
+  audioReport(s: 'A' | 'B' = 'A'): Locator { return this.slot(s).locator('.audio-report'); }
+  graph(): Locator { return this.slot('A').locator('.graph-viewer'); }
   frameLabel(): Locator { return this.slot('A').locator('.frames-controls .mono'); }
   swapButton(): Locator { return this.page.locator('#swapB'); }
   closeCompareButton(): Locator { return this.page.locator('#closeB'); }
