@@ -11,13 +11,16 @@
     "src/",
     "public/",
     "README.md",
+    "llms.txt",
+    "llms-full.txt",
     "LICENSE"
   ],
   "scripts": {
     "start": "node bin/agent-art.js serve --open",
     "serve": "node bin/agent-art.js serve",
     "mcp": "node bin/agent-art.js mcp",
-    "test": "node --test test/"
+    "test": "node --test test/",
+    "docs:llms": "node scripts/build-llms.js"
   },
   "keywords": [
     "mcp",
