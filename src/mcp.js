@@ -15,6 +15,7 @@ import { COMMAND_NAMES } from './doc.js';
 import { drawDescription, helpText, TOPICS } from './docs.js';
 import { SKILLS, skillText } from './skills.js';
 import { summarizeArgs, summarizeResult, READ_ONLY } from './activity.js';
+import { UsageLog, usageFile } from './usage.js';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const log = (...a) => process.stderr.write(`[agent-art] ${a.join(' ')}\n`);
@@ -704,10 +705,15 @@ export class Backend {
   }
 }
 
-export async function runMcp({ port, home, open }) {
+export async function runMcp({ port, home, open, debug = null }) {
   const backend = new Backend({ port, home, open });
   await backend.init();
   let callSeq = 0;
+  // debug: one JSONL usage record per session / list / tool call (agent-art usage reads them)
+  const usage = debug ? new UsageLog({ file: usageFile(home), level: debug, version: VERSION }) : null;
+  if (usage) log(`debug: logging tool usage (${debug}) to ${usage.file}`);
+  const toolList = () => TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema }));
+  const promptList = () => Object.entries(SKILLS).map(([name, s]) => ({ name, title: s.title, description: `${s.title}. ${s.when}` }));
   const send = (msg) => process.stdout.write(JSON.stringify(msg) + '\n');
 
   async function handle(msg) {
@@ -723,19 +729,23 @@ export async function runMcp({ port, home, open }) {
             serverInfo: { name: 'agent-art', version: VERSION },
             instructions: INSTRUCTIONS,
           };
+          usage?.start({ client: params?.clientInfo, protocol: params?.protocolVersion, instructions: INSTRUCTIONS, tools: toolList(), prompts: promptList() });
           break;
         case 'ping':
           result = {};
           break;
         case 'tools/list':
-          result = { tools: TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) };
+          result = { tools: toolList() };
+          usage?.list(method, result, { count: result.tools.length });
           break;
         case 'prompts/list':
-          result = { prompts: Object.entries(SKILLS).map(([name, s]) => ({ name, title: s.title, description: `${s.title}. ${s.when}` })) };
+          result = { prompts: promptList() };
+          usage?.list(method, result, { count: result.prompts.length });
           break;
         case 'prompts/get': {
           const name = params?.name;
           result = { description: SKILLS[name]?.title, messages: [{ role: 'user', content: { type: 'text', text: skillText(name) } }] };
+          usage?.list(method, result, { name });
           break;
         }
         case 'tools/call': {
@@ -750,7 +760,14 @@ export async function runMcp({ port, home, open }) {
           const t0 = performance.now();
           await backend.trace({ phase: 'start', call: traceId, tool: tool.name, args: summarizeArgs(args) });
           let mutated = false;
-          const traced = (op, a) => { if (!READ_ONLY.has(op)) mutated = true; return backend.call(op, a, true, { call: traceId, tool: tool.name }); };
+          const ops = usage ? [] : null; // engine ops this call ran, with their time (debug)
+          const traced = async (op, a) => {
+            if (!READ_ONLY.has(op)) mutated = true;
+            if (!ops) return backend.call(op, a, true, { call: traceId, tool: tool.name });
+            const o0 = performance.now();
+            try { return await backend.call(op, a, true, { call: traceId, tool: tool.name }); } finally { ops.push({ op, ms: Math.round(performance.now() - o0) }); }
+          };
+          let hinted = false;
           try {
             const r = await tool.run(traced, args, backend);
             result = { content: toContent(r) };
@@ -758,12 +775,14 @@ export async function runMcp({ port, home, open }) {
             const ids = touchedAssets(tool.name, args);
             if (ids.length) {
               const h = await backend.call('review_hint', { ids, mutated }).catch(() => null);
-              if (h?.text) result.content.push({ type: 'text', text: h.text });
+              if (h?.text) { result.content.push({ type: 'text', text: h.text }); hinted = true; }
             }
             await backend.trace({ phase: 'end', call: traceId, ok: true, ms: performance.now() - t0, summary: summarizeResult(r) });
+            usage?.call({ tool: tool.name, args, content: result.content, ms: performance.now() - t0, ok: true, ops, hint: hinted });
           } catch (e) {
             result = { content: [{ type: 'text', text: `Error: ${e.message}` }], isError: true };
             await backend.trace({ phase: 'end', call: traceId, ok: false, error: e.message, ms: performance.now() - t0 });
+            usage?.call({ tool: tool.name, args, content: result.content, ms: performance.now() - t0, ok: false, error: e.message, ops });
           }
           break;
         }

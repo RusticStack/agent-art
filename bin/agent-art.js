@@ -10,6 +10,7 @@ import { SKILLS, skillFile, skillText } from '../src/skills.js';
 import { startServer, APP_ID, packResult, VERSION } from '../src/server.js';
 import { runMcp, openBrowser, runTool, TOOLS, INSTRUCTIONS } from '../src/mcp.js';
 import { resolveHome, batchOutPath } from '../src/cli.js';
+import { debugLevel, readUsage, summarizeUsage, formatUsage, transcriptUsage, formatTranscript } from '../src/usage.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
@@ -29,13 +30,27 @@ const legacyNote = () => {
   if (fs.existsSync(legacy) && path.resolve(legacy) !== home) console.error(`note: ${legacy} is no longer used implicitly (since 0.3.0); the workspace is ${home}. Pass --home "${legacy}" to use it.`);
 };
 const open = flag('open');
+// --debug [full|on|off]: only those words are its value, so `--debug mcp` still runs mcp
+const debugFlag = (() => {
+  const i = argv.indexOf('--debug');
+  if (i < 0) return undefined;
+  const v = argv[i + 1];
+  const takes = v && /^(full|on|off|1|0|true|false)$/i.test(v);
+  argv.splice(i, takes ? 2 : 1);
+  return takes ? v : true;
+})();
 const [cmd = 'help', ...rest] = argv;
 
 const USAGE = `agent-art — pixel art editor for AI agents, with a live web UI
 
   agent-art serve [--port 7420] [--home DIR] [--open]   run the web UI + API
-  agent-art mcp   [--port 7420] [--home DIR] [--open]   MCP stdio server; always runs the web UI (reuses a running
-        'serve', else hosts it; next free port if taken). --open / AGENT_ART_OPEN=1 opens the browser
+  agent-art mcp   [--port 7420] [--home DIR] [--open] [--debug [full]]   MCP stdio server; always runs the web UI
+        (reuses a running 'serve', else hosts it; next free port if taken). --open / AGENT_ART_OPEN=1 opens the browser.
+        --debug / AGENT_ART_DEBUG=1 logs every tool call (estimated tokens, time, errors, engine ops) to
+        <home>/debug/usage-<date>.jsonl; "full" also keeps the arguments; AGENT_ART_DEBUG_FILE picks the file
+  agent-art usage [FILE|DIR ...] [--since 2026-11-01] [--session ID] [--tool art_x] [--json] [--transcript F.jsonl]
+        report from the debug logs (default <home>/debug): cost per tool and action, biggest replies, errors,
+        repeats, help reads, suggestions. --transcript adds the real token usage from a Claude Code session log
   agent-art op <op> [json | @file.json | -] [--out f.png]  run one operation ("-" reads the JSON from stdin)
   agent-art batch <file.jsonl | file.json | -> [--out-dir DIR] [--keep-going]
         run many ops in order; each item is {"op": "...", "args": {...}, "out": "optional.png"}
@@ -51,7 +66,7 @@ Tip (Windows / any shell): avoid quoting problems by piping JSON on stdin:
   EOF
 
 ops: ${OP_NAMES.join(', ')}
-env: AGENT_ART_PORT, AGENT_ART_HOME, AGENT_ART_OPEN (workspace: ${home})`;
+env: AGENT_ART_PORT, AGENT_ART_HOME, AGENT_ART_OPEN, AGENT_ART_DEBUG, AGENT_ART_DEBUG_FILE (workspace: ${home})`;
 
 function readStdin() {
   return fs.readFileSync(0, 'utf8');
@@ -107,7 +122,8 @@ async function main() {
     process.on('SIGTERM', stop);
   } else if (cmd === 'mcp') {
     legacyNote();
-    await runMcp({ port, home, open: open || /^(1|true|yes)$/i.test(process.env.AGENT_ART_OPEN || '') });
+    const debug = debugLevel(debugFlag); // --debug [full] or AGENT_ART_DEBUG
+    await runMcp({ port, home, open: open || /^(1|true|yes)$/i.test(process.env.AGENT_ART_OPEN || ''), debug });
   } else if (cmd === 'op') {
     const [op, json] = rest;
     if (!op) throw new Error('usage: agent-art op <op> <json>');
@@ -176,6 +192,19 @@ async function main() {
     if (SKILLS[what]) console.log(skillText(what));
     else if (TOPICS[what] || what === 'index' || what === 'ops') console.log(helpText({ topic: what }));
     else console.log(helpText({ op: what }));
+  } else if (cmd === 'usage') {
+    const opt = (n) => { const v = flag(n); return v === true ? undefined : v; };
+    const since = opt('since'), session = opt('session'), tool = opt('tool'), transcript = opt('transcript');
+    const json = flag('json');
+    const sources = rest.length ? rest : [process.env.AGENT_ART_DEBUG_FILE || path.join(home, 'debug')];
+    const rep = summarizeUsage(readUsage(sources), { since, session, tool });
+    const tr = transcript ? transcriptUsage(fs.readFileSync(transcript, 'utf8')) : null;
+    if (json) console.log(JSON.stringify(tr ? { ...rep, transcript: tr } : rep, null, 2));
+    else {
+      if (!rep.calls && !rep.sessions) console.log(`no usage records in ${sources.join(', ')} (run the MCP server with --debug or AGENT_ART_DEBUG=1)`);
+      else console.log(formatUsage(rep));
+      if (tr) console.log('\n' + formatTranscript(tr));
+    }
   } else if (cmd === 'skills') {
     const out = path.resolve(String(flag('out') || 'agent-art-skills'));
     for (const name of Object.keys(SKILLS)) {
