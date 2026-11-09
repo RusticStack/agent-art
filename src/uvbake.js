@@ -4,7 +4,7 @@
 // masonry courses, and a compose pass that ends every texel in a palette lookup (pixel art: no
 // in-between colours), plus the UV guide overlay and the reply contact sheet.
 import { BVH, bvhOf, aoAt, hemisphere, hashf } from './bake.js';
-import { hash3, BAYER4 } from './util.js';
+import { hash3 } from './util.js';
 import { medianCut, parseColor, nearestColor } from './color.js';
 import { dilate } from './uvunwrap.js';
 import { getFont } from './fonts.js';
@@ -307,8 +307,9 @@ export function cohesionPalette(base, coh, { project, canvas, extra = [] } = {})
 }
 /**
  * Cohesion layer: AO / contact / grime darken toward `shadow`, worn edges lighten toward
- * `highlight`, crease and joint texels become crisp lines; ordered dither anchored per island;
- * every texel ends in a palette colour. Only texels that differ from the base are written.
+ * `highlight`, crease and joint texels become crisp lines; the shading is cut into a few clean value
+ * bands (checker only at band borders, no orphan texels); every texel ends in a palette colour.
+ * Only texels that differ from the base are written.
  */
 export function composeCohesion(L, M, base, masks, courses, coh, palette, { overlays = [] } = {}) {
   const { W, H } = M, n = W * H, out = new Uint8ClampedArray(n * 4), cache = new Map();
@@ -316,9 +317,10 @@ export function composeCohesion(L, M, base, masks, courses, coh, palette, { over
   const jc = courses && coh.courses?.color ? rgb(coh.courses.color) : null, jl = courses && coh.courses?.light ? rgb(coh.courses.light) : null;
   const pal = [...palette, ...(jc ? [jc] : []), ...(jl ? [jl] : [])];
   const lv = coh.ao ? coh.ao.levels : 0;
+  // 1. per texel: colour after overlays, darkening, light (edge wear), structural lines
+  const dark = new Float32Array(n), cols = new Array(n), kind = new Int8Array(n); // kind: 0 none, 1 crease / joint line, 2 joint highlight
   for (let k = 0; k < n; k++) {
     if (M.facet[k] < 0 || !base[k * 4 + 3]) continue;
-    const i = k % W, j = (k - i) / W, c = L.charts[M.island[k]];
     let cc = [base[k * 4], base[k * 4 + 1], base[k * 4 + 2]];
     // overlays (moss in the contact, dirt at the bottom, ...): hard per-texel replace before the lookup
     for (const ov of overlays) {
@@ -329,25 +331,76 @@ export function composeCohesion(L, M, base, masks, courses, coh, palette, { over
       const [S, Q] = M.st(k), T = ov.tex, q = (pmod(Math.floor(Q), T.height) * T.width + pmod(Math.floor(S), T.width)) * 4;
       if (T.data[q + 3] >= 128) cc = [T.data[q], T.data[q + 1], T.data[q + 2]];
     }
+    cols[k] = cc;
     const a = masks.ao[k], aoq = lv > 1 ? Math.round(a * (lv - 1)) / (lv - 1) : a;
-    const dark = clamp01((coh.ao ? coh.ao.strength * (1 - aoq) : 0) + (coh.contact ? coh.contact.strength * 0.5 * masks.cavity[k] : 0) + (coh.grime ? coh.grime.strength * masks.grime[k] : 0));
-    const light = coh.edges ? coh.edges.strength * masks.edge[k] : 0;
+    dark[k] = clamp01((coh.ao ? coh.ao.strength * (1 - aoq) : 0) + (coh.contact ? coh.contact.strength * 0.5 * masks.cavity[k] : 0) + (coh.grime ? coh.grime.strength * masks.grime[k] : 0));
     const jv = courses ? courses.joint[k] : 0;
-    let target, line = false;
+    kind[k] = masks.crease[k] || jv === 1 ? 1 : jv === 2 ? 2 : 0;
+  }
+  // 2. clean pixel-art shading: the darkening is smoothed inside its island (no per-texel AO speckle),
+  // cut into a few value bands, texels that no neighbour shares (orphans) take the band around them,
+  // and a 1 px checker marks band borders. Lines (creases, joints) are never touched.
+  const same = (k, q) => q >= 0 && q < n && M.island[q] === M.island[k] && cols[q] !== undefined;
+  const nb = (k, di, dj) => { const i = (k % W) + di, j = (k - (k % W)) / W + dj; return i < 0 || j < 0 || i >= W || j >= H ? -1 : j * W + i; };
+  const N = BANDS, band = new Int8Array(n).fill(-1); // -1 not shaded here, 0..N darkness band, N + 1 edge light
+  for (let k = 0; k < n; k++) {
+    if (cols[k] === undefined || kind[k]) continue;
+    let s = 0, w = 0;
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { const q = nb(k, di, dj); if (same(k, q) && !kind[q]) { s += dark[q]; w++; } }
+    const d = w ? s / w : dark[k];
+    const light = coh.edges ? coh.edges.strength * masks.edge[k] : 0;
+    if (light > 0 && d < 0.35) { band[k] = N + 1; continue; }
+    band[k] = Math.min(N, Math.round(d * N));
+  }
+  for (let pass = 0; pass < 2; pass++) {
+    const prev = Int8Array.from(band);
+    for (let k = 0; k < n; k++) {
+      if (prev[k] < 0) continue;
+      const votes = new Map();
+      let kin = false;
+      for (let dj = -1; dj <= 1 && !kin; dj++) for (let di = -1; di <= 1; di++) {
+        if (!di && !dj) continue;
+        const q = nb(k, di, dj);
+        if (!same(k, q) || prev[q] < 0) continue;
+        if (prev[q] === prev[k]) { kin = true; break; }
+        if (!di || !dj) votes.set(prev[q], (votes.get(prev[q]) || 0) + 1); // 4-neighbours vote
+      }
+      if (kin || !votes.size) continue;
+      let best = -1, bc = 0;
+      for (const [b, c] of votes) if (c > bc || (c === bc && Math.abs(b - prev[k]) < Math.abs(best - prev[k]))) { best = b; bc = c; }
+      band[k] = best;
+    }
+  }
+  // a 1 px checker on the light side of each band border (the only dither)
+  if (coh.dither) {
+    const prev = Int8Array.from(band);
+    for (let k = 0; k < n; k++) {
+      const b = prev[k], i = k % W, j = (k - i) / W;
+      if (b < 0 || b >= N || (i + j) & 1) continue;
+      for (const [di, dj] of [[0, -1], [-1, 0], [1, 0], [0, 1]]) { const q = nb(k, di, dj); if (same(k, q) && prev[q] === b + 1) { band[k] = b + 1; break; } }
+    }
+  }
+  // 3. palette lookup per texel
+  for (let k = 0; k < n; k++) {
+    const cc = cols[k];
+    if (cc === undefined) continue;
     const touched = cc[0] !== base[k * 4] || cc[1] !== base[k * 4 + 1] || cc[2] !== base[k * 4 + 2];
-    if (!touched && !masks.crease[k] && !jv && dark < 0.02 && !light) continue; // untouched texel: the base stays as painted
-    if (masks.crease[k] || jv === 1) { target = jv === 1 && jc ? jc : mix(cc, sh, 0.6); line = true; }
-    else if (jv === 2) { target = jl || mix(cc, hi, 0.3); line = true; }
-    else if (light > 0 && dark < 0.35) target = mix(cc, hi, 0.4 * light);
-    else target = mix(cc, sh, 0.7 * dark);
-    const off = coh.dither && !line ? ((BAYER4[(j - c.rect[1]) & 3][(i - c.rect[0]) & 3] + 0.5) / 16 - 0.5) * 16 : 0;
-    const best = nearestColor(pal, target[0] + off, target[1] + off, target[2] + off, cache);
+    let target;
+    if (kind[k] === 1) target = courses && courses.joint[k] === 1 && jc ? jc : mix(cc, sh, 0.6);
+    else if (kind[k] === 2) target = jl || mix(cc, hi, 0.3);
+    else if (band[k] === N + 1) target = mix(cc, hi, 0.4 * (coh.edges ? coh.edges.strength * masks.edge[k] : 0));
+    else if (band[k] > 0) target = mix(cc, sh, 0.7 * band[k] / N);
+    else if (touched) target = cc;
+    else continue; // untouched texel: the base stays as painted
+    const best = nearestColor(pal, target[0], target[1], target[2], cache);
     if (best[0] === base[k * 4] && best[1] === base[k * 4 + 1] && best[2] === base[k * 4 + 2]) continue;
     out.set([best[0], best[1], best[2], 255], k * 4);
   }
   dilateWithin(out, M, L.pad);
   return out;
 }
+/** Darkness bands of the cohesion shading. */
+const BANDS = 4;
 /** Dilate a sparse layer into the gutters only (texels of an island stay as they are). */
 function dilateWithin(buf, M, pad) {
   const { W, H } = M;
