@@ -701,9 +701,15 @@ export function pairedOut(rig, p, view, n) {
   const dx = f * Math.cos(yaw) - l * Math.sin(yaw), depth = f * Math.sin(yaw) + l * Math.cos(yaw);
   const sign = p.role === 'victim' ? -1 : 1; // the victim's partner (attacker) sits at -offset
   const partnerView = turnedView(view, p.role === 'victim' ? -p.facing : p.facing);
+  // depth staging: the side-family views draw a partner turned to face you from a mirror view (its
+  // near hand stays the near hand), so in front / back the partner is drawn mirrored as well: its
+  // weapon hand stays on the same side as in the side views and the contacts meet in depth instead of
+  // across the body
+  const src = rig.mirror?.[view] || view, sideOf = turnedView('side', p.role === 'victim' ? -p.facing : p.facing);
+  const flip = /^(front|back)$/.test(src) && !!rig.mirror?.[sideOf];
   return {
     role: p.role, partner: p.partner, offset: p.offset, facing: p.facing, sync_frame: frameOfT(p.sync, n), ...(p.release !== undefined ? { release_frame: frameOfT(p.release, n) } : {}),
-    partner_view: partnerView, partner_dx: r1(sign * dx * u), partner_depth: r1(sign * depth * u),
+    partner_view: partnerView, ...(flip ? { partner_flip: true } : {}), partner_dx: r1(sign * dx * u), partner_depth: r1(sign * depth * u),
     order: sign * depth > 0 ? 'partner_front' : 'partner_behind',
     contacts: (p.contacts || []).map((c) => ({ frames: [frameOfT(c.t[0], n), frameOfT(c.t[1], n)], attacker: c.attacker, victim: c.victim })),
   };

@@ -1,8 +1,10 @@
 // Renders the 0.9 limits-pass demos in docs/limits/ with Agent Art's own ops: fp muzzle aim variants
 // over an fp gun, diagonal muzzle flashes, a damage glb with baked AO kept (AO / mask UV sets), the
 // damage blend at every LOD, a rigged damaged door opening (the exported glb's clip sampled), open-mesh
-// fracture, the gun disarm strip with its gun track, front / back paired checks and a two-proportion
-// takedown. glb images are drawn from the exported files (a small glTF reader + the software
+// fracture, the gun disarm strip with its gun track, front / back paired checks (depth staging), a
+// two-proportion takedown, skinned damage LODs + fracture chunks riding a bone, and a rigged plain export
+// with LOD children per rig node + AO on the rest pose. sprite_overlay_before_after.png comes from
+// scripts/sprite-overlay-demo.js. glb images are drawn from the exported files (a small glTF reader + the software
 // rasteriser), so they show what an engine loads.
 // Usage: node scripts/limits-demos.js [workDir]
 import fs from 'node:fs';
@@ -92,12 +94,27 @@ function sampleClip(G, name, t) {
 function sceneGroups(G, rootName, opts = {}) {
   const groups = [], anim = opts.clip ? sampleClip(G, opts.clip, opts.t ?? 0) : new Map();
   let key = 0;
+  // skinned meshes: joint matrices = posed world of the joint x its inverse bind matrix
+  const parent = new Map();
+  G.json.nodes.forEach((n, i) => (n.children || []).forEach((c) => parent.set(c, i)));
+  const posedW = new Map();
+  const worldAt = (i) => {
+    if (posedW.has(i)) return posedW.get(i);
+    const n = G.json.nodes[i], L = nodeMat(n, anim.get(i) && { t: anim.get(i).t ?? n.translation, q: anim.get(i).q ?? n.rotation });
+    const W = parent.has(i) ? mul(worldAt(parent.get(i)), L) : L;
+    posedW.set(i, W);
+    return W;
+  };
+  const jointMats = (si) => {
+    const sk = G.json.skins[si], ibm = G.acc(sk.inverseBindMatrices);
+    return sk.joints.map((j, k) => { const m = ibm.slice(k * 16, k * 16 + 16); return mul(worldAt(j), [m[0], m[4], m[8], m[12], m[1], m[5], m[9], m[13], m[2], m[6], m[10], m[14]]); });
+  };
   const texOf = (img) => ({ key: `t${key++}`, name: 'tex', width: img.width, height: img.height, data: img.data });
   const walk = (i, M) => {
     const n = G.json.nodes[i];
     if (opts.skip && opts.skip(n)) return;
     const W = mul(M, nodeMat(n, anim.get(i) && { t: anim.get(i).t ?? n.translation, q: anim.get(i).q ?? n.rotation }));
-    if (n.mesh !== undefined) for (const p of G.json.meshes[n.mesh].primitives) {
+    if (n.mesh !== undefined && !(opts.hide && opts.hide(n))) for (const p of G.json.meshes[n.mesh].primitives) {
       const mat = G.json.materials[p.material] || {}, bt = mat.pbrMetallicRoughness?.baseColorTexture;
       const pos = G.acc(p.attributes.POSITION), nrm = G.acc(p.attributes.NORMAL), idx = G.acc(p.indices);
       if (p.targets && opts.morph) { const d = G.acc(p.targets[0].POSITION); for (let k = 0; k < pos.length; k++) pos[k] += d[k] * opts.morph; }
@@ -110,17 +127,21 @@ function sceneGroups(G, rootName, opts = {}) {
       const uvA = p.attributes[`TEXCOORD_${uvSet}`];
       const uv = uvA !== undefined ? G.acc(uvA) : new Array((pos.length / 3) * 2).fill(0.5);
       const wp = [], wn = [];
+      const J = n.skin !== undefined ? jointMats(n.skin) : null, JI = J ? G.acc(p.attributes.JOINTS_0) : null, JW = J ? G.acc(p.attributes.WEIGHTS_0) : null;
       for (let v = 0; v < pos.length / 3; v++) {
         const x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
-        wp.push(W[0] * x + W[1] * y + W[2] * z + W[3], W[4] * x + W[5] * y + W[6] * z + W[7], W[8] * x + W[9] * y + W[10] * z + W[11]);
+        let M = W;
+        if (J) { M = new Array(12).fill(0); for (let k = 0; k < 4; k++) { const w = JW[v * 4 + k]; if (w > 0) for (let c = 0; c < 12; c++) M[c] += w * J[JI[v * 4 + k]][c]; } }
+        wp.push(M[0] * x + M[1] * y + M[2] * z + M[3], M[4] * x + M[5] * y + M[6] * z + M[7], M[8] * x + M[9] * y + M[10] * z + M[11]);
         const a = nrm[v * 3], b = nrm[v * 3 + 1], c = nrm[v * 3 + 2];
-        wn.push(W[0] * a + W[1] * b + W[2] * c, W[4] * a + W[5] * b + W[6] * c, W[8] * a + W[9] * b + W[10] * c);
+        wn.push(M[0] * a + M[1] * b + M[2] * c, M[4] * a + M[5] * b + M[6] * c, M[8] * a + M[9] * b + M[10] * c);
       }
       groups.push({ tex: texOf(img), pos: wp, nrm: wn, uv, idx, ...(overlay ? { overlay: true, uv0: uv, alpha: new Array(pos.length / 3).fill(1) } : {}) });
     }
     for (const c of n.children || []) walk(c, W);
   };
-  walk(G.byName.get(rootName), [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]);
+  const start = G.byName.get(rootName);
+  walk(start, parent.has(start) ? worldAt(parent.get(start)) : [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]);
   return groups;
 }
 /** The damage mask at a blend (threshold encoding): grey surface, scorch dark brown, dents blue-grey, holes black, wear light. */
@@ -143,11 +164,12 @@ const shot = (groups, S = 160, view = 'game', fit = null) => renderCamera(groups
 // ---------- 1. fp muzzle aim variants over an fp gun ----------
 {
   e.run('model_create', { name: 'ar', template: 'fp_rifle' });
-  // the gun swung across the screen (turning / recoil extremes): the muzzle's screen aim changes
-  e.run('model_render', { name: 'ar', canvas: 'ar_sway', camera: 'fp', size: [384, 216], sweep: { yaw: [-50, 50, 10], pitch: [-30, 30, 30] } });
+  // the gun rolled through a cant (lean / roll extremes): the muzzle travels around the screen and
+  // its aim (muzzle -> frame centre) crosses every default variant
+  e.run('model_render', { name: 'ar', canvas: 'ar_sway', camera: 'fp', size: [384, 216], sweep: { roll: [-90, 90, 10] } });
   const d = e.get('ar_sway'), fh = d.frameHeight || d.height, full = d.composite(), anchors = Object.values(d.meta.anchors)[0];
   const fx = path.join(out, 'fx');
-  const mk = e.run('fx_make', { type: 'muzzle', variant: 'rifle', view: 'fp', seed: 3, path: fx, aims: 7 });
+  const mk = e.run('fx_make', { type: 'muzzle', variant: 'rifle', view: 'fp', seed: 3, path: fx });
   const cell = mk.meta.cell, pivot = mk.meta.pivot, cols = mk.meta.grid ? mk.meta.grid[0] : Math.floor(mk.meta.sheet[0] / cell[0]);
   const variants = mk.meta.fp.aims.map((v) => ({ aim: v.aim_deg, img: crop(decodePNG(fs.readFileSync(path.join(fx, v.file))), (1 % cols) * cell[0], Math.floor(1 / cols) * cell[1], cell[0], cell[1]) }));
   const near = (deg) => variants.reduce((b, v) => { const dd = Math.abs(((deg - v.aim + 540) % 360) - 180); return dd < b.d ? { d: dd, v } : b; }, { d: Infinity }).v;
@@ -310,12 +332,11 @@ const frameOf = (canvas, f) => { const d = e.get(canvas), fh = d.frameHeight || 
   e.run('anim_skin', { name: 'pk_v', skeleton: 'pk' }); paint('pk_v', '#6a3c34');
   const chk = e.run('anim_melee_check', { skeleton: 'pk', clips: ['takedown_rear_attacker', 'disarm_front_attacker'] }).clips;
   const items = [];
-  for (const pair of ['disarm_front', 'takedown_rear']) for (const view of ['front', 'back']) {
+  for (const [pair, frames] of [['disarm_front', [8, 12]], ['takedown_rear', [16]]]) for (const view of ['front', 'back']) {
     const c = chk[`${pair}_attacker`], r = e.run('anim_paired', { skin: 'pk_a', victim_skin: 'pk_v', pair, view, canvas: `pk_${pair}_${view}` });
-    const f = pair === 'disarm_front' ? 8 : 16;
-    items.push({ img: pane(frameOf(`pk_${pair}_${view}`, f)), label: `${pair} ${view} f${f}: 3D ${c.contact_by_view[view]} px, staged ${c.lateral_px[view]} px` });
+    for (const f of frames) items.push({ img: pane(frameOf(`pk_${pair}_${view}`, f)), label: `${pair} ${view} f${f}: 3D ${c.contact_by_view[view]} px, sideways ${c.lateral_px[view]} px${pair === 'disarm_front' ? ', partner mirrored' : ''}` });
   }
-  save('front_back_check.png', packImages(items, { labels: true, checker: false, columns: 4 }));
+  save('front_back_check.png', packImages(items, { labels: true, checker: false, columns: 6 }));
 
   e.run('anim_skin', { name: 'pk_h', skeleton: 'pk', proportions: 'heavy' }); paint('pk_h');
   e.run('anim_skin', { name: 'pk_l', skeleton: 'pk', proportions: 'light' }); paint('pk_l', '#6a3c34');
@@ -324,11 +345,62 @@ const frameOf = (canvas, f) => { const d = e.get(canvas), fh = d.frameHeight || 
   const two = [];
   for (const [a, v, lab] of [['pk_h', 'pk_l', 'heavy on light'], ['pk_l2', 'pk_h2', 'light on heavy']]) {
     const c = e.run('anim_melee_check', { skeleton: 'pk', skin: a, victim_skin: v, clips: ['takedown_rear_attacker'] }).clips.takedown_rear_attacker;
-    for (const view of ['side', 'front_side']) {
+    for (const view of ['side', 'front']) {
       const r = e.run('anim_paired', { skin: a, victim_skin: v, pair: 'takedown_rear', view, canvas: `two_${a}_${view}` });
-      for (const f of [10, 16]) two.push({ img: pane(frameOf(`two_${a}_${view}`, f)), label: `${lab} ${view} f${f}: refit ${r.refit_offset?.[0]}, contact ${c.contact_by_view[view]} px` });
+      const ok = c.contact_by_view[view] <= c.contact_tolerance_px;
+      for (const f of [10, 16]) two.push({ img: pane(frameOf(`two_${a}_${view}`, f)), label: `${lab} ${view} f${f}: refit ${r.refit_offset?.[0]}, contact ${c.contact_by_view[view]} / ${c.contact_tolerance_px} px ${ok ? 'ok' : 'MISS'}` });
     }
   }
   save('two_proportion_takedown.png', packImages(two, { labels: true, checker: false, columns: 4 }));
+}
+
+// ---------- 10. skinned damage: LOD levels skinned, fracture chunks riding a bone ----------
+{
+  e.run('model_create', { name: 'snake', parts: [
+    { type: 'tube', path: [[0, 40, 0], [0, 26, 0], [0, 12, 0], [0, 2, 0]], r: 4, sides: 10, texture: 'hull', segments: 6 },
+    { type: 'box', w: 8, h: 8, d: 6, at: [0, 10, 5], texture: 'plank' },
+  ] });
+  e.run('model_skeleton', { name: 'snake', skeleton: { template: 'chain', count: 3, from: [0, 40, 0], to: [0, 2, 0] } });
+  e.run('model_skin', { name: 'snake', skin: { method: 'heat' } });
+  e.run('model_animate', { name: 'snake', clip: 'bend', duration: 1, keys: [{ t: 0, bones: {} }, { t: 1, bones: { chain_1: { rot: [0, 0, 35] }, chain_2: { rot: [0, 0, 35] } } }] });
+  e.run('model_damage', { name: 'snake', states: ['wrecked'], seed: 3 });
+  e.run('model_fracture', { name: 'snake', groups: [{ part: 1, pieces: 5, seed: 2 }] });
+  const dir = path.join(out, 'skin');
+  e.run('model_export', { name: 'snake', path: path.join(dir, 'snake.glb'), damage: { lods: [1, 0.4, 0.15] } });
+  const G = readGLB(path.join(dir, 'snake.damage.glb')), man = JSON.parse(fs.readFileSync(path.join(dir, 'snake.damage.json'), 'utf8'));
+  const fit = fitOf(sceneGroups(G, 'snake_intact_LOD0')).concat([[-1.2, 0, 0], [1.2, 1.4, 0]]);
+  const chunkSkip = (n) => n.extras?.collision;
+  const items = [];
+  const wrecked = man.states.find((s) => s.name === 'wrecked');
+  for (const L of wrecked.lods) items.push({ img: pane(shot(sceneGroups(G, L.node, { clip: 'bend', t: 1 }), 150, 'front', fit)), label: `wrecked LOD${L.level}, ${L.triangles} tris, bent` });
+  // the fracture chunks under their bone: at rest and bent with the clip (they ride chain_2)
+  const bone = man.fracture.groups[0].chunks[0].bone;
+  for (const t of [0, 1]) {
+    const g = [...sceneGroups(G, 'snake_intact_LOD0', { clip: 'bend', t }), ...sceneGroups(G, bone, { clip: 'bend', t, skip: (n) => chunkSkip(n) || (n.extras?.rig_node === undefined && n.name.startsWith('chain_') && n.name !== bone) })];
+    items.push({ img: pane(shot(g, 150, 'front', fit)), label: `chunks on ${bone}, bend ${t}` });
+  }
+  save('skinned_damage_lods_fracture.png', packImages(items, { labels: true, checker: false, columns: 5 }));
+}
+
+// ---------- 11. plain export of a rigged model: LOD children per rig node + AO on the rest pose ----------
+{
+  const dir = path.join(out, 'riglod');
+  e.run('model_create', { name: 'turret', origin: 'bottom', parts: [
+    { type: 'cylinder', name: 'base', r: 16, h: 10, segments: 24, texture: 'plank' },
+    { type: 'cylinder', name: 'head', parent: 'base', r: 11, h: 12, segments: 20, at: [0, 11, 0], texture: 'hull' },
+    { type: 'tube', name: 'barrel', parent: 'head', from: [0, 14, 4], to: [0, 14, 30], r: 2.5, sides: 12, texture: 'hull' },
+  ], sockets: { muzzle: { part: 'barrel', at: [0, 14, 30] } } });
+  e.run('model_animate', { name: 'turret', clip: 'turn', keys: [{ t: 0, parts: { head: { rot: [0, 0, 0] } } }, { t: 1, parts: { head: { rot: [0, 90, 0] } } }] });
+  const r = e.run('model_export', { name: 'turret', path: path.join(dir, 'turret.glb'), lods: [1, 0.4, 0.15], bake_ao: { mode: 'texture' } });
+  const G = readGLB(r.file);
+  const prim = G.json.meshes[G.json.nodes[G.byName.get('base')].mesh].primitives[0];
+  const aoImg = G.images[G.json.textures[G.json.materials[prim.material].occlusionTexture.index].source];
+  const fit = fitOf(sceneGroups(G, 'turret')).concat([[-40, 0, 40], [30, 50, 40]].map((p) => p.map((v) => v / 32)));
+  const items = [];
+  for (const L of r.lods) {
+    const hide = (n) => (L.level === 0 ? /_LOD\d$/.test(n.name) : !n.name.endsWith(`_LOD${L.level}`));
+    items.push({ img: pane(shot(sceneGroups(G, 'turret', { clip: 'turn', t: 0.5, hide, uvSet: { set: 1, image: aoImg } }), 150, 'game', fit)), label: `LOD${L.level}, ${L.triangles} tris, AO, turned 45` });
+  }
+  save('rigged_lods_ao.png', packImages(items, { labels: true, checker: false, columns: 3 }));
 }
 log('done');

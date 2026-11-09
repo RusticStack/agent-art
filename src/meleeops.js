@@ -5,7 +5,7 @@
 // line per cell) and preview paired clips. anim_batch calls meleeBatchAnim for the manifest fields.
 import fs from 'node:fs';
 import path from 'node:path';
-import { normalizeRig, resolvePose, lerpPose, solvePose, partIn, poseOf, renderPose } from './rig.js';
+import { normalizeRig, resolvePose, lerpPose, solvePose, partIn, poseOf, renderPose, ikChain } from './rig.js';
 import { getRig, framePoses } from './rigops.js';
 import { normalizeClip, evalClip, applyProportions, retargetClip, LIB_NAME } from './animlib.js';
 import { meleeLibrary, meleeParts, meleeAnim, meleeEvents, hitSources, frameVolumes, segDist, inPoly, pairedOut, turnedView, VIEW_YAW8, normalizeMelee, frameOfT, HD_VIEWS } from './melee.js';
@@ -118,6 +118,31 @@ function poseAtT(rig, keys, t) {
  * on the partner's contact point at each attacker key inside the contact window. rigV: the victim's
  * rig when the partners have different proportions (per-skeleton takedowns; default the same rig).
  */
+const FIT_STEP = 20; // offset grid: 1 / 20 body unit
+/**
+ * The forward offset (body units) minimising the worst contact gap max |ax - (vx + f k u)| over the
+ * views. The worst gap is convex in f, so its minimum on a fixed absolute grid (multiples of 1/20 u,
+ * independent of where the search starts) is found by widening the window around the start until the
+ * minimum lies inside it; ties (a flat bottom) take the middle of the tied run. The result therefore
+ * depends only on the gaps: refitting a fitted pair returns the same offset (idempotent).
+ */
+export function fitOffset(gaps, u, start) {
+  const worst = (i) => { const f = i / FIT_STEP; let w = 0; for (const g of gaps) w = Math.max(w, Math.abs(g.ax - (g.vx + f * g.k * u))); return w; };
+  const c = Math.round(start * FIT_STEP);
+  for (let half = 40 * FIT_STEP; ; half *= 2) {
+    const lo = c - half, hi = c + half;
+    let bw = Infinity, b0 = lo, b1 = lo;
+    for (let i = lo; i <= hi; i++) {
+      const w = Math.round(worst(i) * 1e6) / 1e6; // 1e-6 px: no float noise in the comparison
+      if (w < bw) { bw = w; b0 = b1 = i; } else if (w === bw && b1 === i - 1) b1 = i;
+    }
+    if ((b0 > lo && b1 < hi) || half >= 640 * FIT_STEP) return Math.round(((b0 + b1) >> 1)) / FIT_STEP;
+  }
+}
+
+/** The partner's solved pose in its view (mirrored when the pair is staged in depth: partner_flip). */
+const partnerSolve = (rigV, P, po) => { const s = solvePose(rigV, P, po.partner_view); return po.partner_flip ? { ...s, flip: !s.flip } : s; };
+
 function fitPaired(rig, att, vic, cells, rigV = rig) {
   const m = att.melee, p = m.paired;
   const u = (rig.frame[1] - 4) / 98;
@@ -137,13 +162,11 @@ function fitPaired(rig, att, vic, cells, rigV = rig) {
       gaps.push({ ax: a[0], vx: v[0], k, w: view === 'side' ? 1 : 0 });
     }
     // the forward offset that minimises the worst gap over those views (side alone when only side)
-    const worst = (f) => Math.max(...gaps.map((g) => Math.abs(g.ax - (g.vx + f * g.k * u))));
-    let best = p.offset[0], bw = Infinity;
-    for (let f = p.offset[0] - 30; f <= p.offset[0] + 30; f += 0.05) { const w = worst(f); if (w < bw - 1e-9) { bw = w; best = f; } }
-    p.offset = [Math.round(best * 100) / 100, p.offset[1]];
+    p.offset = [fitOffset(gaps, u, p.offset[0]), p.offset[1]];
   }
   vic.melee.paired.offset = p.offset;
   const views = rig.views.filter((v) => HD_VIEWS.includes(v));
+  const reachTol = u * 4;
   // a key on every frame inside a hand contact window (the pose there unchanged), so the grip holds
   // frame by frame instead of drifting between keys
   const n = att.frames, times = new Set();
@@ -160,15 +183,38 @@ function fitPaired(rig, att, vic, cells, rigV = rig) {
       const VP = poseAtT(rigV, vic.keys, k.t);
       for (const view of views) {
         const po = pairedOut(rig, { ...p, role: 'attacker' }, view, 2);
-        const V = solvePose(rigV, VP, po.partner_view);
+        const V = partnerSolve(rigV, VP, po);
         const [x, y] = contactPoint(rigV, V, c.victim, cells);
         const target = [Math.round((x + po.partner_dx) * 100) / 100, Math.round(y * 100) / 100];
         const bend = c.attacker === 'hand_b' ? (view === 'front' ? 1 : -1) : view === 'front' ? -1 : view === 'back' ? 1 : -1;
-        const spec = { target, bend, weight: 1 };
+        let spec = { target, bend, weight: 1 }, full = null;
+        // front / back: an arm reaching toward / away from the camera is foreshortened, so the planar
+        // chain can fall short (a light attacker on a taller victim, a hand crossing the chest).
+        // When the planar solve misses by more than the contact tolerance, two reaches are tried in
+        // order and the closest is kept (ties keep the earlier): the arm extending in depth
+        // (plane:"depth": the foreshortened bones lengthen toward full length), and the arm swung into
+        // the frontal plane (both bones at full screen length, sy 1, planar IK: a hand reaching across
+        // the body). Poses that reach keep the planar solve.
+        if (view !== 'side' && rig.scaleChildren) {
+          const chain = ikChain(rig, c.attacker);
+          const keyWith = (sp, fl) => {
+            const kk = structuredClone(k); kk.parts.views = kk.parts.views || {};
+            const o = { ...(kk.parts.views[view] || {}), ik: { ...(kk.parts.views[view]?.ik || {}), [c.attacker]: sp } };
+            if (fl) for (const b of chain) o[b] = { ...(o[b] || {}), sy: 1 };
+            kk.parts.views[view] = o;
+            return kk;
+          };
+          const miss = (sp, fl) => { const q = contactPoint(rig, solvePose(rig, poseAtT(rig, [keyWith(sp, fl)], 0), view), c.attacker, cells); return Math.hypot(q[0] - target[0], q[1] - target[1]); };
+          let best = miss(spec, false);
+          if (best > reachTol) {
+            for (const [sp, fl] of [[{ ...spec, plane: 'depth' }, false], [spec, true]]) { const m = miss(sp, fl); if (m < best - 1e-6) { best = m; spec = sp; full = fl ? chain : null; } }
+          }
+        }
         if (view === 'side') k.parts.ik = { ...(k.parts.ik || {}), [c.attacker]: spec };
         else {
           k.parts.views = k.parts.views || {};
           k.parts.views[view] = { ...(k.parts.views[view] || {}), ik: { ...(k.parts.views[view]?.ik || {}), [c.attacker]: spec } };
+          if (full) for (const b of full) k.parts.views[view][b] = { ...(k.parts.views[view][b] || {}), sy: 1 };
         }
       }
     }
@@ -225,7 +271,7 @@ export function transferTrack(e, rig, def, att, vic, getClip, sk, view, rigV = r
   const po = pairedOut(rig, { ...p, role: 'attacker' }, view, 2);
   const A = clipFrames(e, rig, def, att, getClip, sk, view), V = clipFrames(e, rigV, defV, vic, getClip, sk, po.partner_view);
   const f0 = frameOfT(tr.t, n), fg = frameOfT(tr.grab ?? 0, n);
-  const gunAt = (P, f) => { const s = solvePose(rigV, P, po.partner_view); const q = socketOf(rigV, s, { order: [] }, { view: po.partner_view }); return { x: q.x + po.partner_dx + (lat ? lat[f] : 0), y: q.y, rot: q.rot, pitch: q.pitch, s }; };
+  const gunAt = (P, f) => { const s = partnerSolve(rigV, P, po); const q = socketOf(rigV, s, { order: [] }, { view: po.partner_view }); return { x: q.x + po.partner_dx + (lat ? lat[f] : 0), y: q.y, rot: q.rot, pitch: q.pitch, s }; };
   const handAt = (P) => { const s = solvePose(rig, P, view); const q = contactPoint(rig, s, tr.hand, null); return { x: q[0], y: q[1], rot: partRot(s, tr.hand) }; };
   // the gun's grip offset in the taking hand: where the victim's hand still holds it (the frame before the transfer)
   const fT = Math.max(0, f0 - 1), g0 = gunAt(V[fT], fT), h0 = handAt(A[fT]);
@@ -424,7 +470,7 @@ function pairedTrack(e, rig, def, att, vic, getClip, sk, view, cells, rigV = rig
   const feet = rig.feet || ['foot_f', 'foot_b'];
   const foot = (r, solved, n, dx) => { const q = contactPoint(r, solved, n, cells); const pp = partIn(r, n, solved.src); return [q[0] + dx, solved.world[n].y + (pp.h - 1 - pp.pivot[1])]; };
   return A.map((Pa, f) => {
-    const sa = solvePose(rig, Pa, view), sv = solvePose(rigV, V[f], po.partner_view);
+    const sa = solvePose(rig, Pa, view), sv = partnerSolve(rigV, V[f], po);
     return {
       a: Object.fromEntries(feet.map((n) => [n, foot(rig, sa, n, 0)])), v: Object.fromEntries(feet.map((n) => [n, foot(rigV, sv, n, po.partner_dx)])),
       contacts: (p.contacts || []).map((c) => {
@@ -737,7 +783,7 @@ export const MELEE_OPS = {
     const frames = pa.map((Pa, f) => {
       const ia = renderPose(A.rig, A.d, Pa, view, cache, { pad });
       const dx = dxs[f];
-      const iv = renderPose(V.rig, V.d, pv[f], po.partner_view, cacheV, { pad: [padL + dx, padT, padR - dx, padB].map((x) => Math.max(0, x)) });
+      const iv = renderPose(V.rig, V.d, pv[f], po.partner_view, cacheV, { mirror: !!po.partner_flip, pad: [padL + dx, padT, padR - dx, padB].map((x) => Math.max(0, x)) });
       const out = new Uint8ClampedArray(FW * FH * 4);
       const over = (img) => { for (let i = 0; i < img.length; i += 4) if (img[i + 3]) out.set(img.subarray(i, i + 4), i); };
       if (po.order === 'partner_front') { over(ia); over(iv); } else { over(iv); over(ia); }

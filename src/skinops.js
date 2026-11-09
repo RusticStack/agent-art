@@ -6,7 +6,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Mesh } from './model3d.js';
 import { rigInfo } from './modelrig.js';
-import { attachMorphs } from './modelexport.js';
+import { attachMorphs, normLods, normLodScreen } from './modelexport.js';
+import { normAO } from './bake.js';
+import { normLightmap, normThickness } from './lightbake.js';
+import { meshOfGroups, bakeRest, lodSet } from './restbake.js';
+import { transferSkin } from './damagerig.js';
 import { normalizeRig, solvePose } from './rig.js';
 import { evalClip } from './animlib.js';
 import { expandSkeleton, resolveSkeleton, bonesFromRig, bonesFromLibrary, retargetFrom2D, skelClipKeys, sampleSkelClip, poseState, solvePoseState, boneOffsets, SKELETON_TEMPLATE_NAMES } from './skeleton3d.js';
@@ -139,17 +143,41 @@ export function assembleSkinned(ctx, def, built, { scale, up, file, args = {} })
   const fps = Number(args.fps ?? 30);
   if (!(fps >= 1 && fps <= 120)) throw new Error('fps must be 1..120');
   const scene = skinScene(def.name, S, sk, { fps });
-  // baked light needs a static mesh: a deforming skinned mesh cannot carry a lightmap / thickness bake
-  const noBake = ['lightmap', 'thickness'].filter((k) => args[k]);
-  if (noBake.length) throw new Error(`${noBake.join(', ')}: not available on skinned models (baked light does not follow the bones); export without it, or bake a static pose with a rigid rig`);
   if (args.profile !== undefined && args.profile !== null && !['three', 'roblox', 'minimal'].includes(args.profile)) throw new Error('profile must be one of three, roblox, minimal (three = everything, roblox = SurfaceAppearance maps + skinned MeshPart limits, minimal = geometry + base colour)');
+  // LOD levels (every level skinned on the one armature: the weights ride through the decimation by
+  // surface transfer from the bind mesh) and AO / lightmap / thickness baked on the bind (rest) pose
+  const lods = normLods(args.lods), screen = normLodScreen(args.lod_screen);
+  if (lods && args.profile === 'roblox') throw new Error('lods: Roblox makes the LODs of a MeshPart itself (RenderFidelity): export the roblox profile without lods');
+  const ao = normAO(args.bake_ao), lm = normLightmap(args.lightmap), thick = normThickness(args.thickness);
+  if (ao && args.bake_ao && typeof args.bake_ao === 'object' && args.bake_ao.bent) ao.bent = true;
+  const lodMeta = {}, bakeOpts = {};
+  if (lods || ao || lm || thick) {
+    const bind = meshOfGroups(sk.mesh.groups.values());
+    const levels = lods ? lodSet([bind], lods, { scale, screen }) : [{ level: 0, ratio: 1, meshes: [bind], triangles: bind.triangles, distance: 0, error_px: 0 }];
+    let transfer = 0;
+    for (const L of levels.slice(1)) { const t = transferSkin(sk.mesh, L.meshes[0]); L.meshes[0] = t.mesh; transfer = Math.max(transfer, t.max_distance); }
+    if (ao || lm || thick) {
+      const r = bakeRest(levels.map((L) => [{ mesh: L.meshes[0], world: null }]), { ao, lm, thickness: thick, lights: built.lights || [], bounds: bind.bounds() });
+      Object.assign(bakeOpts, r.glbOpts);
+      lodMeta.bake = { ...(ao ? { ao: ao.mode } : {}), ...(lm ? { lightmap: true } : {}), ...(thick ? { thickness: true } : {}), ...r.stats, pose: 'bind (rest)', note: 'AO / lightmap / thickness baked on the bind (rest) pose on TEXCOORD_1; the skinned mesh carries them as it deforms (the light of the rest pose)' };
+    }
+    scene.meshes[0] = { ...scene.meshes[0], groups: [...levels[0].meshes[0].groups.values()] };
+    if (lods) {
+      for (const L of levels.slice(1)) {
+        scene.meshes.push({ name: `${def.name}_LOD${L.level}`, groups: [...L.meshes[0].groups.values()] });
+        scene.nodes.push({ name: `${def.name}_mesh_LOD${L.level}`, mesh: scene.meshes.length - 1, skin: 0, lodHidden: true, extras: { lod: L.level, distance: L.distance } });
+      }
+      scene.nodes[scene.meshNode] = { ...scene.nodes[scene.meshNode], extras: { ...(scene.nodes[scene.meshNode].extras || {}), lod: 0, distance: 0 } };
+      lodMeta.lods = { levels: levels.map((L) => ({ level: L.level, node: L.level ? `${def.name}_mesh_LOD${L.level}` : `${def.name}_mesh`, triangles: L.triangles, distance: L.distance })), weight_transfer_max_px: +transfer.toFixed(6), note: 'Every level is a skinned mesh on skin 0 (the same joints); show one level by camera distance (levels[i].distance, units). Shapes (morph targets) animate LOD0.' };
+    }
+  }
   let roblox = null;
   if (args.profile === 'roblox') roblox = robloxProfile(scene, S, { maxBones: Math.round(Number(args.max_bones ?? ROBLOX_MAX_BONES)), r15: !!args.r15 });
   // materials v2 (extensions, packing, tangents, vertex colours, profiles) on the skinned scene, as on static exports
   scene.meshes = scene.meshes.map((m) => ({ ...m, groups: [...m.groups] }));
   const v2 = exportV2(def, built, args, { meshes: scene.meshes, nodes: scene.nodes, ext: null, scale, file, info: null, skinned: true });
   if (v2) scene.meshes = v2.meshes;
-  const { glb, stats } = ctx.writeGLB(scene, { scale, up, name: def.name, extras: { skin: { bones: S.bones.length, clips: Object.keys(scene.clips), shapes: sk.morphNames, ...(roblox ? { profile: 'roblox' } : {}) } }, ...(v2 ? { ...v2.glbOpts, v2: v2.v2 } : {}) });
+  const { glb, stats } = ctx.writeGLB(scene, { scale, up, name: def.name, extras: { skin: { bones: S.bones.length, clips: Object.keys(scene.clips), shapes: sk.morphNames, ...(roblox ? { profile: 'roblox' } : {}), ...(lodMeta.lods ? { lods: lodMeta.lods.levels.length } : {}) } }, ...bakeOpts, ...(v2 ? { ...v2.glbOpts, v2: v2.v2 } : {}) });
   const v = validateGLB(glb);
   if (!v.ok) throw new Error(`skinned glb failed validation: ${v.errors.slice(0, 4).join('; ')}`);
   if (v2) finishV2(v2, glb, stats);
@@ -160,13 +188,13 @@ export function assembleSkinned(ctx, def, built, { scale, up, file, args = {} })
       ik: Object.fromEntries(Object.entries(S.ik).map(([k, c]) => [k, c.bones])), clips: scene.clips, shapes: sk.morphNames,
       drivers: sk.drivers.map((d) => ({ shape: d.name, bone: d.bone, axis: d.axis, from: d.from, to: d.to })),
       weights: { method: sk.report.method, max_influences: sk.report.max_influences, unweighted: sk.report.unweighted, non_normalised: sk.report.non_normalised },
-      validation: v.stats, ...(roblox ? { roblox } : {}),
+      validation: v.stats, ...(roblox ? { roblox } : {}), ...lodMeta,
       note: 'glTF skin: mesh node <name>_mesh (skin 0) at the scene root, joints = bone nodes under the armature node <name>; inverseBindMatrices = inverse rest world (units). three.js: GLTFLoader -> SkinnedMesh; AnimationMixer plays the clips (IK, plants, constraints and corrective-shape drivers are baked per frame). Shapes = morph targets on the skinned primitives (mesh.extras.targetNames); morph first, then skin.',
     },
   };
   return {
     glb, stats, built, info: null, rigClips: scene.clips, ctm: {}, ctmNames: [], v2,
-    ext: { after() {}, meta, result: { skin: { bones: S.bones.length, joints_per_mesh: scene.skins.map((s) => s.joints.length), clips: Object.keys(scene.clips), shapes: sk.morphNames, validation: v.ok ? 'ok' : v.errors, ...(roblox ? { roblox: { meshes: roblox.meshes, warnings: roblox.warnings, renamed: roblox.renamed } } : {}) } } },
+    ext: { after() {}, meta, result: { skin: { bones: S.bones.length, joints_per_mesh: scene.skins.map((s) => s.joints.length), clips: Object.keys(scene.clips), shapes: sk.morphNames, validation: v.ok ? 'ok' : v.errors, ...(roblox ? { roblox: { meshes: roblox.meshes, warnings: roblox.warnings, renamed: roblox.renamed } } : {}), ...(lodMeta.lods ? { lods: lodMeta.lods.levels.map((L) => L.triangles), weight_transfer_max_px: lodMeta.lods.weight_transfer_max_px } : {}), ...(lodMeta.bake ? { bake: { pose: 'bind (rest)', ...(lodMeta.bake.size ? { size: lodMeta.bake.size } : {}) } } : {}) } } },
   };
 }
 

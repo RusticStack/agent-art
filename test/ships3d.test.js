@@ -290,7 +290,9 @@ test('budgets: class report, export budget enforcement, split meshes under 20k',
 test('static export of a rigged ship bakes the pose, enables lods, and keeps sockets as marker nodes', () => {
   const e = new Engine({ home: tmp() });
   e.run('model_create', { name: 'f', template: 'fighter', seed: 2 });
-  assert.throws(() => e.run('model_export', { name: 'f', lods: [1, 0.5], path: path.join(tmp(), 'x.glb') }), /rigged/);
+  // a rigged ship exports lods with the rig kept (LOD children per rig node); static bakes one pose instead
+  const rl = e.run('model_export', { name: 'f', lods: [1, 0.5], path: path.join(tmp(), 'x.glb') });
+  assert.ok(rl.animations !== undefined && rl.lods.length === 2, 'rigged lods');
   e.run('model_pose', { name: 'f', pose: 'open', parts: { canopy: { rot: [-60, 0, 0] } } });
   const r = e.run('model_export', { name: 'f', static: 'open', lods: [1, 0.5], path: path.join(tmp(), 'f.glb') });
   assert.equal(r.static, 'open');

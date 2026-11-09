@@ -673,7 +673,9 @@ export function renderPose(rig, partsDoc, pose, view, cache = new Map(), opts = 
   // a mirror view renders its source with left/right swapped, so the padding lands on the right side
   const pad = opts.pad ? opts.pad.map((n) => Math.max(0, Math.round(Number(n) || 0))) : null;
   const FW = RW + (pad ? pad[0] + pad[2] : 0), FH = RH + (pad ? pad[1] + pad[3] : 0);
-  const { src, flip, VP, world, P } = solvePose(rig, pose, view);
+  const { src, flip: flip0, VP, world, P } = solvePose(rig, pose, view);
+  // opts.mirror: draw the view mirrored about the root column (a paired partner staged in depth)
+  const flip = !!flip0 !== !!opts.mirror;
   const ox = pad ? (flip ? pad[2] : pad[0]) : 0, oy = pad ? pad[1] : 0;
   // skinned meshes replace their host part (+ absorbed parts) in the views they are drawn in
   const skin = rig.skin ? skinView(rig, partsDoc, src, cache) : null;

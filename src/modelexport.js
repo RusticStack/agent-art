@@ -15,6 +15,7 @@ import { renderViews } from './raster3d.js';
 import { quatOfMat } from './modelrig.js';
 import { paintTrimSheet, trimStrips, TRIM_STYLES, DEFAULT_TRIM } from './surface.js';
 import { normLightmap, normProbes, normThickness, bakeLighting, bakeProbes, probeScene } from './lightbake.js';
+import { restWorld, meshOfGroups, bakeRest, lodSet } from './restbake.js';
 
 const NAME_RE = /^[A-Za-z0-9_\-.]{1,64}$/;
 const f6 = (v) => +(+v).toFixed(6);
@@ -122,7 +123,8 @@ export function exportExtras(engine, def, built, a, { scale, file, info, meshes,
   const root = built.mesh;
   const base = file.replace(/\.glb$/i, '');
   if (info || a.instances) {
-    const what = [lods && 'lods', cullSpec && 'cull', def.morphs && 'morphs', info && ao && 'bake_ao', lm && 'lightmap', probes && 'probes', thick && 'thickness'].filter(Boolean);
+    // rigged models: lods, bake_ao, lightmap and thickness are made per rig node on the rest pose (below)
+    const what = [!info && lods && 'lods', cullSpec && 'cull', def.morphs && 'morphs', !info && lm && 'lightmap', probes && 'probes', !info && thick && 'thickness'].filter(Boolean);
     if (what.length) throw new Error(`${what.join(', ')}: not available on ${info ? 'rigged models (named parts / sockets / clips)' : 'instances:true exports'} yet; export without ${what.join(' / ')}`);
   }
   // world copies of the layout instances + GPU pieces (occluders, impostor, proxies)
@@ -270,6 +272,38 @@ export function exportExtras(engine, def, built, a, { scale, file, info, meshes,
     for (const n of nodes) {
       const p = n.extras && n.extras.part !== undefined ? def.parts[n.extras.part] : null;
       if (p && (p.cast_shadow !== undefined || p.receive_shadow !== undefined)) n.extras = { ...n.extras, cast_shadow: p.cast_shadow !== false, receive_shadow: p.receive_shadow !== false };
+    }
+  }
+  if (info && (lods || ao || lm || thick)) {
+    // rigged: every rig node keeps its own mesh (LOD0) and gets hidden children <node>_LOD1..n with its
+    // piece simplified in the node's frame (they move with the node: clips still drive the parts);
+    // AO / lightmap / thickness are baked on the rest pose (all pieces at their rest placement
+    // occlude each other; one set per LOD level) and ride with the parts
+    const W = restWorld(nodes);
+    const rn = info.nodes.map((n, i) => ({ i, n })).filter(({ i, n }) => nodes[i].mesh !== undefined && n.mesh.triangles);
+    const local = rn.map(({ n }) => meshOfGroups(n.mesh.groups.values()));
+    const levels = lods ? lodSet(local, lods, { scale, screen }) : [{ level: 0, ratio: 1, meshes: local, triangles: local.reduce((s, m) => s + m.triangles, 0), distance: 0, error_px: 0 }];
+    if (ao || lm || thick) {
+      const r = bakeRest(levels.map((L) => L.meshes.map((m, k) => (m ? { mesh: m, world: W[rn[k].i] } : null)).filter(Boolean)), { ao, lm, thickness: thick, lights: built.lights || [], bounds: whole().bounds() });
+      Object.assign(glbOpts, r.glbOpts);
+      if (ao) { meta.ao = { ...r.stats, pose: 'rest', note: 'AO baked on the rest pose (every rig node at its rest placement occludes the others), per rig node mesh on TEXCOORD_1 (occlusionTexture texCoord 1' + (ao.mode === 'vertex' ? '' : '') + '); it moves with its node' }; result.ao = { ...r.stats, pose: 'rest' }; }
+      if (lm) { meta.lightmap = { ...r.stats, pose: 'rest', note: 'lightmap baked on the rest pose (material extras.lightMap on TEXCOORD_1); moving parts carry the light of their rest placement' }; result.lightmap = { size: r.stats.size, pose: 'rest' }; }
+      if (thick) { meta.thickness = { distance_px: thick.distance, pose: 'rest', note: 'SSS thickness on TEXCOORD_1 (material extras.thicknessTexture), baked on the rest pose' }; result.thickness = { size: r.stats.size, pose: 'rest' }; }
+    }
+    rn.forEach(({ i }, k) => { meshes[nodes[i].mesh] = { name: meshes[nodes[i].mesh].name, groups: [...levels[0].meshes[k].groups.values()] }; });
+    if (lods) {
+      for (const L of levels.slice(1)) rn.forEach(({ i }, k) => {
+        const m = L.meshes[k];
+        if (!m || !m.triangles) return;
+        const nm = `${nodes[i].name}_LOD${L.level}`;
+        meshes = [...meshes, { name: nm, groups: [...m.groups.values()] }];
+        nodes.push({ name: nm, mesh: meshes.length - 1, lodHidden: true, extras: { lod: L.level, distance: L.distance } });
+        nodes[i].children = [...(nodes[i].children || []), nodes.length - 1];
+      });
+      const lv = levels.map((L) => ({ level: L.level, ratio: L.ratio, triangles: L.triangles, distance: L.distance, error_px: L.error_px }));
+      nodes[0] = { ...nodes[0], extras: { ...(nodes[0].extras || {}), lod_levels: lv.map((L) => ({ level: L.level, distance: L.distance, triangles: L.triangles })) } };
+      meta.lods = { mode: 'rig', screen, levels: lv, note: 'Rigged: each rig node keeps LOD0 as its own mesh and has hidden children <node>_LOD1..n (same local frame, so clips move them). At level i show <node>_LODi under every node and hide the node meshes of the other levels; switch at levels[i].distance (units). The root node extras.lod_levels lists them.' };
+      result.lods = lv.map((L) => ({ level: L.level, triangles: L.triangles, distance: L.distance }));
     }
   }
   // ---- collision / occluder proxies (named nodes, extras flags; excluded from triangle stats)

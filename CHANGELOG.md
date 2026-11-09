@@ -14,17 +14,26 @@ Fixes the known limits of art_fx, damage and melee from 0.9.0. Everything that d
 
 - The damage mask UVs move off TEXCOORD_1 when the export bakes AO / lightmap / thickness or adds uv2 / uv3: they take the next free set (manifest `blend.uv_set`, node `extras.blend.uv_set`), and AO / lightmaps / thickness are now baked on damage exports (per file; manifest `bake`). Without those options the mask stays on TEXCOORD_1. The Roblox damage profile keeps its decal bake.
 - The blend works on every LOD: the intact mesh keeps chart UVs, damage RGBA and the dent morph through the LOD collapses (`<name>_intact_LODn` each carry them).
-- Rigs: models with named parts / sockets / clips keep their node tree, socket nodes and clips in every state (`<name>_<state>_rig` / `_LODn`, one animation per clip driving every state), so damaged doors open and turrets turn. Skinned models now take damage states: every state is a skinned mesh on the one armature, with weights from the closest point of the bind surface. Rigged and skinned damage glbs are validated before writing. Fracture still needs rigid parts.
+- Rigs: models with named parts / sockets / clips keep their node tree, socket nodes and clips in every state (`<name>_<state>_rig` / `_LODn`, one animation per clip driving every state), so damaged doors open and turrets turn. Skinned models now take damage states: every state is a skinned mesh on the one armature, with weights from the closest point of the bind surface. Rigged and skinned damage glbs are validated before writing.
+- Skinned damage exports take `lods` (every level skinned on skin 0, weights transferred onto the decimated mesh), the Roblox profile (no morph targets, at most 4 influences, at most `max_bones` (50) joints per MeshPart: meshes over it split into `<node>_partN` with their own skins over the same bones; at most 20k triangles; manifest `skin.roblox`), `bake_ao` / `lightmap` / `thickness` (baked on the bind pose) and fracture (`model_fracture` accepts skinned models; each top chunk is rigid and rides the bone weighing most on its surface: `extras.bone`, manifest `chunk.bone`).
 - `art_draw damage` retuned for sprites: features scale with the damaged box, new `chips` and `under` kinds, palette-only, same spots per view for one seed.
 - Open meshes: fracture closes an open part first (`close: "auto" | "cleanup" | false`; reply / manifest `closed`), and a breach on an open host closes the host first (`features.closed_hosts`; damage `close:false` keeps it open).
 - The intact overlay shells follow the dent morph.
 - Fix: damage `kind:"door"` no longer crashes guessing the door leaf.
 
+### Plain exports of rigged and skinned models
+
+- `lods` on rigged models (named parts / sockets / clips): every rig node keeps LOD0 and gets hidden children `<node>_LOD1..n` in its own frame, so the clips still move them (root `extras.lod_levels`, meta `lods.mode: "rig"`). `bake_ao` / `lightmap` / `thickness` bake on the rest pose (every piece at its rest placement occludes the others) and ride with the parts.
+- Skinned models: `lods` adds `<name>_mesh_LOD1..n`, each skinned on skin 0 (weights carried through the decimation; `skin.lods`, `skin.weight_transfer_max_px`); `bake_ao` / `lightmap` / `thickness` bake on the bind pose. The Roblox profile with `lods` is refused (Roblox makes MeshPart LODs itself).
+- Non-rigged exports are byte-identical (corpus).
+
 ### Melee
 
 - Gun skeletons get `disarm_front` for every handling class: `art_anim melee {disarm:"take"|"drop"}`. The batch manifest has `transfer {mode, frame, track[frame] = {owner, state, x, y, rot, pitch}}` for both actors' runtime weapon layers. `melee_check` checks the release, the grip at the transfer, a dropped gun coming to rest and the gun track.
 - Front / back contacts are checked in 3D (screen gap + side-view depth) per view (`contact_by_view`), with per-frame lateral staging of the partner (`lateral_px`; manifest `paired.partner_dx_track`, also used by `anim_paired`).
-- Per-skeleton takedowns: skins with proportions get paired pairs refit on their own rigs in batch, `anim_paired` and `melee_check {skin, victim_skin}` (`refit_offset`).
+- Per-skeleton takedowns: skins with proportions get paired pairs refit on their own rigs in batch, `anim_paired` and `melee_check {skin, victim_skin}` (`refit_offset`). Light on heavy passes: a front / back hand IK that falls short reaches in depth (`plane:"depth"`) or swings the arm into the frontal plane (full length), whichever lands closer (light-on-heavy rear takedown: 6.8 px -> 3.0 px against a 4 px tolerance at 64x96). Every heavy / light pairing of the knife set passes.
+- Deterministic paired fit: the offset search runs on an absolute grid (1/20 body unit), widens until the optimum is inside the window (0.9.0 stopped on its +-30 bound for the knife disarm), and ties take the middle of the tied run. Two fresh engines give byte-identical refits for every paired clip, and refitting a refit pair returns it unchanged.
+- Front / back depth staging: a face-to-face partner is drawn mirrored in front / back (`paired.partner_flip`, as the side views draw it from a mirror view), so its weapon hand stays on the same side and the contacts meet in depth; lateral staging is only the remainder (knife disarm at 128x192: 25.2 px -> 0 px; every melee set <= 3 px). `anim_paired` draws it the same way.
 
 ### Intentional default changes
 
@@ -35,6 +44,9 @@ Fixes the known limits of art_fx, damage and melee from 0.9.0. Everything that d
 - Damage exports with `bake_ao` / `lightmap` / `thickness` / `uv2` / `uv3` move the mask UVs off TEXCOORD_1 and bake AO etc. into the damage glbs; with `lods` the intact LODs carry the blend; intact overlay shells carry the morph; breaches close open hosts; models with named parts / sockets / clips export rigged damage states.
 - Gun skeletons get `disarm_front_attacker` / `_victim` clips (were not written).
 - Front / back batch anims of paired clips gain `partner_dx_track`; `anim_paired` front / back canvases are staged the same way.
+- The melee-set (knife, baton + shield) `disarm_front` fit offset is 73.15 (0.9.0: 70, on the search bound), so those clips and their batch manifests change (3 corpus digests, listed in the corpus test). Gun disarms and the other pairs keep their offsets.
+- Front / back of face-to-face pairs (`disarm_front`, `shield_knockdown`) gain `partner_flip` and are drawn mirrored; their front / back IK targets change.
+- Skinned damage exports with `lods` / `profile:"roblox"` / `lightmap` / `thickness` and skinned `model_fracture` are no longer refused; rigged plain exports with `lods` / `bake_ao` / `lightmap` / `thickness` and skinned plain exports with `lods` / `bake_ao` / `lightmap` / `thickness` are no longer refused.
 
 ## 0.9.0
 

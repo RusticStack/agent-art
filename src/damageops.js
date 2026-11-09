@@ -19,7 +19,7 @@ import { simplifyMesh, switchDistance } from './lod.js';
 import { normLods, normLodScreen } from './modelexport.js';
 import { rigInfo } from './modelrig.js';
 import { splitRig, addRig, transferSkin } from './damagerig.js';
-import { skinScene } from './skin3d.js';
+import { skinScene, splitByBones, ROBLOX_MAX_BONES } from './skin3d.js';
 import { validateGLB as validateSkinned } from './gltfvalidate.js';
 import { validateGLB as checkGLB } from './gltfcheck.js';
 import { isSkinned } from './skinops.js';
@@ -201,7 +201,7 @@ export function damageOps({ getModel, build, saveModel }) {
         saveModel(this, next, source, 'fracture removed');
         return { model: def.name, fracture: null };
       }
-      noSkin(def, 'fracture');
+      // skinned models fracture too: the chunks are rigid and ride the nearest bone in the damage export
       const input = a.groups ?? (a.parts !== undefined ? a.parts : def.fracture?.groups);
       if (!input) throw new Error('fracture needs parts:[{part:<name|index>, pieces?:8, method?:"voronoi"|"slice", seed?, inside?, debris?, density?, group?, parent?}]');
       const xdef = expandDef(def);
@@ -291,12 +291,14 @@ export function damageExport(engine, def, built, a, { file, scale, skinned = nul
   const rinfo = skinned ? null : rigInfo(def, built);
   let skinBase = null;
   if (skinned) {
-    const bad = [lods && 'lods', roblox && 'profile "roblox"', fr.length && 'fracture', a.lightmap && 'lightmap', a.thickness && 'thickness'].filter(Boolean);
-    if (bad.length) throw new Error(`damage export of a skinned model: ${bad.join(', ')} not available (skinned exports have no LOD chain, Roblox damage profile or baked light; fracture chunks need a rigid copy)`);
+    // skinned: LOD levels, the Roblox profile, baked AO / light (on the bind = rest pose) and fracture
+    // (rigid chunks on their nearest bone) all keep the one armature
     const { S: SK, sk } = skinned();
     const fps = Number(a.fps ?? 30);
     if (!(fps >= 1 && fps <= 120)) throw new Error('fps must be 1..120');
-    skinBase = { sc: skinScene(def.name, SK, sk, { fps }), sk, bones: SK.bones.length, transfer: 0 };
+    const maxBones = Math.round(Number(o.max_bones ?? a.max_bones ?? ROBLOX_MAX_BONES));
+    if (!(maxBones >= 4 && maxBones <= 256)) throw new Error('max_bones must be 4..256 (Roblox: 50 bones per skinned MeshPart)');
+    skinBase = { sc: skinScene(def.name, SK, sk, { fps }), sk, bones: SK.bones.length, transfer: 0, maxBones, roblox: roblox ? { meshes: [], max_joints: 0, max_influences: 0 } : null, chunks: 0 };
   }
 
   // ---- scene builder (shared by nodes / files / blend)
@@ -349,6 +351,39 @@ export function damageExport(engine, def, built, a, { file, scale, skinned = nul
     if (r.triangles > ROBLOX_TRIS) throw new Error(`roblox profile: ${what} has ${mesh.triangles} triangles and simplifies only to ${r.triangles} (MeshPart limit ${ROBLOX_TRIS}): fewer dents / segments`);
     return { mesh: r.mesh, simplified: true };
   };
+  /**
+   * A skinned mesh on node id. Roblox: no morph targets (MeshParts have no blend shapes), <= 4
+   * influences per vertex, <= maxBones joints per MeshPart (meshes using more are split into several
+   * skinned meshes, each with its own skin over the same bone nodes).
+   */
+  const skinnedOn = (S, id, nm, sm) => {
+    if (!roblox) { S.nodes[id].mesh = addMesh(S, nm, sm); S.nodes[id].skin = 0; return; }
+    const m = new Mesh();
+    for (const [k, g] of sm.groups) { const { morphs, ...rest } = g; m.groups.set(k, rest); }
+    let infl = 0;
+    for (const g of m.groups.values()) if (g.skin) for (let v = 0; v < g.skin.w.length / 4; v++) { let c = 0; for (let q = 0; q < 4; q++) if (g.skin.w[v * 4 + q] > 0) c++; infl = Math.max(infl, c); }
+    const used = new Set();
+    for (const g of m.groups.values()) if (g.skin) g.skin.w.forEach((w, i) => { if (w > 0) used.add(g.skin.j[i]); });
+    const R = skinBase.roblox;
+    R.max_influences = Math.max(R.max_influences, infl);
+    if (used.size <= skinBase.maxBones) {
+      S.nodes[id].mesh = addMesh(S, nm, m); S.nodes[id].skin = 0;
+      R.meshes.push({ node: nm, joints: used.size, triangles: m.triangles }); R.max_joints = Math.max(R.max_joints, used.size);
+      return;
+    }
+    const all = S.skins[0], pieces = splitByBones(m, skinBase.maxBones);
+    const over = pieces.find((pc) => pc.joints.length > skinBase.maxBones);
+    if (over) throw new Error(`roblox profile: ${nm} has triangles weighted to ${over.joints.length} bones (max_bones ${skinBase.maxBones}): raise max_bones (Roblox allows 50) or skin with fewer influences`);
+    pieces.forEach((pc, k) => {
+      const si = S.skins.length;
+      S.skins.push({ name: `${all.name}_${nm}_${k}`, joints: pc.joints.map((j) => all.joints[j]), skeleton: all.skeleton, ibm: pc.joints.map((j) => all.ibm[j]) });
+      const pn = `${nm}_part${k}`;
+      const pid = k === 0 ? id : node(S, { name: pn });
+      S.nodes[pid].mesh = addMesh(S, k === 0 ? nm : pn, pc.mesh); S.nodes[pid].skin = si;
+      if (k > 0) (S.nodes[id].children || (S.nodes[id].children = [])).push(pid);
+      R.meshes.push({ node: k === 0 ? nm : pn, joints: pc.joints.length, triangles: pc.mesh.triangles, skin: si }); R.max_joints = Math.max(R.max_joints, pc.joints.length);
+    });
+  };
   const manifest = { model: def.name, generator: 'agent-art', px_per_unit: scale, up: a.up === 'z' ? 'z' : 'y', mode, profile: profile || 'web', default_state: 'intact', states: [], fracture: null, blend: null };
   /** One state (or intact) under a parent: node with mesh (or LOD children) + fx socket children. */
   const stateNodes = (S, name, label, mesh, sockets, extras, levels, overlays = null) => {
@@ -368,16 +403,37 @@ export function damageExport(engine, def, built, a, { file, scale, skinned = nul
         if (L.level === 0) rec.rig = { root: prefix, nodes: r.nodes.length, ...(ovp.length ? { overlays: 'per rig node: <node>_overlays' } : {}) };
       }
     } else if (skinBase) {
-      // skinned: the state mesh is a skinned mesh on the shared armature (skin 0)
-      let sm;
-      if (label === 'intact' && !blend) { sm = skinBase.sk.mesh; S.intactSkin = id; }
-      else { const t = transferSkin(skinBase.sk.mesh, mesh); sm = t.mesh; skinBase.transfer = Math.max(skinBase.transfer, t.max_distance); }
-      S.nodes[id].mesh = addMesh(S, `${name}_${label}`, sm);
-      S.nodes[id].skin = 0;
-      rec.skin = { skin: 0, weights: label === 'intact' && !blend ? 'bind (the skinned export)' : 'transferred from the intact bind mesh (nearest vertex)' };
+      // skinned: the state mesh (and every LOD level) is a skinned mesh on the shared armature
+      // (skin 0); the intact bind mesh keeps its weights, other meshes take them from the bind surface
+      // (decimated levels included: the weights ride through the collapses by surface transfer)
+      const bindIntact = label === 'intact' && !blend;
+      const skinOf = (m, level) => {
+        if (bindIntact && level === 0) {
+          if (!roblox) return skinBase.sk.mesh;
+          const c = capRoblox(skinBase.sk.mesh, 'intact');
+          if (!c.simplified) return skinBase.sk.mesh;
+          m = c.mesh;
+        }
+        const t = transferSkin(skinBase.sk.mesh, m);
+        skinBase.transfer = Math.max(skinBase.transfer, t.max_distance);
+        return t.mesh;
+      };
+      const lv = levels || [{ level: 0, mesh }];
+      if (levels) rec.lods = [];
+      for (const L of lv) {
+        const nm = levels ? `${name}_${label}_LOD${L.level}` : `${name}_${label}`;
+        const target = levels ? node(S, { name: nm, extras: { lod: L.level, distance: L.distance }, ...(L.level ? { lodHidden: true } : {}) }) : id;
+        if (levels) S.nodes[id].children.push(target);
+        skinnedOn(S, target, nm, skinOf(L.mesh, L.level));
+        if (bindIntact && L.level === 0 && !roblox) S.intactSkin = target;
+        if (levels) rec.lods.push({ level: L.level, node: nm, triangles: L.mesh.triangles, distance: L.distance });
+      }
+      rec.skin = { skin: 0, weights: bindIntact ? 'bind (the skinned export)' : 'transferred from the intact bind surface (closest point)', ...(levels ? { lods: 'every level skinned (weights transferred from the bind surface)' } : {}) };
       if (overlays) {
         const on = `${name}_${label}_overlays`;
-        S.nodes[id].children.push(node(S, { name: on, mesh: addMesh(S, on, transferSkin(skinBase.sk.mesh, overlays.mesh).mesh), skin: 0, extras: overlays.extras }));
+        const oid = node(S, { name: on, extras: overlays.extras });
+        skinnedOn(S, oid, on, transferSkin(skinBase.sk.mesh, overlays.mesh).mesh);
+        (levels ? S.nodes[S.nodes[id].children[0]] : S.nodes[id]).children = [...((levels ? S.nodes[S.nodes[id].children[0]] : S.nodes[id]).children || []), oid];
         rec.overlays_node = on;
       }
     } else if (levels) {
@@ -448,8 +504,23 @@ export function damageExport(engine, def, built, a, { file, scale, skinned = nul
           S.nodes[id2].children.push(node(S, { name: `${cn}_collision`, mesh: addMesh(S, `${cn}_collision`, hm), proxy: true, extras: { collision: true, proxy: 'hull', visible: false } }));
         }
         cnode.set(c.name, id2);
-        (c.parent ? S.nodes[cnode.get(c.parent)] : S.nodes[id]).children.push(id2);
-        rec.chunks.push({ name: c.name, node: cn, level: c.level, parent: c.parent, volume: f6(c.volume_px3 / scale ** 3), mass_kg: f6((c.volume_px3 / scale ** 3) * g.density), center: c.center.map((v) => f6(v / scale)), bounds: { min: c.min.map((v) => f6(v / scale)), max: c.max.map((v) => f6(v / scale)) }, collision: c.hull ? { node: `${cn}_collision`, type: 'hull', vertices: c.hullVerts } : null, triangles: c.mesh.triangles, watertight: c.watertight });
+        let bone = null;
+        if (skinBase && !c.parent) {
+          // skinned: a rigid chunk rides the bone that weighs most on its surface (closest points on
+          // the bind surface); local matrix = inverse rest world of the bone x chunk centre
+          const t = transferSkin(skinBase.sk.mesh, c.mesh), acc = new Map();
+          for (const g2 of t.mesh.groups.values()) g2.skin.w.forEach((w, i) => { if (w > 0) acc.set(g2.skin.j[i], (acc.get(g2.skin.j[i]) || 0) + w); });
+          const j = [...acc].sort((x, y) => y[1] - x[1] || x[0] - y[0])[0][0];
+          const sk0 = skinBase.sc.skins[0], I = sk0.ibm[j], C = c.center;
+          bone = S.nodes[sk0.joints[j]].name;
+          delete S.nodes[id2].translation;
+          S.nodes[id2].matrix = [I[0], I[1], I[2], I[0] * C[0] + I[1] * C[1] + I[2] * C[2] + I[3], I[4], I[5], I[6], I[4] * C[0] + I[5] * C[1] + I[6] * C[2] + I[7], I[8], I[9], I[10], I[8] * C[0] + I[9] * C[1] + I[10] * C[2] + I[11]];
+          S.nodes[id2].extras = { ...S.nodes[id2].extras, bone, visible: false };
+          (S.nodes[sk0.joints[j]].children || (S.nodes[sk0.joints[j]].children = [])).push(id2);
+          (S.nodes[id].extras.chunks || (S.nodes[id].extras.chunks = [])).push(cn);
+          skinBase.chunks++;
+        } else (c.parent ? S.nodes[cnode.get(c.parent)] : S.nodes[id]).children.push(id2);
+        rec.chunks.push({ name: c.name, ...(bone ? { bone } : {}), node: cn, level: c.level, parent: c.parent, volume: f6(c.volume_px3 / scale ** 3), mass_kg: f6((c.volume_px3 / scale ** 3) * g.density), center: c.center.map((v) => f6(v / scale)), bounds: { min: c.min.map((v) => f6(v / scale)), max: c.max.map((v) => f6(v / scale)) }, collision: c.hull ? { node: `${cn}_collision`, type: 'hull', vertices: c.hullVerts } : null, triangles: c.mesh.triangles, watertight: c.watertight });
       }
       manifest.fracture.groups.push(rec);
     }
@@ -562,7 +633,13 @@ export function damageExport(engine, def, built, a, { file, scale, skinned = nul
     };
   }
   if (rinfo) manifest.rig = { root: def.name, nodes: rinfo.nodes.map((n) => n.name), sockets: rinfo.sockets.map((s) => s.name), clips: Object.keys(def.clips || {}), validation, note: 'Every state (and LOD level) holds a copy of the rig: <model>_<state>_rig (LODs: <model>_<state>_LODn) with one node per rig node (<prefix>_<node>, rest TRS, its piece of the damaged mesh) and the socket nodes. One animation per clip drives the matching nodes of every state, so a damaged door opens and a wrecked turret turns; only the visible state shows.' };
-  if (skinBase) manifest.skin = { armature: def.name, bones: skinBase.bones, skin: 0, clips: skinBase.sc.animations.map((x) => x.name), weight_transfer_max_px: f6(skinBase.transfer), validation, note: 'Every state node is a skinned mesh on the one armature (skin 0, shared joints and inverse bind matrices). The intact state keeps the bind weights; damaged states take the weights of the nearest bind vertex, so dents, cuts and inner backing follow the bones. Shape (morph) weights animate the intact bind mesh only.' };
+  if (skinBase) manifest.skin = {
+    armature: def.name, bones: skinBase.bones, skin: 0, clips: skinBase.sc.animations.map((x) => x.name), weight_transfer_max_px: f6(skinBase.transfer), validation,
+    ...(lods ? { lods: 'every state LOD level is skinned on skin 0 (weights transferred from the bind surface onto the decimated mesh)' } : {}),
+    ...(skinBase.chunks ? { fracture: `${skinBase.chunks} rigid chunks parented to their nearest bone (the bone weighing most on the chunk surface; chunk extras.bone, node matrix = inverse rest world of the bone x chunk centre, hidden until the break)` } : {}),
+    ...(skinBase.roblox ? { roblox: { max_bones: skinBase.maxBones, max_influences: skinBase.roblox.max_influences, max_joints_per_mesh: skinBase.roblox.max_joints, skins: 1 + skinBase.roblox.meshes.filter((m) => m.skin).length, meshes: skinBase.roblox.meshes, note: `Roblox skinned MeshParts: <= ${skinBase.maxBones} bones per mesh (meshes over it are split into <node>_partN, each with its own skin over the same bones), <= 4 influences per vertex, <= ${ROBLOX_TRIS} triangles, no morph targets` } } : {}),
+    note: 'Every state node is a skinned mesh on the one armature (skin 0, shared joints and inverse bind matrices). The intact state keeps the bind weights; damaged states (and LOD levels) take the weights of the closest point on the bind surface, so dents, cuts and inner backing follow the bones. Shape (morph) weights animate the intact bind mesh only. Baked AO / lightmap / thickness are baked on the bind (rest) pose.',
+  };
   if (roblox) manifest.roblox = { tri_limit: ROBLOX_TRIS, note: 'Each state and chunk node is its own MeshPart (<= 20k triangles, simplified when needed). Masks, morphs and the second UV set are dropped: decals are baked into a per-state colour atlas (TEXCOORD_0). Swap MeshParts (Transparency 1 / 0) to change state; fx sockets become Attachments.' };
   if (v2Report) manifest.materials_v2 = { profile: v2Report.profile, extensions: v2Report.extensions, valid: v2Report.valid, note: aoSpec || lmSpec || thSpec || a.vertex_colors || a.uv2 || a.uv3 ? 'materials v2 as in the plain export, with its vertex colour sets, uv2 / uv3, AO, lightmap and thickness (TEXCOORD_1); the damage masks sample their own UV set (blend.uv_set)' : "materials v2 as in the plain export; vertex colour sets, uv2 / uv3, lightmaps and thickness stay on the plain export (TEXCOORD_1 + COLOR_0 / _DAMAGE carry the damage masks here)" };
   if (bakeInfo.ao || bakeInfo.lightmap) manifest.bake = { ...(bakeInfo.ao ? { ao: bakeInfo.ao } : {}), ...(bakeInfo.lightmap ? { lightmap: bakeInfo.lightmap } : {}), note: 'AO / lightmap on TEXCOORD_1 (occlusionTexture texCoord 1, material extras.lightMap), baked per file: every state, LOD level and chunk occludes only itself and they share one lightmap; the damage masks use blend.uv_set' };

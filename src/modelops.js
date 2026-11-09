@@ -996,7 +996,7 @@ export function assembleGLB(engine, def0, { normal = false, instances = false, s
   let def = expandDef(def0);
   if (isSkinned(def)) {
     // skinned: one skinned mesh + bone tree + baked clips (art_model skeleton / skin)
-    const bad = ['lods', 'bake_ao', 'impostor', 'collision', 'occluder', 'cull', 'static', 'split', 'walk'].filter((k) => args[k]);
+    const bad = ['impostor', 'collision', 'occluder', 'cull', 'static', 'split', 'walk'].filter((k) => args[k]);
     if (instances || atlas || bad.length) throw new Error(`${[...bad, instances && 'instances', atlas && 'atlas'].filter(Boolean).join(', ')}: not available on skinned models yet`);
     const built = build(engine, def, { normal, ...(bump !== undefined ? { bump } : {}) });
     return assembleSkinned(skinCtx(BASE, engine, built), def, built, { scale, up, file, args });

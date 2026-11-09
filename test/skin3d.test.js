@@ -551,7 +551,9 @@ test('skinned export runs materials v2: glass extensions, vertex colours, profil
   }
   assert.ok(ex({ profile: 'roblox' }).r.skin.roblox, 'roblox keeps its skinning constraints');
   assert.throws(() => e.run('model_export', { name: 's', profile: 'unity' }), /profile must be one of three, roblox, minimal/);
-  assert.throws(() => e.run('model_export', { name: 's', lightmap: true }), /lightmap: not available on skinned models/);
+  // baked light on a skinned mesh: on the bind (rest) pose, TEXCOORD_1 next to the skin attributes
+  const lmx = ex({ lightmap: true });
+  assert.ok(validateGLB(lmx.buf).ok && lmx.r.skin.bake.pose === 'bind (rest)' && lmx.prims.every((p) => p.attributes.TEXCOORD_1 !== undefined && p.attributes.JOINTS_0 !== undefined));
   // normal maps + tangents on a skinned mesh: TANGENT, JOINTS_0 and WEIGHTS_0 all match POSITION
   e.run('create', { name: 'hull', width: 16 });
   e.run('draw', { canvas: 'hull', commands: [{ op: 'rect', x: 0, y: 0, w: 16, h: 8, color: '#778' }, { op: 'rect', x: 0, y: 8, w: 16, h: 8, color: '#556' }, { op: 'rect', x: 3, y: 3, w: 4, h: 4, color: '#aab' }] });
