@@ -249,10 +249,12 @@ function repeatsAndRetries(calls) {
   for (const c of calls) { if (!bySession.has(c.session)) bySession.set(c.session, []); bySession.get(c.session).push(c); }
   for (const cs of bySession.values()) {
     const seen = new Set();
+    let failed = null; // {tool, i} of the last failure not yet retried
     cs.forEach((c, i) => {
       const key = c.args_hash || `${c.tool}:${JSON.stringify(c.args)}`;
       if (seen.has(key)) repeats++; else seen.add(key);
-      if (c.ok && cs.slice(Math.max(0, i - 2), i).some((p) => !p.ok && p.tool === c.tool)) retries++;
+      if (!c.ok) failed = { tool: c.tool, i };
+      else if (failed && failed.tool === c.tool && i - failed.i <= 2) { retries++; failed = null; }
     });
   }
   return { repeats, retries };
