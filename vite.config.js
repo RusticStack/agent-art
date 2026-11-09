@@ -5,6 +5,7 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
+import { notices } from './scripts/vite-notices.js';
 
 const here = (p) => fileURLToPath(new URL(p, import.meta.url));
 const API = (process.env.AGENT_ART_URL || 'http://127.0.0.1:7420').replace(/\/+$/, '');
@@ -37,7 +38,11 @@ export default defineConfig({
   root: here('./web'),
   base: './',
   publicDir: false,
-  plugins: [svelte({ configFile: here('./svelte.config.js') }), devUiToken()],
+  plugins: [svelte({ configFile: here('./svelte.config.js') }), devUiToken(), notices()],
+  resolve: {
+    alias: { '@': here('./web/src') },
+    conditions: process.env.VITEST ? ['browser'] : undefined,
+  },
   build: {
     outDir: here('./dist/ui'),
     emptyOutDir: true,
@@ -49,7 +54,14 @@ export default defineConfig({
         // keep /*! */ and @license notices (three.js is MIT)
         comments: { legal: true, annotation: false, jsdoc: false },
         // three.js core + the addons the 3D viewer uses: one lazy chunk, fetched when it first opens
-        codeSplitting: { groups: [{ name: 'three', test: /[\\/]node_modules[\\/]three[\\/]/ }] },
+        codeSplitting: {
+          groups: [
+            { name: 'three', test: /[\\/]node_modules[\\/]three[\\/]/ },
+            // lazy graph libraries (Svelte Flow + its d3 parts; dagre): stable names for the budget script
+            { name: 'graph-cards', test: /[\\/]node_modules[\\/](@xyflow|@svelte-put|d3-[a-z]+)[\\/]/ },
+            { name: 'graph-layout', test: /[\\/]node_modules[\\/]@dagrejs[\\/]/ },
+          ],
+        },
       },
     },
   },

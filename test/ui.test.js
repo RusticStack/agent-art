@@ -250,3 +250,29 @@ test('ui: audio wav + analysis endpoints', async () => {
     await close(srv);
   }
 });
+
+test('ui: build notices plugin collects one notice per bundled package and enforces the licence allow-list', async () => {
+  const { noticesFor, packageRootOf, licenceIds, formatNotices } = await import('../scripts/vite-notices.js');
+  const files = {
+    '/r/node_modules/svelte/package.json': JSON.stringify({ name: 'svelte', version: '5.0.0', license: 'MIT' }),
+    '/r/node_modules/svelte/LICENSE.md': 'MIT text svelte',
+    '/r/node_modules/@xyflow/svelte/package.json': JSON.stringify({ name: '@xyflow/svelte', version: '1.7.1', license: 'MIT' }),
+    '/r/node_modules/@xyflow/svelte/node_modules/d3-zoom/package.json': JSON.stringify({ name: 'd3-zoom', version: '3.0.0', license: 'ISC' }),
+    '/r/node_modules/@xyflow/svelte/node_modules/d3-zoom/LICENSE': 'ISC text',
+    '/r/node_modules/gpl/package.json': JSON.stringify({ name: 'gpl', version: '1.0.0', license: 'GPL-3.0' }),
+    '/r/node_modules/@internationalized/date/package.json': JSON.stringify({ name: '@internationalized/date', version: '3.0.0', license: 'Apache-2.0' }),
+  };
+  const read = (p) => files[p] ?? null;
+  const list = (dir) => Object.keys(files).filter((f) => f.startsWith(dir + '/') && !f.slice(dir.length + 1).includes('/')).map((f) => f.slice(dir.length + 1));
+  assert.equal(packageRootOf('C:\\r\\node_modules\\@xyflow\\svelte\\dist\\index.js'), 'C:/r/node_modules/@xyflow/svelte');
+  assert.equal(packageRootOf('/r/web/src/main.ts'), null);
+  assert.deepEqual(licenceIds('(MIT OR Apache-2.0)'), ['MIT', 'Apache-2.0']);
+  const ids = ['/r/node_modules/svelte/src/index.js', '/r/node_modules/svelte/src/other.js', '/r/node_modules/@xyflow/svelte/dist/a.js', '/r/node_modules/@xyflow/svelte/node_modules/d3-zoom/src/zoom.js', '/r/web/src/main.ts'];
+  const n = noticesFor(ids, read, list);
+  assert.deepEqual(n.map((x) => x.name), ['@xyflow/svelte', 'd3-zoom', 'svelte']);
+  assert.equal(n.find((x) => x.name === 'd3-zoom').text, 'ISC text');
+  assert.match(n.find((x) => x.name === '@xyflow/svelte').text, /no licence file/);
+  assert.match(formatNotices(n), /svelte 5\.0\.0\nLicence: MIT/);
+  assert.throws(() => noticesFor(['/r/node_modules/gpl/index.js'], read, list), /GPL-3\.0.*not in the allow-list/);
+  assert.throws(() => noticesFor(['/r/node_modules/@internationalized/date/x.js'], read, list), /must not be bundled/);
+});

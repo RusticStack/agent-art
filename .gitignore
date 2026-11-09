@@ -5,3 +5,6 @@ render.png
 *.log
 .env
 .env.*
+test-results/
+playwright-report/
+e2e/.state.json
