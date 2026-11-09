@@ -151,7 +151,8 @@ function fxMake(a, source) {
   const r = makeOne(this, a, dir, group, man, source);
   writeJSON(path.join(dir, MANIFEST), man);
   const img = upscale(peakImage(r), Math.max(1, Math.min(4, Math.floor(512 / Math.max(r.meta.sheet[0], r.meta.sheet[1])))));
-  return { ...summary(r), dir, group, meta: r.meta, ...(a.path ? { next: `export with the same folder: art_fx {action:"export", path:${JSON.stringify(a.path)}} (the manifest lives in ${dir})` } : {}), image: encodePNG(img.width, img.height, img.data) };
+  // file is relative to dir (<dir>/<group>/<id>.png); abs_file = the full path
+  return { ...summary(r), abs_file: path.join(dir, r.meta.file), dir, group, meta: r.meta, ...(a.path ? { next: `export with the same folder: art_fx {action:"export", path:${JSON.stringify(a.path)}} (the manifest lives in ${dir})` } : {}), image: encodePNG(img.width, img.height, img.data) };
 }
 
 function fxBatch(a, source) {

@@ -1,8 +1,8 @@
 // Lighting & atmosphere commands for 2.5D / HD-2D style art. All of them stay pixel-art
 // friendly: intensities can be quantized into a few bands with ordered (Bayer) dithering,
 // and `quantize` snaps the result back onto the palette.
-import { parseColor, blendOver } from './color.js';
-import { int, num, band, hash3, smooth, mulberry32, bayer } from './util.js';
+import { parseColor, blendOver, medianCut } from './color.js';
+import { int, num, band, hash3, smooth, mulberry32, bayer, regionRect } from './util.js';
 
 const lum = (c) => (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255;
 const clamp = (v) => Math.max(0, Math.min(255, Math.round(v)));
@@ -26,7 +26,7 @@ function applyLight(c, col, s, mode, onEmpty) {
 }
 
 function regionOf(ctx, a) {
-  const R = Array.isArray(a.region) ? { x: a.region[0], y: a.region[1], w: a.region[2], h: a.region[3] } : a.region || {};
+  const R = regionRect(a.region) || {};
   return ctx.region({ x: a.rx ?? R.x, y: a.ry ?? R.y, w: a.rw ?? R.w, h: a.rh ?? R.h });
 }
 
@@ -262,10 +262,19 @@ export const EFFECTS = {
   /** Snap pixels to a palette (canvas + project palette by default), optionally with ordered dithering. */
   quantize(ctx, a) {
     let list = a.colors;
-    if (!list) list = Object.keys(ctx.pal);
+    const { x, y, w, h } = ctx.region(a);
+    if (typeof list === 'number' && list !== 0) {
+      // colors:<n> = the n most representative colors of the region (median cut, deterministic)
+      if (!(Number.isInteger(list) && list >= 1 && list <= 256)) throw new Error(`colors:<n> must be a whole number 1..256 (got ${list})`);
+      const px = [];
+      for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) { const c = ctx.get(xx, yy); if (c && c[3]) px.push(c[0], c[1], c[2], 255); }
+      list = medianCut([px], list).map((c) => [...c, 255]);
+      if (!list.length) throw new Error('quantize colors:<n>: the region has no painted pixels');
+    } else if (!list) list = Object.keys(ctx.pal);
+    else if (typeof list === 'string') list = [list];
+    if (!Array.isArray(list)) throw new Error('colors must be a list of colors (["#hex", "palette key", ..]) or a count (colors:16 picks 16 from the canvas)');
     const pal = list.map((c) => ctx.color(c)).filter((c) => c[3] > 0);
     if (!pal.length) throw new Error('quantize needs "colors" or a non-empty palette');
-    const { x, y, w, h } = ctx.region(a);
     const dither = a.dither || 'none';
     const spread = num(a.spread, 'spread', 40) * num(a.strength, 'strength', 1);
     const alphaCut = a.alpha_threshold !== undefined ? num(a.alpha_threshold, 'alpha_threshold') * 255 : null;

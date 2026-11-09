@@ -13,7 +13,7 @@ import { Engine } from './engine.js';
 import { startServer, APP_ID, packResult } from './server.js';
 import { COMMAND_NAMES } from './doc.js';
 import { drawDescription, helpText, TOPICS } from './docs.js';
-import { SKILLS, skillText } from './skills.js';
+import { SKILLS, skillText, skillList } from './skills.js';
 import { summarizeArgs, summarizeResult, READ_ONLY } from './activity.js';
 import { UsageLog, usageFile } from './usage.js';
 
@@ -134,9 +134,9 @@ export const TOOLS = [
     description: 'Docs on demand: {op:"shade"} = draw op options + example; {topic} = guide (long ones answer with a core + section index: {topic, section:"a,b"} or full:true); {skill} = step-by-step recipe.',
     inputSchema: {
       type: 'object',
-      properties: { op: { type: 'string' }, topic: { type: 'string', enum: ['index', 'ops', ...Object.keys(TOPICS)] }, section: { type: 'string' }, full: { type: 'boolean' }, skill: { type: 'string', enum: Object.keys(SKILLS) } },
+      properties: { op: { type: 'string' }, topic: { type: 'string', enum: ['index', 'ops', ...Object.keys(TOPICS)] }, section: { type: 'string' }, full: { type: 'boolean' }, skill: { type: 'string', enum: ['list', ...Object.keys(SKILLS)] } },
     },
-    run: async (call, a) => ({ text: a.skill ? skillText(a.skill) : helpText(a) }),
+    run: async (call, a) => ({ text: a.skill === 'list' ? skillList() : a.skill ? skillText(a.skill) : helpText(a) }),
   },
   {
     name: 'art_sheet',
@@ -305,7 +305,7 @@ export const TOOLS = [
         rig: { type: 'object' }, sockets: { type: 'object' }, poses: { type: 'object' }, clips: { type: ['object', 'array'], description: 'create / update: {<clip>: {keys, loop?, duration?}}; hold_check: clip names' },
         pose: { type: 'string' }, base: { type: 'string' }, clip: { type: 'string' }, keys: { type: ['array', 'null'] }, loop: { type: 'boolean' }, events: { type: 'array' }, duration: { type: 'number' }, ease: { enum: ['linear', 'smooth', 'step'] }, delete: { type: 'boolean' },
         canvas: { type: 'string' }, animation: { type: 'string' }, frames: { type: 'integer' }, fps: { type: 'number' }, view: { type: ['string', 'object'] }, camera: { type: ['string', 'object'] }, fov: { type: 'number' }, zoom: { type: 'number' },
-        angles: { type: 'array' }, sweep: { type: 'object' }, pivot: { type: 'array' }, light: { type: 'object' }, outline: { type: 'string' },
+        angles: { type: 'array' }, sweep: { type: 'object' }, pivot: { type: 'array' }, light: { type: 'object' }, outline: { type: ['string', 'boolean'] },
         quantize: { type: ['boolean', 'object'] }, only: { type: 'array', items: { type: 'string' } }, hide: { type: 'array', items: { type: 'string' } },
         grid: { type: 'number' }, scale: { type: 'number', description: 'px per unit (32)' }, origin: { type: ['string', 'array'], description: 'auto (part coords)|bottom (props, ships)|center|pivot|[x,y,z]' }, notes: { type: 'string' }, overwrite: { type: 'boolean' },
         overlays: { type: 'array', items: { type: 'object' } }, uv_origin: { type: 'array', items: { type: 'number' } },

@@ -1,7 +1,7 @@
 // Canvas document: layers, palette, undo history, frames, and all drawing commands.
 import { parseColor, toHex, colorsEqual, blendOver, adjustColor, rgbToHsl, hslToRgb } from './color.js';
 import { encodePNG, decodePNG } from './png.js';
-import { mulberry32, hash3, smooth, BAYER4, int, BLEND_MODES, blendChannel } from './util.js';
+import { mulberry32, hash3, smooth, BAYER4, int, BLEND_MODES, blendChannel, regionRect } from './util.js';
 import { EFFECTS } from './effects.js';
 import { ISO, ISO_FIELDS } from './iso.js';
 import { SHADING } from './shading.js';
@@ -179,9 +179,11 @@ export class Doc {
         const at = this.insertIndex({ position: 'top', ...a });
         this.layers.splice(at, 0, l);
         const hide = a.hide_others !== false && a.keep_visible !== true;
+        const hid = hide ? this.layers.filter((o) => o !== l && o.visible).map((o) => o.name) : [];
         if (hide) this.layers.forEach((o) => { if (o !== l) o.visible = false; });
         this.active = at;
-        return `Stamped visible layers into "${l.name}" at #${at}${hide ? ' (other layers hidden; flatten or remove them when happy)' : ''}`;
+        const names = hid.length ? `: ${hid.slice(0, 8).join(', ')}${hid.length > 8 ? ` +${hid.length - 8}` : ''}` : '';
+        return `Stamped visible layers into "${l.name}" at #${at}${hide ? ` (other layers hidden${names}; keep_visible:true keeps them; flatten or remove them when happy)` : ''}`;
       }
       case 'remove': {
         if (this.layers.length === 1) throw new Error('Cannot remove the last layer');
@@ -800,8 +802,8 @@ class Ctx {
   }
   /** Region in local coords, defaulting to the whole clip area. */
   region(a) {
-    // also accept region:[x,y,w,h] or region:{x,y,w,h} (models often send that form)
-    const R = Array.isArray(a.region) ? { x: a.region[0], y: a.region[1], w: a.region[2], h: a.region[3] } : a.region && typeof a.region === 'object' ? a.region : null;
+    // also accept region:[x,y,w,h], {x,y,w,h} or {box:[x,y,w,h]} (models often send those forms)
+    const R = regionRect(a.region);
     if (R) a = { ...a, x: a.x ?? R.x, y: a.y ?? R.y, w: a.w ?? R.w, h: a.h ?? R.h };
     const x = a.x === undefined ? 0 : int(a.x, 'x');
     const y = a.y === undefined ? 0 : int(a.y, 'y');

@@ -915,7 +915,7 @@ export function listenerReport(p, issues = []) {
     const x = p.sfx;
     s.push(`Reads as: ${x.reads_as}.`);
     s.push(`Envelope: ${x.attack_words} (${x.attack_ms} ms to peak), ${x.hits_words}, ${x.decay_words}; ${x.duration} s long.`);
-    s.push(`Timbre: ${p.timbre.words.join(', ')}, ${x.tone_words}${x.pitch_words ? `, ${x.pitch_words}` : ''}; space: ${p.timbre.space}; stereo ${p.timbre.stereo}.`);
+    s.push(`Timbre: ${p.timbre.words.join(', ')}, ${x.tone_words}${x.pitch_words ? `, ${x.pitch_words}` : ''}; space: ${p.timbre.space}${x.decay_s < 0.12 && /hall|church|cathedral|room/.test(p.timbre.space) ? ' (faint reverb tail, >30 dB under the hit)' : ''}; stereo ${p.timbre.stereo}.`);
     if (issues.length) s.push(`Most audible problems: ${issues.slice(0, 4).map((i) => i.message).join('; ')}.`);
     return s.join(' ');
   }

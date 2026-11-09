@@ -149,3 +149,24 @@ export function blendOver(dst, src, opacity = 1) {
   const ch = (i) => clamp255((src[i] * sa + dst[i] * da * (1 - sa)) / oa);
   return [ch(0), ch(1), ch(2), clamp255(oa * 255)];
 }
+
+/** Median-cut palette of n colours from opaque pixels of several RGBA images. */
+export function medianCut(images, n) {
+  const counts = new Map();
+  for (const d of images) for (let i = 0; i < d.length; i += 4) if (d[i + 3] >= 128) { const k = (d[i] << 16) | (d[i + 1] << 8) | d[i + 2]; counts.set(k, (counts.get(k) || 0) + 1); }
+  let boxes = [[...counts].map(([k, c]) => [(k >> 16) & 255, (k >> 8) & 255, k & 255, c])];
+  if (!boxes[0].length) return [];
+  while (boxes.length < n) {
+    let bi = -1, best = 0, ch = 0;
+    boxes.forEach((b, i) => {
+      if (b.length < 2) return;
+      for (let c = 0; c < 3; c++) { let lo = 255, hi = 0; for (const p of b) { if (p[c] < lo) lo = p[c]; if (p[c] > hi) hi = p[c]; } if (hi - lo > best) { best = hi - lo; bi = i; ch = c; } }
+    });
+    if (bi < 0) break;
+    const b = boxes[bi].sort((x, y) => x[ch] - y[ch]), total = b.reduce((s, p) => s + p[3], 0);
+    let acc = 0, cut = 1;
+    for (let i = 0; i < b.length - 1; i++) { acc += b[i][3]; if (acc >= total / 2) { cut = i + 1; break; } cut = i + 1; }
+    boxes.splice(bi, 1, b.slice(0, cut), b.slice(cut));
+  }
+  return boxes.filter((b) => b.length).map((b) => { const w = b.reduce((s, p) => s + p[3], 0); return [0, 1, 2].map((c) => Math.round(b.reduce((s, p) => s + p[c] * p[3], 0) / w)); });
+}

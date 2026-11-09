@@ -2,7 +2,7 @@
 // JSON in <workspace>/models/<name>.json, so agents can iterate; canvases stay the texture source.
 import fs from 'node:fs';
 import path from 'node:path';
-import { parseColor, toHex } from './color.js';
+import { parseColor, toHex, medianCut } from './color.js';
 import { buildModel, PART_DOCS, matMul, rigLayout, detailOf } from './model3d.js';
 import { generateCTM, CTM_METHODS } from './ctm.js';
 import { Doc, MAX_SIZE } from './doc.js';
@@ -330,26 +330,6 @@ function previewImage(engine, def, a) {
 }
 
 // ---------- sprite renders: quantize, dither, outline ----------
-/** Median-cut palette of n colours from opaque pixels of several RGBA images. */
-function medianCut(images, n) {
-  const counts = new Map();
-  for (const d of images) for (let i = 0; i < d.length; i += 4) if (d[i + 3] >= 128) { const k = (d[i] << 16) | (d[i + 1] << 8) | d[i + 2]; counts.set(k, (counts.get(k) || 0) + 1); }
-  let boxes = [[...counts].map(([k, c]) => [(k >> 16) & 255, (k >> 8) & 255, k & 255, c])];
-  if (!boxes[0].length) return [];
-  while (boxes.length < n) {
-    let bi = -1, best = 0, ch = 0;
-    boxes.forEach((b, i) => {
-      if (b.length < 2) return;
-      for (let c = 0; c < 3; c++) { let lo = 255, hi = 0; for (const p of b) { if (p[c] < lo) lo = p[c]; if (p[c] > hi) hi = p[c]; } if (hi - lo > best) { best = hi - lo; bi = i; ch = c; } }
-    });
-    if (bi < 0) break;
-    const b = boxes[bi].sort((x, y) => x[ch] - y[ch]), total = b.reduce((s, p) => s + p[3], 0);
-    let acc = 0, cut = 1;
-    for (let i = 0; i < b.length - 1; i++) { acc += b[i][3]; if (acc >= total / 2) { cut = i + 1; break; } cut = i + 1; }
-    boxes.splice(bi, 1, b.slice(0, cut), b.slice(cut));
-  }
-  return boxes.filter((b) => b.length).map((b) => { const w = b.reduce((s, p) => s + p[3], 0); return [0, 1, 2].map((c) => Math.round(b.reduce((s, p) => s + p[c] * p[3], 0) / w)); });
-}
 function quantizeFrames(images, W, pal, dither, strength = 1) {
   const spread = 40 * strength, cache = new Map();
   for (const d of images) for (let i = 0; i < d.length; i += 4) {
@@ -688,7 +668,7 @@ export const MODEL_OPS = {
     if (L.ambient !== undefined) lopts.ambient = Math.max(0, Math.min(1, Number(L.ambient)));
     if (L.color) { const c = parseColor(L.color); lopts.color = [c[0] / 255, c[1] / 255, c[2] / 255]; }
     const imgs = posed.map((p) => renderCamera(groupsOf(p.shown.mesh), cam, FW, FH, lopts).data);
-    let colors;
+    let colors, qpal;
     if (a.quantize) {
       const q = a.quantize === true ? { colors: 16 } : a.quantize;
       let pal;
@@ -701,9 +681,14 @@ export const MODEL_OPS = {
       } else if (Array.isArray(q.colors)) pal = q.colors.map((c) => parseColor(c));
       else pal = medianCut(imgs, Math.max(2, Math.min(256, Math.round(Number(q.colors ?? 16)))));
       if (pal.length) quantizeFrames(imgs, FW, pal, q.dither === true || q.dither === 'bayer', Number(q.strength ?? 1));
-      colors = pal.length;
+      colors = pal.length; qpal = pal;
     }
-    if (a.outline) { const c = parseColor(a.outline); for (const d of imgs) outlineFrame(d, FW, FH, c); }
+    if (a.outline) {
+      // outline:true = the darkest quantize colour, else near-black
+      const dark = qpal?.length ? qpal.reduce((m, c) => (c[0] * 2 + c[1] * 3 + c[2] < m[0] * 2 + m[1] * 3 + m[2] ? c : m)) : null;
+      const c = a.outline === true ? (dark ? [dark[0], dark[1], dark[2], 255] : parseColor('#1a1a1a')) : parseColor(a.outline);
+      for (const d of imgs) outlineFrame(d, FW, FH, c);
+    }
     // per-frame socket anchors: frame pixel [x, y] (0.1 px) + screen rotation of the socket's forward (-Z) axis
     const anchors = posed.map((p) => {
       const out = {};

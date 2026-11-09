@@ -85,3 +85,15 @@ export function checkName(n, what) {
   if (typeof n !== 'string' || !SAFE_NAME.test(n) || /^\.+$/.test(n)) throw new Error(`${what} ${JSON.stringify(n)} must be 1-64 letters, digits, _ - . (it names files under the asset root)`);
   return n;
 }
+
+/** region:[x,y,w,h] | {x?,y?,w?,h?} | {box:[x,y,w,h]} -> {x,y,w,h} (null when absent); anything else is an error, never ignored. */
+export function regionRect(r) {
+  if (r === undefined || r === null || r === false) return null;
+  if (Array.isArray(r)) return { x: r[0], y: r[1], w: r[2], h: r[3] };
+  if (typeof r === 'object') {
+    if (Array.isArray(r.box)) return regionRect(r.box);
+    const bad = Object.keys(r).filter((k) => !['x', 'y', 'w', 'h'].includes(k));
+    if (!bad.length) return r;
+  }
+  throw new Error(`region must be [x,y,w,h] or {x,y,w,h} (got ${JSON.stringify(r)})`);
+}

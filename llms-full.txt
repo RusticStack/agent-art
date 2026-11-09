@@ -123,7 +123,7 @@ Parameters:
 - topic (string): one of index | ops | workflow | textures | characters | animation | scenes | hires | minecraft | rig | library | skin2d | melee | 3d | materials | damage | audio | music | mixing | perception | planets | fx | fp | graph | cleanup
 - section (string)
 - full (boolean)
-- skill (string): one of tileable-texture | sprite | rig | rig-hd | weapon-handling | anim-library | walk-cycle | iso-scene | hd2d-scene | minecraft-pack | 3d-kit | ship-model | hard-surface | ships-structures | fp-weapon | prop-rig | ui-icons | sfx-pack | music-track | planets-space | combat-fx
+- skill (string): one of list | tileable-texture | sprite | rig | rig-hd | weapon-handling | anim-library | walk-cycle | iso-scene | hd2d-scene | minecraft-pack | 3d-kit | ship-model | hard-surface | ships-structures | fp-weapon | prop-rig | ui-icons | sfx-pack | music-track | planets-space | combat-fx
 
 ### art_sheet
 
@@ -450,7 +450,7 @@ Parameters:
 - sweep (object)
 - pivot (array)
 - light (object)
-- outline (string)
+- outline (string|boolean)
 - quantize (boolean|object)
 - only (array of string)
 - hide (array of string)
@@ -851,7 +851,7 @@ example: {"op":"gradient","colors":["#1a1030","#4a2a60","#c06070"],"direction":"
 adjust {hue?,saturation?,lightness?,jitter?,alpha?,region} — HSL adjust. hue in degrees, saturation/lightness -1..1, jitter = random ±lightness per pixel, alpha = opacity change -1..1 (-0.3 = 30% more transparent; result clamped 0..1), set_alpha = absolute opacity 0..1. region = x?,y?,w?,h? (defaults to the whole canvas/frame).
 example: {"op":"adjust","lightness":-0.1,"hue":10}
 
-quantize {colors?,dither?,alpha_threshold?,region} — snap to palette. Snap pixels to colors (default: the palette). dither none|bayer, strength. alpha_threshold:0.5 makes alpha binary. Run after effects to keep a coherent palette. region = x?,y?,w?,h? (defaults to the whole canvas/frame).
+quantize {colors?,dither?,alpha_threshold?,region} — snap to palette. Snap pixels to colors (default: the palette; colors:16 = best 16 from the region). dither none|bayer, strength. alpha_threshold:0.5 makes alpha binary. Run after effects to keep a coherent palette. region = x?,y?,w?,h? (defaults to the whole canvas/frame).
 example: {"op":"quantize","dither":"bayer"}
 
 shade {colors:[dark..light],light?,of?,depth?,profile?,per_color?,region} — AUTO form shading of drawn shapes (use instead of hand shading). Shades shapes you already drew (any flat color) from ONE light direction using a ramp dark->light: rounded volume from the shape outline, no pillow shading. of: which colors form the shape (default every painted pixel in the region). light: top-left (default)|top|top-right|left|right|bottom-left|bottom|bottom-right or degrees. profile: round (dome, default)|flat (bevelled edges + flat top, set depth px)|sharp. per_color:true shades each flat color as its own part (e.g. arm vs body). bias -0.3..0.3 shifts lighter/darker; contrast; dither:true; wrap:true for tileable textures; cleanup:0 keeps lone pixels. Workflow: block in flat silhouettes -> shade -> outline -> hand detail. region = x?,y?,w?,h? (defaults to the whole canvas/frame).
@@ -893,7 +893,7 @@ example: {"op":"mirror","axis":"x","source":"left"}
 clear {region?} — erase. No region = the whole layer (with frame: the whole frame). region = x?,y?,w?,h? (defaults to the whole canvas/frame). Honours mask.
 example: {"op":"clear","x":0,"y":0,"w":4,"h":4}
 
-light {x,y,radius,color,intensity?,mode?,steps?} — point light. mode add|screen|multiply|paint; falloff smooth|linear|sharp; radius_y for ellipses; steps bands (0 = smooth). Paints empty pixels too (on_empty:false = only painted ones). Put lights on their own layer with blend screen/add.
+light {x,y,radius,color,intensity?,mode?,steps?} — point light. mode add|screen|multiply|paint; falloff smooth|linear|sharp; radius_y for ellipses; steps bands (0 = smooth). Paints empty pixels too (on_empty:false = only painted ones). Put lights on their own layer with blend screen/add. region:[x,y,w,h] clips it.
 example: {"op":"light","x":40,"y":30,"radius":18,"color":"#ffb060","intensity":0.8,"mode":"add"}
 
 fog {color,from?,to?,direction?,noise?,steps?,region} — haze. direction vertical|up|horizontal|radial; from/to = alpha; noise 0..1 wisps. For big smooth fog use steps:0 then quantize dither bayer once (a few steps + bayer looks like a screen door). region = x?,y?,w?,h? (defaults to the whole canvas/frame).

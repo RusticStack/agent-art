@@ -50,7 +50,7 @@ export function overviewImage({ chs, meas, perception: p, loop, title, target_lu
   const img = new Img(W, H);
   const n = chs[0].length, dur = n / SR;
   const st = meas.stats;
-  img.text(6, 4, `${title || ''}  ${dur.toFixed(2)}S  ${st.lufs} LUFS  PEAK ${st.peak_dbfs}  TP ${st.true_peak_dbtp}${p?.rhythm?.perceived_bpm ? `  FELT ${Math.round(p.rhythm.perceived_bpm)} BPM` : ''}${p?.tonal ? `  ${p.tonal.key}` : ''}`);
+  img.text(6, 4, `${title || ''}  ${dur.toFixed(2)}S  ${st.lufs} LUFS  PEAK ${st.peak_dbfs}  TP ${st.true_peak_dbtp}${p?.rhythm?.perceived_bpm && p.kind !== 'sfx' ? `  FELT ${Math.round(p.rhythm.perceived_bpm)} BPM` : ''}${p?.tonal ? `  ${p.tonal.key}` : ''}`);
   const xOf = (t) => L + (t / dur) * PW;
   // sections background (shared by every panel)
   const secs = timeline || [];

@@ -283,6 +283,9 @@ Keep pieces light (< 500 tris), reuse a few textures, characters stay 2D billboa
 
 Object.assign(SKILLS, AUDIO_SKILLS, PLANET_SKILLS, FX_SKILLS);
 
+/** art_help {skill:"list"}: one line per skill. */
+export const skillList = () => `Skills (art_help {skill:"<name>"}):\n${Object.entries(SKILLS).map(([n, x]) => `- ${n}: ${x.title}`).join('\n')}`;
+
 export function skillText(name) {
   const s = SKILLS[name];
   if (!s) throw new Error(`Unknown skill "${name}". Skills: ${Object.keys(SKILLS).join(', ')}`);
