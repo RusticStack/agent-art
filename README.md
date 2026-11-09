@@ -165,7 +165,8 @@ Author motion once per skeleton and render it on every character. A skeleton is 
   - The class table, grip geometry (in body units), carry positions and `conform` live in `src/handling.js`. They are shared with other pipelines, such as first-person viewmodels.
 - **Melee:** `melee {skeleton, weapon?, shield?}` writes a melee clip set onto a humanoid_hd skeleton.
   - Strikes per weapon: knife slash / stab / combo, blade and heavy swings, baton strike with a shock tip, rifle butt-stroke, pistol whip, punches, kick and shove. Also block and parry, hit reactions in four directions, stagger, knockdown and get-up.
-  - Paired takedowns (`takedown_rear`, `disarm_front`, `shield_knockdown`) are attacker / victim clips that share one alignment.
+  - Paired takedowns (`takedown_rear`, `disarm_front`, `shield_knockdown`) are attacker / victim clips that share one alignment. On gun skeletons `disarm_front` takes the gun (`disarm:"take"`) or knocks it to the floor (`disarm:"drop"`) for every handling class, with a per-frame gun track for both actors' weapon layers.
+  - Front and back views are checked in 3D (screen gap plus the side-view depth) and the partner is staged sideways per frame (`partner_dx_track`). Skins with proportions get each pair refit on their own rigs (heavy on light, light on heavy).
   - `batch` adds `anims.<clip>_<view>.melee` to the characters manifest: phases, events (windup, active start / end, impact, recovery, sound, effect), a hit capsule per active frame and view with the swept polygon since the previous frame, damage type, stamina, root motion, combo windows and paired metadata.
   - `melee_check` validates event order, sweep coverage, foot slide and contact alignment.
   - `melee_sheet` renders the eight weapon models (`art_model template:"melee_<id>"`: combat knife, machete, baton, stun baton, vibro-blade, breaching axe and hammer, riot shield) into world sheets of views × pitch with the grip on one pixel.
@@ -173,6 +174,10 @@ Author motion once per skeleton and render it on every character. A skeleton is 
   - `art_help {topic:"melee"}` has the manifest fields and the Three.js and Roblox runtime notes. Demos: `docs/melee/` (`node scripts/melee-demos.js`).
 
   ![Melee: knife combo strike frames in eight directions with the hit volumes drawn over them](docs/melee/strike-knife-combo.png)
+
+  ![Gun disarm (take): the gun's grip on the runtime layer, victim (blue) then attacker (yellow)](docs/limits/gun_disarm_strip.png)
+
+  ![Two proportions: heavy on light and light on heavy rear takedowns, refit on their rigs](docs/limits/two_proportion_takedown.png)
 
   ![Baked vs runtime: the issued rifle and a dmr with a scope drawn at the same sockets](docs/img/weapon-sockets-composite.png)
 - **glTF:** `gltf {skin, clips?, path?}` exports a skinned cutout mesh: one quad per part from the base-view cells, one joint per part, and the rest pose as the bind pose. Each clip becomes an animation, a hidden part is scaled to 0, and events go in the animation extras.
@@ -467,6 +472,17 @@ Big-budget sci-fi set pieces at a pixel-texture budget (renders: `docs/ships/`, 
 
 `art_model damage` gives a model seeded, nested damage states (scuffed, damaged, wrecked or custom amounts): dents that respect part rigidity, lost or hinged panels with an inner frame and sparking wires, bent parts, shattered glass, scorch, wear, bullet holes, hull breaches, and fx sockets for sparks, smoke, fire, steam and leaks. `art_model fracture` pre-cuts parts into watertight chunks with mass, centre and collision hulls. `model_export {damage:true}` writes the states as nodes (with LODs), blend masks and a manifest; `damage:{profile:"roblox"}` writes MeshParts with baked decals. Details: `art_help {topic:"damage"}`.
 
+- The damage mask UVs take the first free UV set, so baked AO, lightmaps and thickness (TEXCOORD_1) and `uv2` / `uv3` work on damage exports (`blend.uv_set` in the manifest). Without them the mask stays on TEXCOORD_1.
+- The blend-ready intact mesh keeps its chart UVs, damage RGBA and dent morph on every LOD level; the intact overlay shells carry the same morph.
+- Rigs survive: named parts, sockets and clips are kept in every state (a damaged door still opens, a wrecked turret still turns), and skinned models get every state skinned on the shared armature. Rigged and skinned damage files pass both glTF validators.
+- Open parts (capless tubes, plates) are closed before fracture and breaches (`close:false` refuses / keeps them open).
+- `art_draw damage` on sprites scales its features with the damaged box, so 0.25 / 0.6 / 1.0 read clearly at 128×192.
+
+![Damage glb with baked AO kept: AO on TEXCOORD_1, mask on TEXCOORD_3](docs/limits/damage_ao_kept.png)
+![The damage blend at every LOD (blend 0, 0.5, 1)](docs/limits/damage_blend_lods.png)
+![A rigged locker: its door opens in every damage state (the exported clip sampled)](docs/limits/rigged_door_open.png)
+![Sprite damage overlay at 0.25 / 0.6 / 1.0 on a 128x192 prop: 0.9.0 (top) and now](docs/limits/sprite_overlay_before_after.png)
+
 ![Crate, door, terminal and hull panel: intact, scuffed, damaged, wrecked](docs/damage/interactables.png)
 ![Barrel, glass pane, light, console and engine pod](docs/damage/interactables_more.png)
 ![Hull breach with exposed frame](docs/damage/hull_breach.png)
@@ -496,6 +512,13 @@ material.onBeforeCompile = (shader) => {
       vMapUv = vec2(dot(wp, t), -dot(wp, b)) * uvScale;`);
 };
 ```
+
+### Combat effects: `art_fx`
+
+Seeded pixel-art flipbooks (muzzle flashes, tracers, impacts, decals, explosions, smoke, fire, sparks, steam, strobes) with engine metadata. Muzzle flashes are drawn per view: `side`, `front_side` and `back_side` (3/4 toward and away from the camera), `front` and `fp`; third-person metadata carries a per-facing sprite table. First-person flashes come as aim variants (`aims`, default 5, 25° apart), each drawn at its aim, listed in `fp.aims` so the runtime picks the nearest. Steam lists its art_audio sounds (`steam_vent` / `steam_leak` loops, `steam_hiss` one-shot). Details: `art_help {topic:"fx"}`.
+
+![fp muzzle aim variants picked over an fp gun](docs/limits/fp_aims.png)
+![Muzzle flashes per view: side, front_side, back_side, front](docs/limits/muzzle_diagonals.png)
 
 ### Sound effects and music: `art_audio`
 

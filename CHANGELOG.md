@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased
+
+Fixes the known limits of art_fx, damage and melee from 0.9.0. Everything that does not use a changed feature is byte-identical to 0.9.0: `test/limits.test.js` checks 260 digests (damage exports of rig-less models, art_fx sheets and metadata, the 0.9.0 audio recipes, knife and rifle melee clips and a knife batch manifest) against `test/fixtures/limits-golden-0.9.json`, recorded on 0.9.0.
+
+### art_fx
+
+- fp muzzle flashes come as aim variants: `aims` (default 5, 25° apart around the base aim; a number 1..9, a list of degrees, or `false`). Each variant is drawn at its aim (not a rotated sprite); `fp.aims` lists `{aim_deg, file}` so the runtime draws the one nearest the muzzle's screen aim. `preview` draws only the anchor's aim.
+- Diagonal muzzle sprites: views `front_side` (3/4 toward the camera: foreshortened flame with the flash-hider star) and `back_side` (3/4 away). Side and diagonal metadata carry a per-facing sprite table `views {E, W, SE, SW, NE, NW, S, N: {fx, flip_x?, scale?, behind?}}`. The `muzzle` and `all` presets include the diagonals.
+- Steam sounds: art_audio recipes `steam_hiss` (one-shot), `steam_vent` and `steam_leak` (seamless loops); steam metadata lists them (`sound: [steam_vent | steam_leak, steam_hiss]`).
+
+### Damage
+
+- The damage mask UVs move off TEXCOORD_1 when the export bakes AO / lightmap / thickness or adds uv2 / uv3: they take the next free set (manifest `blend.uv_set`, node `extras.blend.uv_set`), and AO / lightmaps / thickness are now baked on damage exports (per file; manifest `bake`). Without those options the mask stays on TEXCOORD_1. The Roblox damage profile keeps its decal bake.
+- The blend works on every LOD: the intact mesh keeps chart UVs, damage RGBA and the dent morph through the LOD collapses (`<name>_intact_LODn` each carry them).
+- Rigs: models with named parts / sockets / clips keep their node tree, socket nodes and clips in every state (`<name>_<state>_rig` / `_LODn`, one animation per clip driving every state), so damaged doors open and turrets turn. Skinned models now take damage states: every state is a skinned mesh on the one armature, with weights from the closest point of the bind surface. Rigged and skinned damage glbs are validated before writing. Fracture still needs rigid parts.
+- `art_draw damage` retuned for sprites: features scale with the damaged box, new `chips` and `under` kinds, palette-only, same spots per view for one seed.
+- Open meshes: fracture closes an open part first (`close: "auto" | "cleanup" | false`; reply / manifest `closed`), and a breach on an open host closes the host first (`features.closed_hosts`; damage `close:false` keeps it open).
+- The intact overlay shells follow the dent morph.
+- Fix: damage `kind:"door"` no longer crashes guessing the door leaf.
+
+### Melee
+
+- Gun skeletons get `disarm_front` for every handling class: `art_anim melee {disarm:"take"|"drop"}`. The batch manifest has `transfer {mode, frame, track[frame] = {owner, state, x, y, rot, pitch}}` for both actors' runtime weapon layers. `melee_check` checks the release, the grip at the transfer, a dropped gun coming to rest and the gun track.
+- Front / back contacts are checked in 3D (screen gap + side-view depth) per view (`contact_by_view`), with per-frame lateral staging of the partner (`lateral_px`; manifest `paired.partner_dx_track`, also used by `anim_paired`).
+- Per-skeleton takedowns: skins with proportions get paired pairs refit on their own rigs in batch, `anim_paired` and `melee_check {skin, victim_skin}` (`refit_offset`).
+
+### Intentional default changes
+
+- fp muzzle flashes (`view:"fp"`) now write aim variant sheets by default (`aims:false` = one sheet as before); fp metadata gains `fp.aims` and its notes change.
+- Side muzzle metadata `views` is now the per-facing sprite table (was text hints), and the presets include `front_side` / `back_side` muzzles.
+- Steam metadata `sound` / `notes` list the new recipes.
+- `art_draw damage` output changes at every amount (retuned overlay).
+- Damage exports with `bake_ao` / `lightmap` / `thickness` / `uv2` / `uv3` move the mask UVs off TEXCOORD_1 and bake AO etc. into the damage glbs; with `lods` the intact LODs carry the blend; intact overlay shells carry the morph; breaches close open hosts; models with named parts / sockets / clips export rigged damage states.
+- Gun skeletons get `disarm_front_attacker` / `_victim` clips (were not written).
+- Front / back batch anims of paired clips gain `partner_dx_track`; `anim_paired` front / back canvases are staged the same way.
+
 ## 0.9.0
 
 ### Fixes (melee, art_fx)
