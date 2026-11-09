@@ -102,11 +102,12 @@ export function sessionOverhead({ instructions = '', tools = [], prompts = [] })
 
 /** Appends usage records to a JSONL file; never throws into the server. */
 export class UsageLog {
-  constructor({ file, level = 'on', version = '', write } = {}) {
+  constructor({ file, level = 'on', version = '', write, session } = {}) {
     this.file = file;
     this.level = level;
     this.version = version;
-    this.session = `s${Date.now().toString(36)}${process.pid.toString(36)}`;
+    // one id per server process; CLI calls (one process each) share AGENT_ART_DEBUG_SESSION
+    this.session = session || `s${Date.now().toString(36)}${process.pid.toString(36)}`;
     this.seq = 0;
     this.seen = new Map(); // tool+args hash -> count (repeat detection)
     this.lastError = null; // {tool, seq} of the last failed call
@@ -231,12 +232,30 @@ export function summarizeUsage(recs, filter = {}) {
     biggest: [...calls].sort((a, b) => b.tokens - a.tokens).slice(0, 8).map((c) => ({ ts: c.ts, tool: c.tool, action: c.action, tokens: c.tokens, reply_image_tokens: c.reply_image_tokens, images: c.images })),
     slowest: [...calls].sort((a, b) => b.ms - a.ms).slice(0, 5).map((c) => ({ ts: c.ts, tool: c.tool, action: c.action, ms: c.ms })),
     errors_top: [...errs].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([k, n]) => ({ error: k, count: n })),
-    repeats: calls.filter((c) => c.repeat > 1).length,
-    retries: calls.filter((c) => c.retry_of).length,
+    ...repeatsAndRetries(calls),
     help_topics: Object.entries(help.reduce((m, c) => { m[c.action] = (m[c.action] || 0) + 1; return m; }, {})).sort((a, b) => b[1] - a[1]),
   };
   rep.suggestions = suggestions(rep);
   return rep;
+}
+
+/**
+ * Identical calls (same tool + arguments) and retries (a successful call of the tool that failed
+ * within the previous two calls), per session in log order: CLI sessions span many processes.
+ */
+function repeatsAndRetries(calls) {
+  let repeats = 0, retries = 0;
+  const bySession = new Map();
+  for (const c of calls) { if (!bySession.has(c.session)) bySession.set(c.session, []); bySession.get(c.session).push(c); }
+  for (const cs of bySession.values()) {
+    const seen = new Set();
+    cs.forEach((c, i) => {
+      const key = c.args_hash || `${c.tool}:${JSON.stringify(c.args)}`;
+      if (seen.has(key)) repeats++; else seen.add(key);
+      if (c.ok && cs.slice(Math.max(0, i - 2), i).some((p) => !p.ok && p.tool === c.tool)) retries++;
+    });
+  }
+  return { repeats, retries };
 }
 
 /** Heuristic pointers at what to optimise. */

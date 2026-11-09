@@ -10,7 +10,7 @@ import { SKILLS, skillFile, skillText } from '../src/skills.js';
 import { startServer, APP_ID, packResult, VERSION } from '../src/server.js';
 import { runMcp, openBrowser, runTool, TOOLS, INSTRUCTIONS } from '../src/mcp.js';
 import { resolveHome, batchOutPath } from '../src/cli.js';
-import { debugLevel, readUsage, summarizeUsage, formatUsage, transcriptUsage, formatTranscript } from '../src/usage.js';
+import { debugLevel, readUsage, summarizeUsage, formatUsage, transcriptUsage, formatTranscript, UsageLog, usageFile } from '../src/usage.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
@@ -68,6 +68,15 @@ Tip (Windows / any shell): avoid quoting problems by piping JSON on stdin:
 
 ops: ${OP_NAMES.join(', ')}
 env: AGENT_ART_PORT, AGENT_ART_HOME, AGENT_ART_OPEN, AGENT_ART_DEBUG, AGENT_ART_DEBUG_FILE (workspace: ${home})`;
+
+/** Debug usage log for CLI calls (--debug / AGENT_ART_DEBUG); AGENT_ART_DEBUG_SESSION groups a run's calls. */
+let cliLog;
+function cliUsage() {
+  if (cliLog !== undefined) return cliLog;
+  const level = debugLevel(debugFlag);
+  cliLog = level ? new UsageLog({ file: usageFile(home), level, version: VERSION, session: process.env.AGENT_ART_DEBUG_SESSION || undefined }) : null;
+  return cliLog;
+}
 
 function readStdin() {
   return fs.readFileSync(0, 'utf8');
@@ -169,22 +178,31 @@ async function main() {
     }
     if (failed) process.exitCode = 1;
   } else if (cmd === 'tools') {
-    console.log(`${INSTRUCTIONS}
-`);
-    for (const t of TOOLS) console.log(`${t.name}: ${t.description}
-  args: ${Object.keys(t.inputSchema.properties || {}).join(', ')}
-`);
+    const text = [`${INSTRUCTIONS}\n`, ...TOOLS.map((t) => `${t.name}: ${t.description}\n  args: ${Object.keys(t.inputSchema.properties || {}).join(', ')}\n`)].join('\n');
+    console.log(text);
+    // what a CLI agent loads instead of the MCP tool list
+    cliUsage()?.start({ client: { name: 'cli' }, instructions: INSTRUCTIONS, tools: TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })), prompts: [] });
+    cliUsage()?.list('cli/tools', text);
   } else if (cmd === 'tool') {
     const [name, json] = rest;
     if (!name) throw new Error('usage: agent-art tool <art_tool> <json>');
     const out = flag('out') || 'view.png';
     const runner = await makeRunner();
+    const usage = cliUsage();
+    const args = parseArgs(json);
+    const ops = [];
+    const run = !usage ? runner.run : async (op, a) => { const o0 = performance.now(); try { return await runner.run(op, a); } finally { ops.push({ op, ms: Math.round(performance.now() - o0) }); } };
+    const t0 = performance.now();
     try {
-      const content = await runTool(name, parseArgs(json), runner.run);
+      const content = await runTool(name, args, run);
+      usage?.call({ tool: name, args, content, ms: performance.now() - t0, ok: true, ops });
       for (const c of content) {
         if (c.type === 'text') console.log(c.text);
         else if (c.type === 'image') { fs.mkdirSync(path.dirname(path.resolve(out)), { recursive: true }); fs.writeFileSync(out, Buffer.from(c.data, 'base64')); console.log(`[image written to ${path.resolve(out)}]`); }
       }
+    } catch (e) {
+      usage?.call({ tool: name, args, content: [{ type: 'text', text: `Error: ${e.message}` }], ms: performance.now() - t0, ok: false, error: e.message, ops });
+      throw e;
     } finally {
       runner.close();
     }
