@@ -22,6 +22,8 @@ process.stdin.on('end', async () => {
     else out.text = buf.toString('utf8').slice(0, 500);
     process.stdout.write(`${JSON.stringify(out)}\n`);
   } catch (e) {
-    process.stdout.write(`${JSON.stringify({ error: e.name === 'AbortError' ? 'timed out' : e.message })}\n`);
+    const key = process.env.AGENT_ART_XI_KEY;
+    const msg = e.name === 'AbortError' ? 'timed out' : String(e.message || e);
+    process.stdout.write(`${JSON.stringify({ error: key ? msg.split(key).join('***') : msg })}\n`);
   }
 });

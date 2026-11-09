@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Engine } from '../src/engine.js';
 import { runTool } from '../src/mcp.js';
 
@@ -112,4 +113,20 @@ test('sfx listener report: no tempo, and a wet tail does not contradict "stops d
   const r = JSON.parse(text(await tool(e, 'art_audio', { action: 'analyze', name: 'shot' })).split('\n')[0]);
   assert.doesNotMatch(r.report, /BPM/);
   if (/stops dead/.test(r.report)) assert.doesNotMatch(r.report, /space: (small room|hall|large hall|cathedral)[^(;]*;/, r.report);
+});
+
+test('usage log: a reply without text never throws; the usage CLI takes --tool / --json as flags, not files', async () => {
+  const { UsageLog, measureContent } = await import('../src/usage.js');
+  assert.equal(measureContent([{ type: 'text' }]).chars, 0);
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-usage-'));
+  const log = new UsageLog({ file: path.join(home, 'u.jsonl'), level: 'on' });
+  assert.doesNotThrow(() => log.call({ tool: 'art_help', content: [{ type: 'text', text: undefined }] }));
+  const { execFileSync } = await import('node:child_process');
+  const bin = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'agent-art.js');
+  const env = { ...process.env, AGENT_ART_DEBUG: '', AGENT_ART_DEBUG_FILE: '' };
+  execFileSync(process.execPath, [bin, '--home', home, '--debug', 'tool', 'art_help', '{}'], { env, encoding: 'utf8' });
+  const plain = execFileSync(process.execPath, [bin, '--home', home, 'usage'], { env, encoding: 'utf8' });
+  assert.match(plain, /1 tool calls?/);
+  assert.match(execFileSync(process.execPath, [bin, '--home', home, 'usage', '--tool', 'art_help'], { env, encoding: 'utf8' }), /1 tool calls?/);
+  assert.ok(JSON.parse(execFileSync(process.execPath, [bin, '--home', home, 'usage', '--json'], { env, encoding: 'utf8' })).calls >= 1);
 });

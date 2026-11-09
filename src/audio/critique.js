@@ -51,7 +51,10 @@ export function critiqueAudio(stats, { kind = 'music', target_lufs, target_peak 
   // only catch a pure tonal thump and a bare click.
   const gunText = `${recipe || ''} ${intent || ''}`;
   const tr = perception?.sfx?.transient;
-  if (kind !== 'music' && tr && /gun|shot|rifle|pistol|revolver|smg|lmg|carbine|shotgun|sniper|marksman|firearm|muzzle/i.test(gunText)) {
+  // a gun = a gunshot_* recipe, or an intent naming a gun / gunfire (word-bounded: not shotgun_pump, plasma_shot, one-shot, screenshot)
+  const gunIntent = (intent || '').replace(/\bone[- ]?shot\b/gi, '');
+  const isGun = /^gunshot_/i.test(recipe || '') || /\b(gun ?shots?|gunfire|guns?|rifles?|pistols?|revolvers?|smgs?|lmgs?|carbines?|shotguns?|snipers?|marksman|firearms?|muzzle)\b/i.test(gunIntent);
+  if (kind !== 'music' && tr && isGun) {
     const far = vars?.distance === 'far' || /distant|far away|far-off/i.test(gunText), quiet = /suppress|silenc/i.test(gunText);
     if (tr.ring_db > 13) add('pitched_ring', 0.85, `a pitched ring at ${tr.ring_hz} Hz, ${tr.ring_db} dB above the surrounding noise: it sounds like a drum, bell or instrument, not a gunshot (recorded shots measure 5-10 dB)`, 'use a recorded shot (recipes gunshot_*, layer kind "sample") or build it from noise bursts; remove tonal layers (voice / note / modal clank / sine thump)');
     if (!quiet && tr.snap < 0.015) add('no_crack', 0.6, `${Math.round(tr.snap * 1000) / 10}% of the first 20 ms is above 2 kHz: a dull tonal thump with no crack (recorded shots: 2-55%)`, 'start with a recorded shot or a 2-5 ms noise burst high-passed at ~2 kHz; raise vars.intensity');

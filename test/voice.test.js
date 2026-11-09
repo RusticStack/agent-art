@@ -103,3 +103,20 @@ test('voice: art_audio voice / voices against a mock ElevenLabs API', async (t) 
   await call({ action: 'delete', name: 'rachel_hi' });
   assert.ok(!fs.existsSync(path.join(home, 'audio', 'voices', 'rachel_hi.wav')));
 });
+
+test('voice: review fixes (temp file name cannot hit another take, a bad key is refused without showing it)', async () => {
+  const { request } = await import('../src/audio/elevenlabs.js');
+  assert.throws(() => request({ key: 'sk_ab\rcd', pathname: '/v2/voices' }), (e) => /invalid characters/.test(e.message) && !e.message.includes('sk_ab'));
+  assert.throws(() => request({ key: 'two words', pathname: '/v2/voices' }), (e) => !e.message.includes('two words'));
+  const ops = fs.readFileSync(path.join(ROOT, 'src', 'audio', 'ops.js'), 'utf8');
+  assert.ok(!ops.includes('.part.wav'), 'the temp take name is not a valid asset name');
+});
+
+test('critique: gun checks only for gunshot recipes or gun intents', async () => {
+  const { critiqueAudio } = await import('../src/audio/critique.js');
+  const stats = { duration: 0.5, lufs: -16, peak_dbfs: -1, true_peak_dbtp: -1, head_silence_ms: 0, tail_silence_ms: 0, bands: { sub: 5, low: 20, lowmid: 30, mid: 30, presence: 10, high: 4, air: 1 } };
+  const perception = { sfx: { transient: { attack_ms: 9, snap: 0.001, ring_db: 40, ring_hz: 400, decay30_s: 0.01, body: 0.5 } } };
+  const ids = (o) => critiqueAudio(stats, { kind: 'sfx', perception, ...o }).issues.map((i) => i.id);
+  for (const o of [{ recipe: 'shotgun_pump' }, { recipe: 'plasma_shot' }, { intent: 'one-shot UI chime' }, { intent: 'screenshot shutter' }]) assert.ok(!ids(o).includes('pitched_ring'), JSON.stringify(o));
+  for (const o of [{ recipe: 'gunshot_rifle' }, { recipe: 'gunshot_pistol_synth' }, { intent: 'pistol gunshot' }, { intent: 'distant rifle fire' }, { intent: 'shotgun blast' }]) assert.ok(ids(o).includes('pitched_ring'), JSON.stringify(o));
+});

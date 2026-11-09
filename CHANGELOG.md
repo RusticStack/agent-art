@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Pre-release review fixes:
+  - The gunshot checks only apply to `gunshot_*` recipes or an intent that names a gun. Before, `shotgun_pump`, `plasma_shot` and intents such as "one-shot UI chime" were judged as gunshots.
+  - A voice take can no longer overwrite another take through its temporary file name.
+  - An API key with invalid characters is refused without being shown.
+  - `agent-art usage --tool / --session / --since / --json` work; the flags were read as log file names.
+  - Debug logging can never turn a successful tool call into an error.
 - Fixes from making the README art with Agent Art itself (all additive):
   - `art_draw quantize` takes a count (`colors:16` picks 16 colours from the canvas by median cut) as well as a list.
   - `art_model render outline:true` uses a near-black outline (or the darkest quantize colour) instead of failing.

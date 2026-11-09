@@ -46,6 +46,8 @@ const baseUrl = () => (process.env.AGENT_ART_ELEVENLABS_URL || 'https://api.elev
 
 /** One HTTP request in a child process. out: file for a binary body. Returns {status, json?, bytes?}. */
 export function request({ key, method = 'GET', pathname, query = {}, body = null, out = null, timeoutMs = 120000 }) {
+  // a key with spaces / control characters would make fetch quote it in its error: refuse it without showing it
+  if (typeof key !== 'string' || !/^[!-~]+$/.test(key)) throw new Error('the ElevenLabs API key contains spaces or invalid characters (check ELEVENLABS_API_KEY / the .env line)');
   const qs = new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined && v !== null).map(([k, v]) => [k, String(v)])).toString();
   const job = { url: `${baseUrl()}${pathname}${qs ? `?${qs}` : ''}`, method, body, out, timeoutMs };
   const r = spawnSync(process.execPath, [HELPER], { input: JSON.stringify(job), env: { ...process.env, AGENT_ART_XI_KEY: key }, encoding: 'utf8', timeout: timeoutMs + 5000, windowsHide: true, maxBuffer: 64 * 1024 * 1024 });

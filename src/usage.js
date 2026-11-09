@@ -66,7 +66,7 @@ export function measureContent(content = []) {
   let chars = 0, text = 0, img = 0;
   const images = [];
   for (const c of content) {
-    if (c?.type === 'text') { chars += c.text.length; text += estimateTokens(c.text); }
+    if (c?.type === 'text') { const t = String(c.text ?? ''); chars += t.length; text += estimateTokens(t); }
     else if (c?.type === 'image') {
       const sz = pngSize(c.data) || { w: 0, h: 0 };
       const t = imageTokens(sz.w, sz.h);
@@ -156,6 +156,11 @@ export class UsageLog {
     this.record(rec);
     return rec;
   }
+}
+// logging never breaks a tool call: a failure while measuring or writing a record is dropped
+for (const m of ['start', 'list', 'call']) {
+  const f = UsageLog.prototype[m];
+  UsageLog.prototype[m] = function (...a) { try { return f.apply(this, a); } catch { return null; } };
 }
 
 /** Argument shape without the content: key -> type/size (the default log level). */

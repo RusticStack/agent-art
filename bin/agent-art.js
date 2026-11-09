@@ -216,8 +216,10 @@ async function main() {
   } else if (cmd === 'usage') {
     const opt = (n) => { const v = flag(n); return v === true ? undefined : v; };
     const since = opt('since'), session = opt('session'), tool = opt('tool'), transcript = opt('transcript');
-    const json = flag('json');
-    const sources = rest.length ? rest : [process.env.AGENT_ART_DEBUG_FILE || path.join(home, 'debug')];
+    const ji = argv.indexOf('--json'), json = ji >= 0; // a switch: never takes the next word (a log file) as its value
+    if (json) argv.splice(ji, 1);
+    const files = argv.slice(argv.indexOf('usage') + 1); // what is left after the flags were taken out
+    const sources = files.length ? files : [process.env.AGENT_ART_DEBUG_FILE || path.join(home, 'debug')];
     const rep = summarizeUsage(readUsage(sources), { since, session, tool });
     const tr = transcript ? transcriptUsage(fs.readFileSync(transcript, 'utf8')) : null;
     if (json) console.log(JSON.stringify(tr ? { ...rep, transcript: tr } : rep, null, 2));

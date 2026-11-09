@@ -352,9 +352,9 @@ export const AUDIO_OPS = {
     const found = findApiKey({ cwd, home: this.home });
     if (!found) throw missingKeyError({ cwd, home: this.home });
     const dir = path.join(s.d.root, 'voices');
-    const out = path.join(dir, `${a.name}.wav`), tmp = path.join(dir, `${a.name}.part.wav`);
-    const r = synthesize(found.key, { ...req, sampleRate, out: tmp });
-    fs.renameSync(tmp, out);
+    const out = path.join(dir, `${a.name}.wav`), tmp = path.join(dir, `.${a.name}.${process.pid}.tmp`); // a dot name: no asset name maps to it
+    let r;
+    try { r = synthesize(found.key, { ...req, sampleRate, out: tmp }); fs.renameSync(tmp, out); } finally { fs.rmSync(tmp, { force: true }); }
     const def = { name: a.name, kind: 'sample', source: out, intent: a.intent ?? old?.intent, voice: { provider: 'elevenlabs', text: a.text, voice_id: r.voice_id, voice_name: r.voice_name || a.voice, model: r.model, format: r.format, settings: Object.fromEntries(Object.entries(settings).filter(([, v]) => v != null)), seed: a.seed, language: a.language, request_hash: reqHash } };
     saveDef(this, def, source);
     const au = getAudio(this, a.name, { force: true });
