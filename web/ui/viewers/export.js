@@ -2,7 +2,7 @@
 // show frames and anchors, GIFs animate, JSON is pretty-printed; .glb and audio files open in the
 // 3D and audio viewers (the app routes those).
 import { el, enc, getJSON, loadBitmap, fmtBytes } from '../util.js';
-import { PixelView } from './pixel.js';
+import { PixelView } from '../../src/viewers/pixel/PixelView.ts';
 import { SheetViewer } from './sheet.js';
 
 export class ExportViewer {

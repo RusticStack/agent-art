@@ -48,6 +48,13 @@ export class AppPage {
   viewerStatus(s: 'A' | 'B' = 'A'): Locator { return this.slot(s).locator('.vstatus').first(); }
   pixelCanvas(s: 'A' | 'B' = 'A'): Locator { return this.slot(s).locator('canvas.pixel-canvas').first(); }
   toolButton(tool: string): Locator { return this.slot('A').locator(`.tool[data-tool="${tool}"]`); }
+  toolGroup(): Locator { return this.slot('A').locator('[role=radiogroup]'); }
+  colorSwatch(): Locator { return this.slot('A').locator('button.color-swatch'); }
+  colorPopover(): Locator { return this.slot('A').locator('.color-pop'); }
+  hexInput(): Locator { return this.colorPopover().locator('input.hex-in'); }
+  zoomLabel(): Locator { return this.slot('A').locator('.zoom-label'); }
+  gridToggle(): Locator { return this.slot('A').locator('label.toggle', { hasText: 'Grid' }).locator('input'); }
+  frameLabel(): Locator { return this.slot('A').locator('.frames-controls .mono'); }
   swapButton(): Locator { return this.page.locator('#swapB'); }
   closeCompareButton(): Locator { return this.page.locator('#closeB'); }
   backToLive(): Locator { return this.slotTitle('A').getByRole('button', { name: 'Back to live' }); }

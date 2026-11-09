@@ -60,6 +60,7 @@ import ellipsis from 'lucide-static/icons/ellipsis.svg?raw';
 import copy from 'lucide-static/icons/copy.svg?raw';
 import skipBack from 'lucide-static/icons/skip-back.svg?raw';
 import skipForward from 'lucide-static/icons/skip-forward.svg?raw';
+import chevronLeft from 'lucide-static/icons/chevron-left.svg?raw';
 
 const RAW = {
   'panel-left': panelLeft, 'panel-right': panelRight, 'circle-dot': circleDot, circle, 'columns-2': columns2, flag,
@@ -69,7 +70,7 @@ const RAW = {
   'undo-2': undo2, 'redo-2': redo2, 'zoom-in': zoomIn, 'zoom-out': zoomOut, maximize, play, pause, download, check,
   'triangle-alert': triangleAlert, 'circle-alert': circleAlert, 'rotate-ccw': rotateCcw, image, layers, film, frame, bone,
   puzzle, box, boxes, palette, music, package: pkg, 'folder-kanban': folderKanban, group, file, sun, ellipsis, copy,
-  'skip-back': skipBack, 'skip-forward': skipForward,
+  'skip-back': skipBack, 'skip-forward': skipForward, 'chevron-left': chevronLeft,
 } as const;
 
 export type IconName = keyof typeof RAW;

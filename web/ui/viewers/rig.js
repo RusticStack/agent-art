@@ -1,7 +1,7 @@
 // Rig viewer: parts sheet (cells + pivots), pose previews per view, and clips (the rig's animated
 // output canvases) played with a skeleton overlay built from the per-frame part anchors.
 import { el, enc, getJSON, loadBitmap, checker, playList } from '../util.js';
-import { PixelView } from './pixel.js';
+import { PixelView } from '../../src/viewers/pixel/PixelView.ts';
 
 export class RigViewer {
   constructor(host, ctx) {

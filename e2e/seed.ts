@@ -18,6 +18,7 @@ export const SEED: { tool: string; args: Record<string, unknown>; fails?: boolea
   { tool: 'art_draw', args: { canvas: 'helmet_side', commands: [oval(12, 12, 8, 10, '#4a5568'), box(14, 11, 6, 4, '#1b1f2a')] } },
   { tool: 'art_layer', args: { canvas: 'helmet_side', action: 'add', name: 'decals' } },
   { tool: 'art_draw', args: { canvas: 'helmet_side', commands: [box(8, 4, 2, 5, '#e5484d')] } },
+  { tool: 'art_create_canvas', args: { name: 'scratch', width: 8, height: 8 } },
   { tool: 'art_create_canvas', args: { name: 'pauldron', width: 16, height: 16, project: 'severance' } },
   { tool: 'art_draw', args: { canvas: 'pauldron', commands: [oval(8, 8, 7, 5, '#4a5568'), box(3, 7, 10, 2, '#f5a524')] } },
   { tool: 'art_create_canvas', args: { name: 'spark', width: 16, height: 16, frames: 4 } },

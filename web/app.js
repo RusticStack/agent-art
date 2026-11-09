@@ -9,7 +9,8 @@ import { $, el, api, getJSON, postJSON, store, debounce, toast, onToast, splitId
 import { Browser } from './ui/browser.js';
 import { Timeline } from './ui/timeline.js';
 import { Inspector, reviewDialog } from './ui/inspector.js';
-import { CanvasViewer, TOOL_KEYS } from './ui/viewers/canvas.js';
+import { adapt } from './src/viewers/legacyAdapter.ts';
+import { CanvasViewer as CanvasViewerTS, TOOL_KEYS } from './src/viewers/canvas/CanvasViewer.ts';
 import { AnimViewer } from './ui/viewers/anim.js';
 import { SheetViewer } from './ui/viewers/sheet.js';
 import { RigViewer } from './ui/viewers/rig.js';
@@ -20,6 +21,8 @@ import { ExportViewer } from './ui/viewers/export.js';
 import { GraphViewer } from './ui/viewers/graph.js';
 import { LayersViewer } from './ui/viewers/layers.js';
 import { cleanupPanel } from './ui/cleanup.js';
+
+const CanvasViewer = adapt(CanvasViewerTS);
 
 const ACTIVE_REVIEW = new Set(['open', 'in_progress', 'reopened']);
 
