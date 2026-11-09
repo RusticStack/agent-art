@@ -210,7 +210,7 @@ function parseGLB(buf) {
 test('glb export: valid binary glTF, materials, emissive, meta.json, instances, atlas', () => {
   const e = setup();
   const dir = tmp();
-  e.run('model_create', { name: 'candle3d', parts: [{ type: 'lathe', canvas: 'candle' }, { type: 'extrude', canvas: 'ell', at: [16, 0, 0] }, { type: 'wall', texture: 'stone', at: [0, 0, -16] }] });
+  e.run('model_create', { name: 'candle3d', unwrap: false, parts: [{ type: 'lathe', canvas: 'candle' }, { type: 'extrude', canvas: 'ell', at: [16, 0, 0] }, { type: 'wall', texture: 'stone', at: [0, 0, -16] }] });
   const r = e.run('model_export', { name: 'candle3d', path: path.join(dir, 'candle3d') });
   assert.ok(r.file.endsWith('.glb'));
   const json = parseGLB(fs.readFileSync(r.file));
@@ -321,7 +321,7 @@ const ngon = (r, N) => (N / 2) * r * r * Math.sin((2 * Math.PI) / N);
 test('glass / opacity: glTF BLEND with opacity factor, double-sided glass, shared image, preview blends', () => {
   const e = setup();
   const dir = tmp();
-  e.run('model_create', { name: 'canopy', parts: [
+  e.run('model_create', { name: 'canopy', unwrap: false, parts: [
     { type: 'box', texture: 'stone', w: 32, h: 8, d: 32 },
     { type: 'box', texture: 'stone', w: 16, h: 8, d: 16, at: [0, 8, 0], glass: true },
     { type: 'box', color: '#3af', w: 8, h: 8, d: 8, at: [0, 16, 0], opacity: 0.5 },

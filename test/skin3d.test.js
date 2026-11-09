@@ -435,11 +435,11 @@ test('existing exports stay byte-identical (no skeleton / skin used)', () => {
   const e = new Engine({ home: tmp() });
   e.run('create', { name: 'stone', width: 16 });
   e.run('draw', { canvas: 'stone', commands: [{ op: 'noise', colors: ['#555', '#777', '#999'], seed: 2 }] });
-  e.run('model_create', { name: 'rifle', template: 'fp_rifle' });
-  e.run('model_create', { name: 'arm', parts: [{ type: 'box', name: 'upper', w: 4, h: 12, d: 4, texture: 'stone', pivot: [0, 6, 0] }, { type: 'box', name: 'lower', parent: 'upper', w: 3, h: 10, d: 3, texture: 'stone', at: [0, -11, 0], pivot: [0, 5, 0] }], sockets: { tip: { part: 'lower', at: [0, -16, 0] } }, clips: { wave: { loop: true, duration: 1, keys: [{ t: 0, parts: {} }, { t: 0.5, parts: { lower: { rot: [40, 0, 0] } }, ease: 'smooth' }] } } });
-  e.run('model_create', { name: 'door', parts: [{ type: 'box', w: 20, h: 30, d: 4, texture: 'stone' }], morphs: { open: { set: { 0: { scale: [1, 1.5, 1] } } } } });
+  e.run('model_create', { name: 'rifle', template: 'fp_rifle', unwrap: false });
+  e.run('model_create', { name: 'arm', unwrap: false, parts: [{ type: 'box', name: 'upper', w: 4, h: 12, d: 4, texture: 'stone', pivot: [0, 6, 0] }, { type: 'box', name: 'lower', parent: 'upper', w: 3, h: 10, d: 3, texture: 'stone', at: [0, -11, 0], pivot: [0, 5, 0] }], sockets: { tip: { part: 'lower', at: [0, -16, 0] } }, clips: { wave: { loop: true, duration: 1, keys: [{ t: 0, parts: {} }, { t: 0.5, parts: { lower: { rot: [40, 0, 0] } }, ease: 'smooth' }] } } });
+  e.run('model_create', { name: 'door', unwrap: false, parts: [{ type: 'box', w: 20, h: 30, d: 4, texture: 'stone' }], morphs: { open: { set: { 0: { scale: [1, 1.5, 1] } } } } });
   const h = (f) => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
-  // recorded on main (7bfa3f8) before skinning existed: rigid rig + clips + sockets, morph targets, template
+  // recorded on main (7bfa3f8) before skinning existed: rigid rig + clips + sockets, morph targets, template (unwrap:false = the per-part path of that time)
   const want = {
     rifle: 'fd91aaabf9cf001c4e9bc3e63f31813cfc994f786f4d12726258e5d87f2d9e00',
     arm: '65f9c3a3cfad56fd36dcecb710940ce61f17a46b28f3998ed6d75d5a2e30bf3b',

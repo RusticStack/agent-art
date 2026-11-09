@@ -256,7 +256,7 @@ test('templates fp_arms / fp_rifle / fp_pistol: create, override, pose, animate,
 test('render: frames, size, only/hide layers, quantize, outline, socket anchors on the projected point', () => {
   const e = new Engine({ home: tmp() });
   e.run('model_create', {
-    name: 'gun', parts: [
+    name: 'gun', unwrap: false, parts: [ // colour classes per part (blue = mag): per-part colours
       { type: 'box', name: 'body', w: 12, h: 4, d: 4, color: '#a05030' },
       { type: 'box', name: 'mag', parent: 'body', w: 2, h: 5, d: 2, color: '#3050a0', at: [2, -5, 0], pivot: [0, 5, 0] },
       { type: 'box', name: 'mark', parent: 'body', w: 1, h: 1, d: 1, color: '#00ff00', at: [5, 6, 0] },

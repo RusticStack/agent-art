@@ -23,6 +23,8 @@ import { encodePNG } from './png.js';
 
 const r4 = (v) => Math.round(v * 1e4) / 1e4;
 export const isSkinned = (def) => !!(def && def.skeleton && def.skin);
+/** Reply note for an unwrapped model that gets a skeleton / skin. */
+const SKIN_UV_NOTE = 'skinned models use per-part textures (unwrap is not on skinned models yet)';
 
 /** Shape names of a skin in skinMesh order (variant shapes first, then sculpted), without building. */
 export function shapeNames(def) {
@@ -285,7 +287,7 @@ export function skinOps(base) {
       if (next.skin) { const b2 = build(this, next); skinnedOf(skinCtx(base, this, b2), next, b2); }
       saveModel(this, next, source, `skeleton ${spec.template ?? (spec.from_parts ? 'from parts' : spec.library ? `library ${spec.library}` : 'bones')}`);
       return {
-        model: def.name, note, skeleton: skelSummary(S), ...(kept.length ? { kept } : {}), ...(spec.cable ? { cable: parts[parts.length - 1].path.length + ' path points' } : {}),
+        model: def.name, note, skeleton: skelSummary(S), ...(kept.length ? { kept } : {}), ...(def.unwrap ? { unwrap_note: SKIN_UV_NOTE } : {}), ...(spec.cable ? { cable: parts[parts.length - 1].path.length + ' path points' } : {}),
         next: next.skin ? `art_model weights {name:"${def.name}"} checks the weights; animate {name, clip, keys:[{t, bones:{<bone>:{rot}}}]} or retarget:{skeleton, clip}` : `art_model skin {name:"${def.name}", skin:{method:"heat"|"distance"|"rigid", smooth?, blend?, paint?, shapes?}} binds the mesh`,
       };
     },
@@ -302,7 +304,7 @@ export function skinOps(base) {
       const { S, sk } = skinnedOf(skinCtx(base, this, built), next, built);
       for (const [n, c] of Object.entries(S.clips)) { try { skelClipKeys(S, c, sk.morphNames); } catch (e) { throw new Error(`clip "${n}": ${e.message} (remove the morph from its keys or keep the shape)`); } }
       saveModel(this, next, source, `skin ${spec.method ?? 'heat'}`);
-      return { model: def.name, weights: compactReport(sk.report), shapes: sk.morphNames, drivers: sk.drivers.map((d) => `${d.name} <- ${d.bone}.${d.axis} ${d.from}..${d.to} deg`), ms: Math.round(performance.now() - t0), next: `art_model weights {name:"${def.name}", bone:"<bone>"} = heat map; preview {name, clip|pose|bones}; export {name, profile?:"roblox"}` };
+      return { model: def.name, ...(def.unwrap ? { unwrap_note: SKIN_UV_NOTE } : {}), weights: compactReport(sk.report), shapes: sk.morphNames, drivers: sk.drivers.map((d) => `${d.name} <- ${d.bone}.${d.axis} ${d.from}..${d.to} deg`), ms: Math.round(performance.now() - t0), next: `art_model weights {name:"${def.name}", bone:"<bone>"} = heat map; preview {name, clip|pose|bones}; export {name, profile?:"roblox"}` };
     },
     /** weights {name, bone?}: weights_check (unweighted, > 4 influences before pruning, non-normalised) + heat map of a bone. */
     model_weights(a) {

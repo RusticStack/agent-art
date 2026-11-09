@@ -16,11 +16,12 @@ export function corpus(e, decodePNG) {
   e.run('draw', { canvas: 'stone', commands: [{ op: 'cells', colors: ['#3a3a44', '#55555f', '#70707a', '#90909a'], gap_color: '#22222a', size: 5, seed: 3 }] });
   e.run('create', { name: 'grime', width: 16, height: 16 });
   e.run('draw', { canvas: 'grime', commands: [{ op: 'noise', colors: ['#00000000', '#30281e'], weights: [0.6, 0.4], seed: 2 }] });
-  e.run('model_create', { name: 'kit_wall', parts: [{ type: 'wall', texture: 'stone' }, { type: 'floor', texture: 'stone', at: [0, 0, 20] }, { type: 'wall', texture: 'stone', at: [32, 0, 0] }], overlays: [{ texture: 'grime', where: 'bottom', falloff: 12 }] });
-  e.run('model_create', { name: 'prop', origin: 'bottom', parts: [{ type: 'box', w: 20, h: 14, d: 12, texture: 'stone', bevel: 2 }, { type: 'cylinder', r: 3, h: 10, at: [0, 14, 0], color: '#8899aa', material: 'bare_metal' }, { type: 'box', w: 6, h: 6, d: 20, at: [0, 4, 0], boolean: 'subtract' }] });
-  e.run('model_create', { name: 'merged', merge: true, parts: [{ type: 'box', w: 16, h: 16, d: 16, color: '#aa6633' }, { type: 'box', w: 16, h: 16, d: 16, at: [16, 0, 0], color: '#aa6633' }] });
-  e.run('model_create', { name: 'v2prop', parts: [{ type: 'box', w: 16, h: 16, d: 16, texture: 'stone', material: 'painted_hull' }, { type: 'box', w: 8, h: 8, d: 8, color: '#9fd8ff', material: 'glass_canopy', at: [0, 16, 0] }] });
-  e.run('model_create', { name: 'door_rig', parts: [{ type: 'box', w: 4, h: 40, d: 4, at: [-14, 0, 0], color: '#555a63' }, { type: 'box', w: 24, h: 38, d: 2, at: [0, 1, 0], color: '#6d7a88', name: 'leaf', pivot: [-12, 0, 0] }], sockets: { handle: { part: 'leaf', at: [8, 20, 2] } } });
+  // unwrap:false on every model: the legacy per-part path (new models are unwrapped by default since the golden was recorded)
+  e.run('model_create', { name: 'kit_wall', unwrap: false, parts: [{ type: 'wall', texture: 'stone' }, { type: 'floor', texture: 'stone', at: [0, 0, 20] }, { type: 'wall', texture: 'stone', at: [32, 0, 0] }], overlays: [{ texture: 'grime', where: 'bottom', falloff: 12 }] });
+  e.run('model_create', { name: 'prop', unwrap: false, origin: 'bottom', parts: [{ type: 'box', w: 20, h: 14, d: 12, texture: 'stone', bevel: 2 }, { type: 'cylinder', r: 3, h: 10, at: [0, 14, 0], color: '#8899aa', material: 'bare_metal' }, { type: 'box', w: 6, h: 6, d: 20, at: [0, 4, 0], boolean: 'subtract' }] });
+  e.run('model_create', { name: 'merged', unwrap: false, merge: true, parts: [{ type: 'box', w: 16, h: 16, d: 16, color: '#aa6633' }, { type: 'box', w: 16, h: 16, d: 16, at: [16, 0, 0], color: '#aa6633' }] });
+  e.run('model_create', { name: 'v2prop', unwrap: false, parts: [{ type: 'box', w: 16, h: 16, d: 16, texture: 'stone', material: 'painted_hull' }, { type: 'box', w: 8, h: 8, d: 8, color: '#9fd8ff', material: 'glass_canopy', at: [0, 16, 0] }] });
+  e.run('model_create', { name: 'door_rig', unwrap: false, parts: [{ type: 'box', w: 4, h: 40, d: 4, at: [-14, 0, 0], color: '#555a63' }, { type: 'box', w: 24, h: 38, d: 2, at: [0, 1, 0], color: '#6d7a88', name: 'leaf', pivot: [-12, 0, 0] }], sockets: { handle: { part: 'leaf', at: [8, 20, 2] } } });
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-art-corpus-'));
   const runs = [
     ['kit_wall', {}], ['kit_wall', { lods: [1, 0.5], tag: 'lods' }], ['prop', {}], ['prop', { bake_ao: { samples: 8 }, collision: true, tag: 'ao' }],

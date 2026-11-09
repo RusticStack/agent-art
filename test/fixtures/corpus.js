@@ -37,8 +37,9 @@ export function corpusEngine() {
     pair: { parts: [{ type: 'box', w: 8, h: 8, d: 8, color: '#a04040' }, { type: 'box', w: 8, h: 8, d: 8, color: '#40a040', at: [12, 0, 0] }, { type: 'plane', w: 8, h: 8, texture: 'gun', at: [-12, 0, 0] }] },
     morph: { parts: [{ type: 'box', w: 16, h: 4, d: 16, color: '#666' }], morphs: { open: { set: { 0: { at: [0, 8, 0] } } } } },
   };
-  for (const [name, def] of Object.entries(models)) e.run('model_create', { name, ...def });
-  e.run('model_create', { name: 'rifle', template: 'fp_rifle' });
+  // unwrap:false: the legacy per-part path (new models are unwrapped by default since the golden was recorded)
+  for (const [name, def] of Object.entries(models)) e.run('model_create', { name, unwrap: false, ...def });
+  e.run('model_create', { name: 'rifle', template: 'fp_rifle', unwrap: false });
   return e;
 }
 

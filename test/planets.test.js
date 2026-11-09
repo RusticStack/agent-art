@@ -346,10 +346,10 @@ test('existing exports stay byte-identical (no art_planet features used)', () =>
   const e = new Engine({ home: tmp() });
   e.run('create', { name: 'stone', width: 16 });
   e.run('draw', { canvas: 'stone', commands: [{ op: 'noise', colors: ['#555', '#777', '#999'], seed: 2 }] });
-  e.run('model_create', { name: 'kit', parts: [{ type: 'floor', w: 64, d: 64, texture: 'stone' }, { type: 'wall', w: 64, h: 64, d: 8, texture: 'stone', at: [0, 0, -28] }, { type: 'cylinder', r: 8, h: 40, texture: 'stone', at: [20, 0, 0] }] });
-  e.run('model_create', { name: 'prop', origin: 'bottom', parts: [{ type: 'box', w: 20, h: 10, d: 30, texture: 'stone', bevel: 2 }, { type: 'cylinder', r: 6, h: 12, texture: 'stone', at: [0, 10, 0] }, { type: 'wedge', w: 10, h: 6, d: 10, texture: 'stone', at: [0, 22, 0] }] });
+  e.run('model_create', { name: 'kit', unwrap: false, parts: [{ type: 'floor', w: 64, d: 64, texture: 'stone' }, { type: 'wall', w: 64, h: 64, d: 8, texture: 'stone', at: [0, 0, -28] }, { type: 'cylinder', r: 8, h: 40, texture: 'stone', at: [20, 0, 0] }] });
+  e.run('model_create', { name: 'prop', unwrap: false, origin: 'bottom', parts: [{ type: 'box', w: 20, h: 10, d: 30, texture: 'stone', bevel: 2 }, { type: 'cylinder', r: 6, h: 12, texture: 'stone', at: [0, 10, 0] }, { type: 'wedge', w: 10, h: 6, d: 10, texture: 'stone', at: [0, 22, 0] }] });
   const h = (f) => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
-  // hashes recorded on main (8567dbc) before art_planet existed
+  // hashes recorded on main (8567dbc) before art_planet existed (unwrap:false = the per-part path of that time)
   const want = {
     'kit.glb': '7360574e569704c71434ea75b92d6cd17689446683b0c21354b44ef59273e9d3',
     'prop.glb': '282396abb22d99aa023f610fb7a4d197a64a9760bd56c880051d9921008c70ec',

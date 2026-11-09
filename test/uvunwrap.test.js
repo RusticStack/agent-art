@@ -55,7 +55,7 @@ test('no unwrap = no change: builds, previews and exports of other models stay i
   const before = snap();
   e.run('model_unwrap', { name: 'column' });
   assert.deepEqual(snap(), before);
-  assert.equal(defOf(e, 'column_static').unwrap, undefined);
+  assert.equal(defOf(e, 'column_static').unwrap, false); // the fixture opts out (unwrap:false); unwrapping another model never touches it
   assert.equal(e.run('model_info', { name: 'column_static' }).unwrap, undefined);
 });
 
@@ -274,14 +274,20 @@ test('paint preservation: paint moves with its island on re-layout; a changed pa
   const cap = isl().find((i) => i.part === 'cap' && i.rect[2] >= 4 && i.rect[3] >= 4);
   const at = [cap.rect[0] + 1, cap.rect[1] + 1];
   e.run('draw', { canvas: 'column_uv', layer: 'paint', commands: [{ op: 'pixels', points: [[at[0], at[1], '#ff0000']] }] });
-  e.run('model_update', { name: 'column', set: { plinth: { w: 40, d: 40 } } });
+  const painted = () => { const now = isl().find((i) => i.key === cap.key), doc = e.get('column_uv'), p = ((now.rect[1] + 1) * doc.width + now.rect[0] + 1) * 4, d = layer(doc, 'paint').data; return [d[p], d[p + 1], d[p + 2], d[p + 3]]; };
+  // a def changed outside update (file edit): the explicit layout step moves the paint and says so
+  const def = defOf(e, 'column');
+  modelDefs(e).set('column', { ...def, parts: def.parts.map((p) => (p.name === 'plinth' ? { ...p, w: 40, d: 40 } : p)) });
   const r = e.run('model_unwrap', { name: 'column', unwrap: { do: 'layout' } });
-  const now = isl().find((i) => i.key === cap.key);
-  assert.ok(now, 'cap island kept');
-  const doc = e.get('column_uv'), p = ((now.rect[1] + 1) * doc.width + now.rect[0] + 1) * 4, d = layer(doc, 'paint').data;
-  assert.deepEqual([d[p], d[p + 1], d[p + 2], d[p + 3]], [255, 0, 0, 255]);
+  assert.ok(isl().find((i) => i.key === cap.key), 'cap island kept');
+  assert.deepEqual(painted(), [255, 0, 0, 255]);
   assert.ok(r.notes?.some((n) => /paint of 1 island/.test(n)), JSON.stringify(r.notes));
-  e.run('model_update', { name: 'column', set: { cap: { w: 26, d: 26 } } });
+  // update re-lays the atlas itself (paint moves with its island)
+  e.run('model_update', { name: 'column', set: { plinth: { w: 36, d: 36 } } });
+  assert.deepEqual(painted(), [255, 0, 0, 255]);
+  // the painted island changes: update keeps the atlas (stale, per-part textures) and says why
+  const u = e.run('model_update', { name: 'column', set: { cap: { w: 26, d: 26 } } });
+  assert.match(u.unwrap_note, /overwrite/);
   assert.throws(() => e.run('model_unwrap', { name: 'column' }), /overwrite/);
   e.run('model_unwrap', { name: 'column', unwrap: { overwrite: true } });
 });
@@ -289,7 +295,10 @@ test('paint preservation: paint moves with its island on re-layout; a changed pa
 test('stale atlas: the build falls back to per-part textures and says so; check reports stale_atlas', () => {
   const e = uvCorpusEngine(tmp());
   e.run('model_unwrap', { name: 'column' });
-  const u = e.run('model_update', { name: 'column', set: { shaft: { r: 7 } } });
+  // update re-bakes (never stale); a def changed outside update (file edit) is stale until the next preview / update
+  const def = defOf(e, 'column');
+  modelDefs(e).set('column', { ...def, parts: def.parts.map((p) => (p.name === 'shaft' ? { ...p, r: 7 } : p)) });
+  const u = e.run('model_info', { name: 'column' });
   assert.match(u.cohesion, /stale/);
   assert.equal(u.unwrap.stale, true);
   const b = uwBuilt(e, 'column');
@@ -371,9 +380,12 @@ test('check: column before / after unwrap, a single box has no false alarms, til
   e.run('model_update', { name: 'column', set: { plinth: { texture: 'stone' }, base: { texture: 'stone' }, shaft: { texture: 'stone' }, cap: { texture: 'stone' } } });
   e.run('model_unwrap', { name: 'column', unwrap: { cohesion: { courses: { h: 8, len: 16 } } } });
   assert.equal(e.run('model_unwrap', { name: 'column', unwrap: { do: 'check' } }).cohesion.pass, true);
-  e.run('model_create', { name: 'one', parts: [{ type: 'box', w: 16, h: 16, d: 16, texture: 'brick' }] });
-  assert.deepEqual(e.run('model_unwrap', { name: 'one', unwrap: { do: 'check' } }).cohesion.issues, []);
-  e.run('model_create', { name: 'mixed', parts: [{ type: 'box', w: 16, h: 16, d: 16, texture: 'brick' }, { type: 'box', w: 48, h: 16, d: 16, at: [32, 0, 0], texture: 'brick', tile: false }] });
+  e.run('model_create', { name: 'one', unwrap: false, parts: [{ type: 'box', w: 16, h: 16, d: 16, texture: 'brick' }] });
+  assert.deepEqual(e.run('model_unwrap', { name: 'one', unwrap: { do: 'check' } }).cohesion.issues.filter((i) => i.id !== 'unwrap_off'), []);
+  // the default (unwrapped) single box: only info notes (atlas fill), never an error or warning
+  e.run('model_create', { name: 'one_uv', parts: [{ type: 'box', w: 16, h: 16, d: 16, texture: 'brick' }] });
+  assert.deepEqual(e.run('model_unwrap', { name: 'one_uv', unwrap: { do: 'check' } }).cohesion.issues.filter((i) => i.level !== 'info'), []);
+  e.run('model_create', { name: 'mixed', unwrap: false, parts: [{ type: 'box', w: 16, h: 16, d: 16, texture: 'brick' }, { type: 'box', w: 48, h: 16, d: 16, at: [32, 0, 0], texture: 'brick', tile: false }] });
   assert.ok(e.run('model_unwrap', { name: 'mixed', unwrap: { do: 'check' } }).cohesion.issues.some((i) => i.id === 'texel_density'));
 });
 
@@ -411,4 +423,136 @@ test('acceptance renders: after differs from before and passes the check (AA_UV_
     if (dir) { fs.writeFileSync(path.join(dir, `${m}_before.png`), b); fs.writeFileSync(path.join(dir, `${m}_after.png`), a); fs.writeFileSync(path.join(dir, `${m}_uv.png`), r.image); }
   }
   assert.ok(UV_MODELS.column);
+});
+
+// ---------- unwrap by default (new models) ----------
+const fresh = () => { const e = new Engine({ home: tmp() }); drawTextures(e); return e; };
+const imgOf = (e, name) => Buffer.from(e.run('model_preview', { name, views: ['front', 'game'], size: 128 }).image).toString('base64');
+
+test('default: create stores the default unwrap and bakes the atlas; reply names it', () => {
+  const e = fresh();
+  const r = e.run('model_create', { name: 'column', ...UV_MODELS.column });
+  const def = defOf(e, 'column');
+  assert.deepEqual(def.unwrap, { cohesion: { ao: { strength: 1 }, contact: { strength: 1 }, edges: { strength: 1, wear: 0.65 }, grime: { strength: 0.5 }, courses: false } });
+  assert.equal(r.unwrap.canvas, 'column_uv');
+  assert.deepEqual(r.materials, ['column_uv']);
+  assert.equal(r.unwrap_note, undefined);
+  assert.match(r.next, /column_uv/);
+  assert.ok(e.get('column_uv').meta.uv);
+  assert.equal(e.run('model_unwrap', { name: 'column', unwrap: { do: 'check' } }).cohesion.pass, true);
+});
+
+test('opt-out: unwrap:false is byte-identical to a model saved before the default (no unwrap key)', () => {
+  const e = fresh();
+  e.run('model_create', { name: 'off', unwrap: false, ...UV_MODELS.crate });
+  e.run('model_create', { name: 'old', unwrap: false, ...UV_MODELS.crate });
+  delete defOf(e, 'old').unwrap; // a def saved before new models were unwrapped
+  assert.equal(defOf(e, 'off').unwrap, false);
+  assert.equal(e.docs.has('off_uv'), false);
+  assert.equal(imgOf(e, 'off'), imgOf(e, 'old'));
+  assert.deepEqual(e.run('model_info', { name: 'off' }).materials, e.run('model_info', { name: 'old' }).materials);
+  const ga = parseGLB(fs.readFileSync(e.run('model_export', { name: 'off', path: path.join(tmp(), 'a.glb') }).file));
+  const gb = parseGLB(fs.readFileSync(e.run('model_export', { name: 'old', path: path.join(tmp(), 'b.glb') }).file));
+  assert.equal(JSON.stringify(ga.json.materials), JSON.stringify(gb.json.materials));
+  assert.equal(JSON.stringify(ga.json.accessors), JSON.stringify(gb.json.accessors));
+});
+
+test('existing models: update keeps them per-part and never adds unwrap; unwrap:true on update converts one', () => {
+  const e = fresh();
+  e.run('model_create', { name: 'old', unwrap: false, ...UV_MODELS.column });
+  delete defOf(e, 'old').unwrap;
+  const r = e.run('model_update', { name: 'old', set: { cap: { h: 8 } } });
+  assert.equal(defOf(e, 'old').unwrap, undefined);
+  assert.equal(r.unwrap, undefined);
+  assert.deepEqual(r.materials, ['brick']);
+  assert.match(r.cohesion, /art_model unwrap/); // the one-line suggestion
+  const c = e.run('model_update', { name: 'old', unwrap: true });
+  assert.equal(c.unwrap.canvas, 'old_uv');
+  assert.deepEqual(c.materials, ['old_uv']);
+});
+
+test('default: update / texture edits re-bake the atlas (paint kept); preview never shows a stale atlas', () => {
+  const e = fresh();
+  e.run('model_create', { name: 'column', ...UV_MODELS.column });
+  const uv = () => e.get('column_uv').meta.uv, h0 = uv().hash, r0 = uv().islands[0].rect;
+  e.run('draw', { canvas: 'column_uv', layer: 'paint', commands: [{ op: 'pixels', points: [[r0[0] + 1, r0[1] + 1, '#ff0000']] }] });
+  const r = e.run('model_update', { name: 'column', set: { cap: { w: 26, d: 26 } } });
+  assert.equal(r.unwrap.canvas, 'column_uv');
+  assert.notEqual(uv().hash, h0);
+  assert.equal(r.cohesion, undefined, 'not stale');
+  assert.ok(layer(e.get('column_uv'), 'paint').data.some((v, i) => i % 4 === 3 && v), 'paint kept');
+  const src = uv().src;
+  e.run('draw', { canvas: 'brick', commands: [{ op: 'pixels', points: [[3, 3, '#ffffff']] }] });
+  e.run('model_preview', { name: 'column' });
+  assert.notEqual(uv().src, src, 'texture edit re-baked on preview');
+  assert.equal(uwBuilt(e, 'column').unwrap.stale, undefined);
+});
+
+test('fallbacks: morphs, skinned, layouts and big models keep per-part textures with one note; check reports unwrap_off', () => {
+  const e = fresh();
+  const m = e.run('model_create', { name: 'morph', parts: [{ type: 'box', w: 8, h: 8, d: 8, texture: 'brick' }], morphs: { a: { set: { 0: { w: 10 } } } } });
+  assert.match(m.unwrap_note, /morphs/);
+  assert.equal(defOf(e, 'morph').unwrap, false);
+  e.run('model_create', { name: 'piece', ...UV_MODELS.boxes });
+  const lay = e.run('model_create', { name: 'lay', parts: [{ type: 'model', model: 'piece' }, { type: 'model', model: 'piece', at: [64, 0, 0] }] });
+  assert.match(lay.unwrap_note, /layout/);
+  const big = e.run('model_create', { name: 'g', template: 'gunship' });
+  assert.match(big.unwrap_note, /triangles/);
+  assert.equal(e.docs.has('g_uv'), false);
+  const chk = e.run('model_unwrap', { name: 'g', unwrap: { do: 'check' } }).cohesion.issues.find((i) => i.id === 'unwrap_off');
+  assert.match(chk.detail, /triangles/);
+  // skinned: the skeleton reply says so once; check reports it
+  e.run('model_create', { name: 'sk', parts: [{ type: 'box', name: 'body', w: 8, h: 24, d: 8, texture: 'brick' }, { type: 'box', name: 'head', parent: 'body', w: 8, h: 8, d: 8, at: [0, 24, 0], texture: 'brick' }] });
+  const s = e.run('model_skeleton', { name: 'sk', skeleton: { from_parts: true } });
+  assert.match(s.unwrap_note, /skinned/);
+  const sc = e.run('model_unwrap', { name: 'sk', unwrap: { do: 'check' } }).cohesion.issues.find((i) => i.id === 'unwrap_off');
+  assert.match(sc.detail, /skinned/);
+});
+
+test('cohesion shading: clean bands, few orphan texels (no per-texel dither noise)', () => {
+  const e = uvCorpusEngine(tmp());
+  for (const m of ['column', 'crate']) {
+    e.run('model_unwrap', { name: m });
+    const d = e.get(`${m}_uv`), W = d.width, H = d.height, coh = layer(d, 'cohesion').data, comp = texOf(d);
+    const id = new Int32Array(W * H).fill(-1);
+    for (const i of d.meta.uv.islands) for (let y = i.rect[1]; y < i.rect[1] + i.rect[3]; y++) for (let x = i.rect[0]; x < i.rect[0] + i.rect[2]; x++) id[y * W + x] = i.id;
+    const col = (k) => (comp[k * 4] << 16) | (comp[k * 4 + 1] << 8) | comp[k * 4 + 2];
+    let orph = 0, written = 0;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const k = y * W + x;
+      if (id[k] < 0 || !coh[k * 4 + 3]) continue;
+      written++;
+      let kin = false, nbs = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const X = x + dx, Y = y + dy, q = Y * W + X; if ((!dx && !dy) || X < 0 || Y < 0 || X >= W || Y >= H || id[q] !== id[k]) continue; nbs++; if (col(q) === col(k)) kin = true; }
+      if (!kin && nbs >= 3) orph++;
+    }
+    assert.ok(written > 1000 && orph / written < 0.05, `${m}: ${orph} orphans of ${written}`);
+  }
+});
+
+test('performance: default create of a small model stays fast; ship templates fall back before any layout', () => {
+  const e = fresh();
+  let t = performance.now();
+  e.run('model_create', { name: 'column', ...UV_MODELS.column });
+  assert.ok(performance.now() - t < 15000);
+  t = performance.now();
+  e.run('model_preview', { name: 'column' });
+  assert.ok(performance.now() - t < 5000);
+  t = performance.now();
+  e.run('model_create', { name: 'f', template: 'fighter' });
+  assert.equal(defOf(e, 'f').unwrap, false);
+  assert.ok(performance.now() - t < 20000);
+});
+
+test('default path golden: create bakes the same atlas (layout hash + base / cohesion RGBA), recorded on this branch', async () => {
+  const crypto = await import('node:crypto');
+  const e = fresh();
+  // recorded with the clean-band cohesion shading (feat/model-uv, default unwrap); a change here changes every new model
+  const want = { column: ['4fcf1dab', '0f0d789135527041'], crate: ['2ab35b89', '741ff9217d9a3116'] };
+  for (const [m, [hash, rgba]] of Object.entries(want)) {
+    e.run('model_create', { name: m, ...UV_MODELS[m] });
+    const d = e.get(`${m}_uv`), h = crypto.createHash('sha256');
+    for (const n of ['base', 'cohesion']) h.update(layer(d, n).data);
+    assert.deepEqual([d.meta.uv.hash, h.digest('hex').slice(0, 16)], [hash, rgba], m);
+  }
 });

@@ -256,7 +256,7 @@ const byExtIn = (j, k) => j.materials.find((m) => m.extensions?.[k]);
 // ---------- ORM packing ----------
 test('ORM packing round trip: gltf_orm shares one texture (R ao layer, G rough, B metal); unity_mask; roblox split; dedupe', () => {
   const e = setup();
-  e.run('model_create', { name: 'p', parts: [{ type: 'box', w: 32, h: 32, d: 32, texture: 'hull' }, { type: 'box', w: 32, h: 32, d: 32, texture: 'hull', at: [40, 0, 0], material: { metal: 0.5, rough: 0.5 } }] });
+  e.run('model_create', { name: 'p', unwrap: false, parts: [{ type: 'box', w: 32, h: 32, d: 32, texture: 'hull' }, { type: 'box', w: 32, h: 32, d: 32, texture: 'hull', at: [40, 0, 0], material: { metal: 0.5, rough: 0.5 } }] }); // per-part materials (unwrap:false)
   const { json, image } = exportGLB(e, 'p', { packing: 'gltf_orm' });
   const m = json.materials.find((x) => x.name === 'hull');
   assert.equal(m.occlusionTexture.index, m.pbrMetallicRoughness.metallicRoughnessTexture.index, 'one texture for occlusion + metal/rough');

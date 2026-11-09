@@ -28,7 +28,7 @@ import { bakeAO } from './bake.js';
 import { WALK_KINDS, navMesh } from './walk.js';
 import { addMarkerNodes, markerMeta, splitScene, materialize, sceneTriangles, sceneDrawCalls, normBudget, ROBLOX_TRIS, moodOpts, budgetReport } from './modelkit.js';
 import { damageOps, damageExport, wantsDamage, damagedBuilt } from './damageops.js';
-import { uvOps, applyUnwrap, unwrapSummary, anchorOf } from './uvops.js';
+import { uvOps, uvAuto, applyUnwrap, unwrapSummary, anchorOf, defaultUnwrap } from './uvops.js';
 import { normUnwrap, storedUnwrap } from './uvunwrap.js';
 import { cohesionCheck } from './uvcheck.js';
 
@@ -436,12 +436,21 @@ function placeFrames(engine, outName, FW, FH, tag, imgs, { durations, loop, proj
 
 /** Model-level options kept on create/update (besides name and parts). */
 export const MODEL_KEYS = ['grid', 'scale', 'origin', 'notes', 'project', 'overlays', 'uv_origin', 'rig', 'sockets', 'poses', 'clips', 'weapon', 'arms', 'merge', 'morphs', 'cull', 'greeble_kind', 'fp', 'skeleton', 'skin', 'materials', 'melee', 'damage', 'fracture', 'unwrap'];
-/** unwrap on create / update: validated early, stored without the action-only keys (null removes it). */
-const withUnwrap = (a) => {
-  if (a.unwrap === undefined || a.unwrap === null || a.unwrap === false) return a.unwrap === false ? { ...a, unwrap: null } : a;
+/**
+ * unwrap on create / update: validated early, stored without the action-only keys. create without
+ * unwrap stores the default (new models get one atlas); unwrap:false is stored (per-part textures);
+ * null on update removes the key.
+ */
+const withUnwrap = (a, create = false) => {
+  if (a.unwrap === undefined || a.unwrap === null) return create ? { ...a, unwrap: defaultUnwrap() } : a;
+  if (a.unwrap === false) return a;
   normUnwrap(a.unwrap);
   return { ...a, unwrap: storedUnwrap(a.unwrap) };
 };
+/** Automatic unwrap (create / update / preview / render / export); see uvAuto. */
+const autoUnwrap = uvAuto({ getModel, saveModel, build, isSkinned });
+/** The model def with a current atlas (re-baked when the geometry or a part texture changed). */
+const freshDef = (engine, def, source) => (def.unwrap ? autoUnwrap(engine, def, source)?.built ? getModel(engine, def.name) : def : def);
 
 /** Part index from a number or a part name. */
 function partIndex(parts, k, what) {
@@ -530,7 +539,7 @@ export const MODEL_OPS = {
     };
   },
   model_create(a0, source) {
-    const a = withUnwrap(a0);
+    const a = withUnwrap(a0, true);
     if (!NAME_RE.test(a.name || '')) throw new Error('model "name" must be 1-64 chars of letters, digits, _ - .');
     if (models(this).has(a.name) && !a.overwrite) throw new Error(`Model "${a.name}" exists (overwrite:true replaces it; art_model update changes it)`);
     const hint = shipLengthHint(a);
@@ -548,10 +557,15 @@ export const MODEL_OPS = {
       e.message = [`${first} (${hint.text})`, ...usage].join('\n');
       throw e;
     }
+    // new models: one cohesive atlas; unsupported or too big = per-part textures (unwrap:false) + one note
+    const uw = def.unwrap ? autoUnwrap(this, def, source, { create: true, force: true }) : null;
+    if (uw?.note) def.unwrap = false;
+    else if (uw?.built) { def = uw.def; built = uw.built; }
     const s = summary(def, built);
     saveModel(this, def, source, 'model created');
     let next = hint && hint.length < 64 ? `NOTE: ${hint.text}. ` : '';
     next += `art_model preview {name:"${def.name}"} to look at it, update {set:{i:{..}}|add|remove} to iterate, export {name} for .glb`;
+    if (uw?.built) next += `. Texture = one atlas ${s.unwrap?.canvas ?? `${def.name}_uv`} (paint its "paint" layer; unwrap:false = per-part textures)`;
     if (s.rig) next += `. Rig: pose {name, pose, parts:{<node>:{rot,at}}}, animate {name, clip, keys:[{pose|parts, t}]}, preview {name, clip, view:"fp"|"side"}, render {name, canvas, clip} = pixel sprites`;
     // origin "auto" keeps part coordinates (kit pieces snap to the grid); a standalone prop or vehicle
     // that is off-centre is easier to place in an engine with origin:"bottom"
@@ -559,15 +573,19 @@ export const MODEL_OPS = {
       const { min, max } = s.bounds_px, cx = (min[0] + max[0]) / 2, cz = (min[2] + max[2]) / 2;
       if (Math.abs(cx) > 0.5 || Math.abs(cz) > 0.5 || Math.abs(min[1]) > 0.5) next += `. Not centred (bbox centre x ${r4(cx)}, z ${r4(cz)}, bottom y ${r4(min[1])}): for a prop / ship / vehicle use update {name:"${def.name}", origin:"bottom"} (centre on X/Z, bottom on y=0)`;
     }
-    return { model: def.name, ...partsBrief(s, def.name), next };
+    return { model: def.name, ...partsBrief(s, def.name), ...(uw?.note ? { unwrap_note: uw.note } : {}), next };
   },
   model_update(a0, source) {
     const a = withUnwrap(a0);
     const def = getModel(this, a.name);
-    const next = applyPatch(def, a);
-    const s = summary(next, build(this, next));
+    let next = applyPatch(def, a);
+    const built = build(this, next);
+    let s = summary(next, built);
     saveModel(this, next, source, 'model updated');
-    return { model: next.name, ...partsBrief(s, next.name) };
+    // an unwrapped model re-bakes its atlas when the parts changed (paint is kept) or new unwrap options came
+    const uw = next.unwrap ? autoUnwrap(this, next, source, { built, force: !!a.unwrap }) : null;
+    if (uw?.built) { next = uw.def; s = summary(next, uw.built); }
+    return { model: next.name, ...partsBrief(s, next.name), ...(uw?.note ? { unwrap_note: uw.note } : {}) };
   },
   model_info(a) {
     const def = getModel(this, a.name);
@@ -626,7 +644,7 @@ export const MODEL_OPS = {
    * per-frame socket anchors in meta.anchors[animation] (spritesheet json frames[].anchors).
    */
   model_render(a, source) {
-    const def = expandDef(getModel(this, a.name));
+    const def = expandDef(freshDef(this, getModel(this, a.name), source));
     let built = build(this, def);
     if (a.damage !== undefined && a.damage !== null) {
       if (isSkinned(def)) throw new Error('damage renders a static state of a rigid model; skinned models: preview {name, damage}');
@@ -794,18 +812,21 @@ export const MODEL_OPS = {
     return { models: [...models(this).values()].sort((x, y) => (y.updated || 0) - (x.updated || 0)).map((m) => ({ name: m.name, parts: m.parts.length, types: [...new Set(m.parts.map((p) => p.type))], project: m.project, updated: m.updated })), part_types: Object.keys(PART_DOCS) };
   },
   model_delete(a, source) {
-    getModel(this, a.name);
+    const def0 = getModel(this, a.name);
+    // the atlas canvas is user paint: it stays (named in the reply)
+    const uvc = def0.unwrap && typeof def0.unwrap === 'object' && def0.unwrap.canvas ? def0.unwrap.canvas : `${a.name}_uv`;
+    const kept = this.docs.get(uvc)?.meta?.uv?.model === a.name ? { atlas_kept: `${uvc} (art_canvas {canvas:"${uvc}", action:"delete"} removes it)` } : {};
     // the model file goes to the trash (art_cleanup restore), unless cleanup.trash_deletes is false
     const trash = this.cleanup?.trashFiles('model', a.name, source, 'art_model delete');
-    if (trash) return { deleted: a.name, trash };
+    if (trash) return { deleted: a.name, trash, ...kept };
     models(this).delete(a.name);
     fs.rmSync(path.join(modelDir(this), `${a.name}.json`), { force: true });
     fs.rmSync(path.join(modelDir(this), `${a.name}.mesh.bin`), { force: true });
     this.emit('event', { type: 'model', model: a.name, deleted: true, source, ts: Date.now() });
-    return { deleted: a.name };
+    return { deleted: a.name, ...kept };
   },
-  model_preview(a) {
-    const def = getModel(this, a.name);
+  model_preview(a, source) {
+    const def = freshDef(this, getModel(this, a.name), source);
     return { model: def.name, ...previewImage(this, def, a) };
   },
   /**
@@ -830,11 +851,12 @@ export const MODEL_OPS = {
     if (!Object.keys(r.mats).length) delete next.materials;
     const s = summary(next, build(this, next));
     saveModel(this, next, source, r.deleted ? `material ${r.name} deleted` : `material ${r.name}`);
+    if (next.unwrap) autoUnwrap(this, next, source); // faces that change material move in or out of the atlas
     const users = def.parts.map((p, i) => (p && (p.material === r.name || p.material?.preset === r.name) ? (p.name ?? p.id ?? i) : null)).filter((x) => x !== null);
     return { model: def.name, material: r.name, ...(r.deleted ? { deleted: true } : { spec: r.spec, resolved: r.resolved }), used_by: { parts: users, canvas_faces: s.materials.filter((m) => m === r.name || m.startsWith(`${r.name}_`)).length }, next: `art_model preview {name:"${def.name}", channel:["lit","normal","orm","emissive"]} shows each channel; export {name:"${def.name}", profile:"three"} writes the extensions` };
   },
-  model_export(a) {
-    const def = expandDef(getModel(this, a.name));
+  model_export(a, source) {
+    const def = expandDef(freshDef(this, getModel(this, a.name), source));
     const scale = Number(a.scale ?? def.scale ?? 32);
     let file = this.resolvePath(a.path || `${def.name}.glb`, this.exportDir);
     if (/[\\/]$/.test(a.path || '') || (fs.existsSync(file) && fs.statSync(file).isDirectory())) file = path.join(file, `${def.name}.glb`);
@@ -889,7 +911,7 @@ export const MODEL_OPS = {
   ...MODEL_EXTRA_OPS,
   ...skinOps({ getModel, saveModel, build, variantOf: (engine, def) => variantOf(engine, def), writeGLB }),
   ...meshOpsFor({ getModel, build, saveModel, modelDir, hasModel: (engine, n) => models(engine).has(n) }),
-  ...kitOps({ getModel, saveModel, build, models }),
+  ...kitOps({ getModel, saveModel, build, models, autoUnwrap }),
   ...damageOps({ getModel, build, saveModel }),
   ...uvOps({ getModel, saveModel, build, isSkinned }),
 };

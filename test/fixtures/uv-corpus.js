@@ -57,10 +57,13 @@ export function drawTextures(e) {
   draw('plate', [{ op: 'rect', x: 0, y: 0, w: 16, h: 16, color: '#7c8490' }, { op: 'line', x1: 0, y1: 15, x2: 15, y2: 15, color: '#4c525c' }, { op: 'line', x1: 15, y1: 0, x2: 15, y2: 15, color: '#4c525c' }, { op: 'rect', x: 2, y: 2, w: 1, h: 1, color: '#aab2bc' }]);
 }
 
-/** Engine on a scratch home with the textures and every UV fixture model created. */
+/**
+ * Engine on a scratch home with the textures and every UV fixture model created with unwrap:false
+ * (the per-part "before" state; the tests unwrap them explicitly).
+ */
 export function uvCorpusEngine(home = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-uv-'))) {
   const e = new Engine({ home });
   drawTextures(e);
-  for (const [name, def] of Object.entries(UV_MODELS)) e.run('model_create', { name, ...def });
+  for (const [name, def] of Object.entries(UV_MODELS)) e.run('model_create', { name, unwrap: false, ...def });
   return e;
 }

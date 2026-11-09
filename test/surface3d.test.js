@@ -129,7 +129,7 @@ test('PBR: presets + part material -> glTF factors; metal/rough layers -> metall
   e.run('draw', { canvas: 'gun', layer: 'metal', commands: [{ op: 'rect', x: 0, y: 0, w: 4, h: 8, color: '#ffffff' }] });
   e.run('draw', { canvas: 'gun', layer: 'rough', commands: [{ op: 'rect', x: 0, y: 0, w: 8, h: 4, color: '#333333' }] });
   e.run('draw', { canvas: 'gun', layer: 'height', commands: [{ op: 'rect', x: 2, y: 2, w: 4, h: 4, color: '#ffffff' }] });
-  e.run('model_create', { name: 'm', parts: [
+  e.run('model_create', { name: 'm', unwrap: false, parts: [
     { type: 'box', w: 16, h: 16, d: 16, texture: 'hull', material: 'bare_metal' },
     { type: 'box', w: 8, h: 8, d: 8, texture: 'gun', at: [20, 0, 0] },
     { type: 'box', w: 8, h: 2, d: 8, texture: 'plate', material: 'emissive_panel', at: [-20, 0, 0] },
@@ -179,7 +179,7 @@ test('plain exports gain no new glTF data (byte-compatible path)', () => {
 
 test('baked AO: deterministic, darker in the crevice than in the open, vertex + lightmap modes', () => {
   const e = setup();
-  e.run('model_create', { name: 'ao', parts: [{ type: 'floor', w: 96, d: 96, texture: 'plate' }, { type: 'box', w: 16, h: 24, d: 16, texture: 'hull' }] });
+  e.run('model_create', { name: 'ao', unwrap: false, parts: [{ type: 'floor', w: 96, d: 96, texture: 'plate' }, { type: 'box', w: 16, h: 24, d: 16, texture: 'hull' }] });
   const dir = tmp();
   const a1 = e.run('model_export', { name: 'ao', path: path.join(dir, 'a1.glb'), bake_ao: { samples: 16 } });
   const a2 = e.run('model_export', { name: 'ao', path: path.join(dir, 'a2.glb'), bake_ao: { samples: 16 } });

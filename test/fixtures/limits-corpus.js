@@ -35,12 +35,13 @@ export function corpus(e, { decodePNG, renderSfx }) {
   e.run('draw', { canvas: 'hull', commands: [{ op: 'noise', colors: ['#5b626d', '#626974', '#686f7a'], scale: 3, seed: 3 }, { op: 'rect', x: 0, y: 0, w: 16, h: 16, color: '#2a2e35', fill: false }] });
   e.run('create', { name: 'plank', width: 16 });
   e.run('draw', { canvas: 'plank', commands: [{ op: 'noise', colors: ['#7a5630', '#835d34', '#8c6538'], scale: 3, seed: 2 }] });
-  e.run('model_create', { name: 'crate', origin: 'bottom', parts: [
+  // unwrap:false: the legacy per-part path (new models are unwrapped by default since the golden was recorded)
+  e.run('model_create', { name: 'crate', unwrap: false, origin: 'bottom', parts: [
     { type: 'box', id: 'body', w: 24, h: 24, d: 24, texture: 'plank' },
     { type: 'box', id: 'lid', w: 26, h: 2, d: 26, at: [0, 24, 0], texture: 'hull' },
     { type: 'box', id: 'slat', w: 18, h: 18, d: 1.5, at: [0, 3, 12.75], texture: 'hull' },
   ] });
-  e.run('model_create', { name: 'hull_panel', origin: 'bottom', parts: [
+  e.run('model_create', { name: 'hull_panel', unwrap: false, origin: 'bottom', parts: [
     { type: 'box', id: 'plate', w: 64, h: 32, d: 6, texture: 'hull' },
     { type: 'box', id: 'hatch', w: 16, h: 12, d: 1.5, at: [-16, 10, 3.75], texture: 'hull' },
     { type: 'cylinder', id: 'pipe', r: 1, h: 56, rotate: [0, 0, 90], at: [0, 26, 4.5], color: '#b08a4a' },

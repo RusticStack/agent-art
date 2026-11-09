@@ -36,7 +36,7 @@ function liveryArgs(a) {
   return o;
 }
 
-export function kitOps({ getModel, saveModel, build, models }) {
+export function kitOps({ getModel, saveModel, build, models, autoUnwrap = () => null }) {
   return {
     /** art_model kit {prefix?:"kit", colors?, seed?, overwrite?}: paint the kit texture canvases. */
     model_kit(a, source) {
@@ -86,7 +86,7 @@ export function kitOps({ getModel, saveModel, build, models }) {
       if (a.apply !== false) {
         // point the raw hull part at the livery (fit UVs); template parts keep their names / ids
         const parts = def.parts.map((p) => (p && p.type === 'hull' && (p === H || (H.id !== undefined && p.id === H.id) || (H.name && p.name === H.name)) ? { ...p, texture: canvas, uv: 'fit' } : p));
-        if (parts.some((p, i) => p !== def.parts[i])) { saveModel(this, { ...def, parts }, source, `livery ${canvas}`); applied = true; }
+        if (parts.some((p, i) => p !== def.parts[i])) { const next = { ...def, parts }; saveModel(this, next, source, `livery ${canvas}`); autoUnwrap(this, next, source); applied = true; }
       }
       return { canvas, size: `${r.width}x${r.height}`, applied, next: applied ? `art_model preview {name:"${a.name}", views:["game","side"], mood:true}` : `set the hull part {texture:"${canvas}", uv:"fit"}` };
     },
@@ -117,7 +117,9 @@ export function kitOps({ getModel, saveModel, build, models }) {
         if ((a.windows !== false && r.windows.length) || merge) {
           const keep = ship.parts.filter((p) => !(p && (p.auto === 'interior' || p.auto === 'interior_merge')));
           const inner = merge ? r.def.parts.map((p) => ({ ...p, auto: 'interior_merge', inside: key, ...(ship.parts.some((q) => q && q.name === 'hull') ? { parent: 'hull' } : {}) })) : [];
-          save({ ...ship, parts: [...keep, ...(a.windows !== false ? r.windows : []), ...inner] }, merge ? 'interior merged' : 'interior windows');
+          const merged = { ...ship, parts: [...keep, ...(a.windows !== false ? r.windows : []), ...inner] };
+          save(merged, merge ? 'interior merged' : 'interior windows');
+          autoUnwrap(this, merged, source);
           windows = a.windows !== false ? r.windows.length : 0;
         }
         const ib = build(this, r.def);

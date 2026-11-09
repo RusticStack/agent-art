@@ -40,6 +40,7 @@ function includer(def, o) {
     if (g.tex.material) return g.tex.material.glass ? 'glass' : g.tex.material.blend ? 'opacity' : 'double_sided';
     if (g.tex.v2) return 'materials v2';
     if (g.tex.decal) return 'decal';
+    if (g.tex.ctm || f.ctm) return 'ctm'; // connected textures change with the neighbouring pieces (runtime json)
     if ((only && !only.has(f.pi)) || (ex && ex.has(f.pi))) return 'excluded';
     return null;
   };
@@ -51,7 +52,7 @@ function includer(def, o) {
 function cachedLayout(engine, def, built, o) {
   const anchor = anchorOf(def, built), include = includer(def, o);
   const topo = facetsOf(built.mesh, anchor, include);
-  if (!topo.facets.length) throw new Error('unwrap: no faces to unwrap (every part is excluded, glass / opacity, or materials v2)');
+  if (!topo.facets.length) throw new Error('unwrap: no faces to unwrap (every part is excluded, glass / opacity, CTM or materials v2)');
   const geo = geoKey(topo, o) + anchor.join(',');
   engine._uv ??= new Map();
   const c = engine._uv.get(def.name);
@@ -61,8 +62,51 @@ function cachedLayout(engine, def, built, o) {
   return { ...L, include };
 }
 const canvasName = (def, o) => o.canvas ?? `${def.name}_uv`;
-/** Which part textures the atlas was baked from (a part's texture swapped = stale atlas). */
-const srcKey = (L) => fnv(L.facets.map((F) => F.src.tex.key).join('|'));
+/** FNV-1a over pixel bytes (texture content). */
+function bytesHash(d) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < d.length; i++) { h ^= d[i]; h = Math.imul(h, 0x01000193); }
+  return (h >>> 0).toString(16);
+}
+/** Which part textures (and their pixels) the atlas was baked from: a swapped or repainted texture = stale atlas. */
+const srcKey = (L) => {
+  const seen = new Map();
+  for (const F of L.facets) { const t = F.src.tex; if (!seen.has(t.key)) seen.set(t.key, t.data ? bytesHash(t.data) : ''); }
+  return fnv(L.facets.map((F) => F.src.tex.key).join('|') + [...seen].map(([k, h]) => `${k}=${h}`).join(';'));
+};
+
+/**
+ * The unwrap art_model create stores on a new model (unwrap:false opts out). The values are written
+ * out, so a later change of the defaults never alters a saved model. Courses stay off: a brick
+ * texture already draws its joints.
+ */
+export const defaultUnwrap = () => ({ cohesion: { ao: { strength: 1 }, contact: { strength: 1 }, edges: { strength: 1, wear: 0.65 }, grime: { strength: 0.5 }, courses: false } });
+/** Automatic unwrap (create / update / preview) skips models over this many atlas triangles. */
+export const AUTO_UNWRAP = { triangles: 6000 };
+/** Cheap size test before any layout: triangles (automatic only) and surface texels vs max_size^2. -> reason or null */
+function sizeCheck(def, mesh, o, auto) {
+  const include = includer(def, o);
+  let tris = 0, area = 0;
+  for (const g of mesh.groups.values()) {
+    if (!g.faces || g.overlay) continue;
+    const P = g.pos;
+    for (const f of g.faces) {
+      if (!include(g, f)) continue;
+      for (let i = f.i; i < f.i + f.ic; i += 3) {
+        const a = g.idx[i] * 3, b = g.idx[i + 1] * 3, c = g.idx[i + 2] * 3;
+        const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2], vx = P[c] - P[a], vy = P[c + 1] - P[a + 1], vz = P[c + 2] - P[a + 2];
+        area += Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) / 2;
+        tris++;
+      }
+    }
+  }
+  if (auto && tris > AUTO_UNWRAP.triangles) return `${tris} triangles (automatic unwrap stops at ${AUTO_UNWRAP.triangles})`;
+  const texels = Math.round(area / (o.texel * o.texel));
+  if (texels > o.max_size * o.max_size) return `${texels} texels do not fit ${o.max_size}x${o.max_size} at texel ${o.texel} px`;
+  return null;
+}
+/** Layout failures per model def (a def is replaced on every save): builds do not retry a failed layout. */
+const failed = new WeakMap();
 
 /** Merge an action's unwrap spec over the stored one (action keys never stored). */
 function mergedSpec(def, a) {
@@ -83,7 +127,13 @@ export function applyUnwrap(engine, def, built, { isSkinned } = {}) {
   const name = canvasName(def, o), doc = engine.docs.get(name);
   if (!doc || !doc.meta?.uv) { built.unwrap = { missing: true, canvas: name }; return; }
   let L;
-  try { L = cachedLayout(engine, def, built, o); } catch (e) { built.unwrap = { error: e.message, canvas: name }; return; }
+  const known = failed.get(def);
+  if (known) { built.unwrap = { error: known, canvas: name }; return; }
+  try {
+    const big = sizeCheck(def, built.mesh, o, false);
+    if (big) throw new Error(`unwrap: ${big}`);
+    L = cachedLayout(engine, def, built, o);
+  } catch (e) { failed.set(def, e.message); built.unwrap = { error: e.message, canvas: name }; return; }
   if (doc.meta.uv.hash !== L.hash || doc.width !== L.W || doc.height !== L.H) { built.unwrap = { stale: true, canvas: name }; return; }
   if (doc.meta.uv.src && doc.meta.uv.src !== srcKey(L)) { built.unwrap = { stale: true, canvas: name, textures: true }; return; }
   const tex = built.tex({ canvas: name });
@@ -259,9 +309,16 @@ function viewCamera(mesh, spec, zoom, texel) {
 const flatGroups = (mesh) => groupsOf(mesh).map((g) => ({ ...g, ao: undefined, aoTex: undefined, tex: { key: g.tex.key, name: g.tex.name, width: g.tex.width, height: g.tex.height, data: g.tex.data, material: g.tex.material } }));
 
 // ---------- ops ----------
+/** Why a model cannot carry an atlas yet (skinned / morphs), or null. */
+export function unwrapBlocked(def, isSkinned) {
+  if ((isSkinned && isSkinned(def)) || def.skeleton) return 'not on skinned models yet (skeleton / skin)';
+  if (def.morphs) return 'not with morphs yet';
+  return null;
+}
 /** Engine ops, bound to modelops internals. */
-export function uvOps({ getModel, saveModel, build, isSkinned }) {
-  const unwrapped = (engine, def) => build(engine, def);
+export function uvOps(I) {
+  const { getModel, saveModel, build, isSkinned } = I;
+  const core = uvCore(I);
   return {
     /**
      * One cohesive UV atlas for the model: unwrap {name, unwrap?:{do, texel, max_size, angle,
@@ -270,25 +327,29 @@ export function uvOps({ getModel, saveModel, build, isSkinned }) {
     model_unwrap(a, source) {
       const t0 = performance.now();
       const def = getModel(this, a.name);
-      if (isSkinned(def) || def.skeleton) throw new Error('unwrap: not on skinned models yet (skeleton / skin): unwrap before skinning is planned');
-      if (def.morphs) throw new Error('unwrap: not with morphs yet');
       const spec = mergedSpec(def, a.unwrap);
       const o = normUnwrap(spec);
       const step = o.do;
       const name = canvasName(def, o);
+      const blocked = unwrapBlocked(def, isSkinned);
+      if (step === 'check') {
+        const built = build(this, def);
+        const doc = this.docs.get(name);
+        const nested = (def.parts || []).map((p, i) => (p?.type === 'model' && p.model && (() => { try { return !!getModel(this, p.model).unwrap; } catch { return false; } })() ? i : -1)).filter((i) => i >= 0);
+        const r = cohesionCheck(def, built, { anchor: anchorOf(def, built), atlasDoc: doc?.meta?.uv ? doc : null, full: true, front: o.front, nested });
+        const why = def.unwrap === false && !blocked ? (sizeCheck(def, built.mesh, normUnwrap({}), true) || ((def.parts || []).some((p) => p?.type === 'model') ? 'layout of placed models' : null)) : null;
+        const off = (blocked && `unwrap ${blocked}`) || (def.unwrap === false ? `unwrap:false${why ? ` (${why})` : ''}` : built.unwrap?.error ? built.unwrap.error.replace(/^unwrap: /, '') : null);
+        if (off) r.issues.push({ id: 'unwrap_off', level: 'info', parts: [], detail: `per-part textures: ${off}`, fix: blocked ? 'none yet' : def.unwrap === false ? `art_model unwrap {name:"${def.name}"}` : 'unwrap:{texel:2} | {parts:[..]} | {method:"box"}' });
+        return { model: def.name, cohesion: r };
+      }
+      if (blocked) throw new Error(`unwrap: ${blocked}${def.skeleton ? ': unwrap before skinning is planned' : ''}`);
       if (step === 'clear') {
         const next = { ...def }; delete next.unwrap;
         saveModel(this, next, source, 'unwrap removed');
         this._uv?.delete(def.name);
         return { model: def.name, unwrap: null, canvas: this.docs.has(name) ? name : null, note: this.docs.has(name) ? `canvas ${name} kept (art_canvas {canvas:"${name}", action:"delete"} removes it)` : undefined };
       }
-      if (step === 'check') {
-        const built = build(this, def);
-        const doc = this.docs.get(name);
-        const nested = (def.parts || []).map((p, i) => (p?.type === 'model' && p.model && (() => { try { return !!getModel(this, p.model).unwrap; } catch { return false; } })() ? i : -1)).filter((i) => i >= 0);
-        return { model: def.name, cohesion: cohesionCheck(def, built, { anchor: anchorOf(def, built), atlasDoc: doc?.meta?.uv ? doc : null, full: true, front: o.front, nested }) };
-      }
-      if (step === 'view' || step === 'project') return viewOrProject.call(this, def, o, spec, source, step);
+      if (step === 'view' || step === 'project') return core.viewOrProject.call(this, def, o, spec, source, step);
       const plain = build(this, def, { noUnwrap: true });
       const L = cachedLayout(this, def, plain, o);
       const M = texelMap(L);
@@ -299,41 +360,88 @@ export function uvOps({ getModel, saveModel, build, isSkinned }) {
         doc0.checkpoint('unwrap guide');
         stepGuide(def, L, M, doc0);
         this.changed(doc0, { op: 'unwrap', source, label: 'uv guide', structural: true });
-        const built = unwrapped(this, def);
+        const built = build(this, def);
         return { model: def.name, canvas: name, islands: L.charts.length, image: guideSheet(this, doc0, built.mesh) };
       }
-      let steps = Array.isArray(step) ? [...step] : step === 'all' ? ['layout', 'bake', 'cohesion'] : [step];
-      const fresh = !doc0 || !doc0.meta?.uv || doc0.meta.uv.hash !== L.hash || doc0.width !== L.W || doc0.height !== L.H;
-      // part textures swapped since the last bake: the base is re-baked (paint stays)
-      if (!fresh && doc0.meta.uv.src && doc0.meta.uv.src !== srcKey(L) && !(Array.isArray(step) ? step : [step]).some((x) => x === 'all' || x === 'bake')) throw new Error(`unwrap: part textures changed since ${name} was baked: run do:"bake" (or the default do:"all") first`);
-      // a new or re-laid atlas is always baked whole (never an empty or scrambled atlas; paint is carried over)
-      if (fresh) steps = ['layout', 'bake', 'cohesion'];
-      const prep = steps.includes('layout') || fresh ? prepareCanvas(this, def, L, o, source) : (doc0.checkpoint(`unwrap ${steps.join('+')}`), { doc: doc0, created: false, migrated: 0 });
-      const doc = prep.doc;
-      const baked = [];
-      let br = null;
-      if (steps.includes('bake')) { br = stepBake(this, def, L, M, o, doc, plain); baked.push('base'); }
-      if (steps.includes('cohesion')) { const r = stepCohesion(this, def, L, M, o, doc, plain); if (r) baked.push('cohesion'); }
-      stepGuide(def, L, M, doc);
-      this.changed(doc, { op: 'unwrap', source, label: `model ${def.name}: unwrap ${steps.join('+')}`, structural: true });
-      const next = { ...def, unwrap: storedUnwrap(spec) };
-      saveModel(this, next, source, 'model unwrapped');
-      const built = unwrapped(this, next);
-      const check = cohesionCheck(next, built, { anchor: anchorOf(next, built), atlasDoc: doc, full: true, front: o.front });
+      const r = core.bakeSteps(this, def, spec, o, source, { plain, L, M });
+      const { doc, built, check, prep, br } = r;
       const keptBy = new Map();
       for (const g of plain.mesh.groups.values()) for (const f of g.faces || []) { const w = L.include.why(g, f); if (w && w !== 'overlay') keptBy.set(`${partLabel(def, f.pi)}`, w); }
-      const seamsVis = L.seams.filter((s) => s.smooth && s.vis > 0.6).length;
+      const seamsVis = L.seams.filter((x) => x.smooth && x.vis > 0.6).length;
       const notes = [...(br?.notes || []), ...(prep.migrated ? [`paint of ${prep.migrated} island${prep.migrated === 1 ? '' : 's'} moved to the new layout`] : [])];
       return {
         model: def.name, canvas: name, size: `${L.W}x${L.H}`, texel_px: L.texel, islands: L.charts.length, fill: L.fill,
         seams: { total: L.seams.length, visible: seamsVis }, kept: [...keptBy].map(([part, why]) => `${part}: ${why}`).slice(0, 8),
-        baked, cohesion: { pass: check.pass, score: check.score, issues: check.issues.slice(0, 3) },
+        baked: r.baked, cohesion: { pass: check.pass, score: check.score, issues: check.issues.slice(0, 3) },
         ...(notes.length ? { notes } : {}),
         image: guideSheet(this, doc, built.mesh), ms: Math.round(performance.now() - t0),
         next: `paint transitions on layer "paint" of ${name} (art_draw {canvas:"${name}", layer:"paint"}); art_model unwrap {name, unwrap:{do:"view", view:"front"}} to paint in a view; preview / export use the atlas`,
       };
     },
   };
+}
+
+/**
+ * Automatic unwrap for create / update / preview / render / export (the default for new models).
+ * auto(engine, def, source, {built, force, create}) -> null (nothing to do: no unwrap, or the atlas
+ * is current) | {def, built, ms} (atlas baked) | {def, note} (per-part textures). Never throws for
+ * unwrap reasons.
+ */
+export function uvAuto(I) { return uvCore(I).auto; }
+
+function uvCore({ getModel, saveModel, build, isSkinned }) {
+  /** layout (fresh atlas) + bake + cohesion + guide; saves def.unwrap = the stored spec. */
+  function bakeSteps(engine, def, spec, o, source, { plain, L, M }) {
+    const name = canvasName(def, o), doc0 = engine.docs.get(name), step = o.do;
+    let steps = Array.isArray(step) ? [...step] : step === 'all' ? ['layout', 'bake', 'cohesion'] : [step];
+    const fresh = !doc0 || !doc0.meta?.uv || doc0.meta.uv.hash !== L.hash || doc0.width !== L.W || doc0.height !== L.H;
+    // part textures swapped since the last bake: the base is re-baked (paint stays)
+    if (!fresh && doc0.meta.uv.src && doc0.meta.uv.src !== srcKey(L) && !(Array.isArray(step) ? step : [step]).some((x) => x === 'all' || x === 'bake')) throw new Error(`unwrap: part textures changed since ${name} was baked: run do:"bake" (or the default do:"all") first`);
+    // a new or re-laid atlas is always baked whole (never an empty or scrambled atlas; paint is carried over)
+    if (fresh) steps = ['layout', 'bake', 'cohesion'];
+    const prep = steps.includes('layout') || fresh ? prepareCanvas(engine, def, L, o, source) : (doc0.checkpoint(`unwrap ${steps.join('+')}`), { doc: doc0, created: false, migrated: 0 });
+    const doc = prep.doc;
+    const baked = [];
+    let br = null;
+    if (steps.includes('bake')) { br = stepBake(engine, def, L, M, o, doc, plain); baked.push('base'); }
+    if (steps.includes('cohesion')) { const r = stepCohesion(engine, def, L, M, o, doc, plain); if (r) baked.push('cohesion'); }
+    stepGuide(def, L, M, doc);
+    engine.changed(doc, { op: 'unwrap', source, label: `model ${def.name}: unwrap ${steps.join('+')}`, structural: true });
+    const next = { ...def, unwrap: storedUnwrap(spec) };
+    saveModel(engine, next, source, 'model unwrapped');
+    const built = build(engine, next);
+    const check = cohesionCheck(next, built, { anchor: anchorOf(next, built), atlasDoc: doc, full: true, front: o.front });
+    return { def: next, doc, built, check, prep, br, baked };
+  }
+  function auto(engine, def, source, { built = null, force = false, create = false } = {}) {
+    if (!def.unwrap) return null;
+    const off = (why) => ({ def, note: `per-part textures: ${why}` });
+    const blocked = unwrapBlocked(def, isSkinned);
+    if (blocked) return off(`unwrap ${blocked}`);
+    // a layout of placed models keeps its pieces instanced; art_model unwrap bakes it on purpose
+    if (create && (def.parts || []).some((p) => p?.type === 'model')) return off(`layout of placed models (pieces stay instanced; art_model unwrap {name:"${def.name}"} bakes one atlas)`);
+    // GPU-instanced greebles (instanced:true) would be merged into unique atlas texels
+    const inst = (g) => [].concat(g || []).some((x) => x && x.instanced);
+    if (create && (def.parts || []).some((p) => p && ((p.type === 'greeble' && p.instanced) || inst(p.greeble) || inst(p.greebles)))) return off(`instanced greebles stay GPU instances (art_model unwrap {name:"${def.name}"} bakes one atlas)`);
+    const t0 = performance.now();
+    try {
+      const spec = mergedSpec(def, undefined), o = normUnwrap(spec);
+      if (!force) {
+        const b = built || build(engine, def);
+        if (b.unwrap && !b.unwrap.stale && !b.unwrap.missing && !b.unwrap.error) return null; // atlas is current
+        if (b.unwrap?.error) return off(b.unwrap.error.replace(/^unwrap: /, '')); // a failed layout is not retried
+      }
+      const plain = build(engine, def, { noUnwrap: true });
+      const big = sizeCheck(def, plain.mesh, o, true);
+      if (big) return off(big);
+      const L = cachedLayout(engine, def, plain, o), M = texelMap(L);
+      const r = bakeSteps(engine, def, spec, { ...o, do: 'all' }, source, { plain, L, M });
+      return { def: r.def, built: r.built, ms: Math.round(performance.now() - t0) };
+    } catch (e) {
+      return off(String(e.message).replace(/^unwrap: /, ''));
+    }
+  }
+  return { bakeSteps, auto, viewOrProject };
   /** do:"view" (paintable orthographic view canvas) / do:"project" (its paint -> atlas texels). */
   function viewOrProject(def, o, spec, source, step) {
     const name = canvasName(def, o), atlas = this.docs.get(name);
