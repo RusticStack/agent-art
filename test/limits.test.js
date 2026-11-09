@@ -33,7 +33,8 @@ test('limits corpus: everything that does not use a changed feature is byte-iden
   // the intentional change (CHANGELOG): the knife disarm_front fit now reaches its optimum (offset
   // 73.15; 0.9.0 stopped on the search bound at 70), so those clips and the batch manifest differ.
   // Ground contact (feet below the ground row lifted by leg IK) changes melee frame poses, not clip
-  // files: of the corpus only that batch manifest (takedown_rear_victim frames) can see it.
+  // files: of the corpus only that batch manifest (takedown_rear_victim frames) can see it; its
+  // swept hulls are also built from 8 sub-steps now (were 4).
   for (const k of INTENDED) assert.notEqual(now[k], golden[k], `${k} expected to change`);
 });
 
@@ -509,7 +510,7 @@ test('paired fit: the offset search is deterministic and idempotent (interior op
 });
 
 // ---------- ground contact ----------
-test('ground contact: no foot sinks in any melee or paired clip, every view, both proportion sets (128x192); melee_check keeps the warning', () => {
+test('ground contact: no foot or hand sinks in any melee or paired clip, every view, both proportion sets (128x192); melee_check keeps the warnings', () => {
   const e = new Engine({ home: tmp() });
   const sinking = (c) => (c.issues || []).filter((i) => /sinks/.test(i));
   for (const [sk, mel, skel] of [...SETS.slice(0, 2), ['rf', {}, { weapon: { class: 'rifle' } }]]) {
@@ -524,6 +525,8 @@ test('ground contact: no foot sinks in any melee or paired clip, every view, bot
       for (const [n, c] of Object.entries(r.clips)) {
         assert.deepEqual(sinking(c), [], `${sk} ${JSON.stringify(a)} ${n}`);
         assert.ok(c.foot_sink_px <= 1, `${sk} ${n}: foot_sink_px ${c.foot_sink_px}`);
+        assert.ok(c.hand_sink_px <= 1, `${sk} ${n}: hand_sink_px ${c.hand_sink_px}`);
+        if (c.sweep_miss_px !== undefined) assert.equal(c.sweep_miss_px, 0, `${sk} ${JSON.stringify(a)} ${n}: sweep_miss_px`);
       }
     }
   }
@@ -534,5 +537,22 @@ test('ground contact: no foot sinks in any melee or paired clip, every view, bot
   assert.equal(r.knockdown.pass, true);
   assert.ok(r.kd_raw.foot_sink_px > 10, `ungrounded knockdown sinks ${r.kd_raw.foot_sink_px} px`);
   assert.match(sinking(r.kd_raw)[0], /^a foot sinks [\d.]+ px below the ground \(foot_[fb], (front|back)\w* frame \d+\)$/);
+  assert.ok(r.kd_raw.hand_sink_px > 10 && r.knockdown.hand_sink_px <= 1, `hands: ungrounded ${r.kd_raw.hand_sink_px} px, grounded ${r.knockdown.hand_sink_px} px`);
+  assert.match(sinking(r.kd_raw)[1], /^a hand sinks [\d.]+ px below the ground \(hand_[fb], \w+ frame \d+\)$/);
   assert.throws(() => e.run('anim_clip', { skeleton: 'kn', name: 'kd_bad', keys: kd.keys, frames: kd.frames, ground: 'yes' }), /ground must be true \| false/);
+});
+
+// ---------- butt-stroke hit volumes ----------
+test('gun butt strokes: the exported swept hulls cover the weapon path sampled 16x between frames (dmr / lmg, both proportion sets, 128x192)', () => {
+  const e = new Engine({ home: tmp() });
+  for (const cls of ['dmr', 'lmg']) {
+    e.run('anim_skeleton', { name: cls, template: 'humanoid_hd', frame: [128, 192], proportions: PROPS, weapon: { class: cls } });
+    e.run('anim_melee', { skeleton: cls });
+    for (const p of ['heavy', 'light']) e.run('anim_skin', { name: `${cls}_${p}`, skeleton: cls, proportions: p });
+    for (const a of [{ skeleton: cls }, { skin: `${cls}_heavy` }, { skin: `${cls}_light` }]) {
+      const c = e.run('anim_melee_check', { ...a, clips: ['butt_stroke'] }).clips.butt_stroke;
+      assert.equal(c.sweep_miss_px, 0, `${cls} ${JSON.stringify(a)}: ${JSON.stringify(c.issues)}`);
+      assert.ok(c.pass, `${cls} ${JSON.stringify(a)}: ${JSON.stringify(c.issues)}`);
+    }
+  }
 });

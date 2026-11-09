@@ -397,8 +397,13 @@ function blendPlacement(a, b, t) {
   if (t <= 0) return a;
   if (t >= 1) return b;
   const pick = t < 0.5 ? a : b;
+  // the screen anchor (the point the weapon is placed by) changes with the state: keep both and
+  // blend where the weapon lands, so a tween between states anchored on different points does not
+  // jump at its middle (a butt stroke turning from the grip onto the stock)
+  const anchorOf = (p) => ({ point: p.point, ref: p.ref, hold: p.hold });
+  const anchors = !a.anchors && !b.anchors && (a.point !== b.point || a.ref !== b.ref || a.hold !== b.hold) ? [anchorOf(a), anchorOf(b), t] : undefined;
   return {
-    ...pick, O: a.O.map((v, i) => lerp(v, b.O[i], t)), theta: a.theta + adiff(a.theta, b.theta) * t,
+    ...pick, ...(anchors ? { anchors } : {}), O: a.O.map((v, i) => lerp(v, b.O[i], t)), theta: a.theta + adiff(a.theta, b.theta) * t,
     lock: { main: lerp(a.lock.main, b.lock.main, t), support: lerp(a.lock.support, b.lock.support, t) },
     weld: lerp(a.weld, b.weld, t), aimF: lerp(a.aimF ?? 0, b.aimF ?? 0, t), hidden: lerp(a.hidden, b.hidden, t), shouldered: a.shouldered && b.shouldered, blend: [a.name, b.name, r2(t)],
   };
@@ -646,7 +651,19 @@ export function solveHeld(rig, P, src) {
   const flipW = !viewCell && Mu[0] < 0;
   const phi = flipW ? Math.atan2(-Mu[1], -Mu[0]) * R2D : Math.atan2(Mu[1], Mu[0]) * R2D;
   const sxs = viewCell ? 1 : flipW ? -L : L;
-  const scr = (p) => { const [dx, dy] = rot2(phi, sxs * (p.x - anc.x), p.y - anc.y); return [ancScr[0] + dx, ancScr[1] + dy]; };
+  let scr = (p) => { const [dx, dy] = rot2(phi, sxs * (p.x - anc.x), p.y - anc.y); return [ancScr[0] + dx, ancScr[1] + dy]; };
+  if (s.pl.anchors) {
+    // tween between differently anchored states: the weapon origin placed from each anchor, blended
+    const originFrom = ({ point, ref, hold }) => {
+      const role = ref === 'support' || hold === 'support' ? 'support' : 'main', sh = s.chains[role][0];
+      const an = localPoint(rig, W, point, s.active) || s.gm, d = proj(sub(at3(s.O, s.f, an), s.S3(sh)));
+      const [dx, dy] = rot2(phi, -sxs * an.x, -an.y);
+      return [Wv[sh].x + d[0] + dx, Wv[sh].y + d[1] + dy];
+    };
+    const [A, B, t] = s.pl.anchors, oa = originFrom(A), ob = originFrom(B);
+    const o = [oa[0] + (ob[0] - oa[0]) * t, oa[1] + (ob[1] - oa[1]) * t];
+    scr = (p) => { const [dx, dy] = rot2(phi, sxs * p.x, p.y); return [o[0] + dx, o[1] + dy]; };
+  }
   const handDir = (alpha) => { const hl = rot2(alpha, 0, 1); const [dx, dy] = rot2(phi, sxs * hl[0], hl[1]); return [dx, dy]; };
   const O2 = scr({ x: 0, y: 0 });
   // pose IK targets on weapon points: {weapon:"mag", at?:[dx,dy]} (weapon cell px), also inside tweened mixes

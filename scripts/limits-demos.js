@@ -404,7 +404,7 @@ const frameOf = (canvas, f) => { const d = e.get(canvas), fh = d.frameHeight || 
   save('rigged_lods_ao.png', packImages(items, { labels: true, checker: false, columns: 3 }));
 }
 
-// ---------- 12. ground contact: melee clips without (ground:false) and with the leg IK onto the ground row ----------
+// ---------- 12. ground contact: melee clips without (ground:false) and with limb IK onto the ground row (labels: foot / hand sink px) ----------
 {
   const items = [];
   const groundLine = (img, row) => { const d = new Uint8ClampedArray(img.data); for (let x = 0; x < img.width; x++) if (!d[(row * img.width + x) * 4 + 3]) d.set([120, 200, 120, 255], (row * img.width + x) * 4); return { ...img, data: d }; };
@@ -416,7 +416,7 @@ const frameOf = (canvas, f) => { const d = e.get(canvas), fh = d.frameHeight || 
     for (const [name, lab] of [[`${clip}_raw`, 'ground:false'], [clip, 'ground contact']]) {
       e.run('anim_render', { skin: 'pk_v', clip: name, view, canvas: `gc_${name}_${view}` });
       const row = lowest(frameOf(`gc_${name}_${view}`, 0));
-      items.push({ img: pane(groundLine(frameOf(`gc_${name}_${view}`, f), row)), label: lab === 'ground:false' ? `${clip.replace('_victim', '')} ${view} f${f}: ${sink[name].foot_sink_px} px` : `grounded: ${sink[name].foot_sink_px} px` });
+      items.push({ img: pane(groundLine(frameOf(`gc_${name}_${view}`, f), row)), label: lab === 'ground:false' ? `${clip.replace('_victim', '')} ${view} f${f}: ${sink[name].foot_sink_px} / ${sink[name].hand_sink_px}` : `grounded: ${sink[name].foot_sink_px} / ${sink[name].hand_sink_px} px` });
     }
   }
   save('ground_contact.png', packImages(items, { labels: true, checker: false, columns: 6 }));
