@@ -16,8 +16,8 @@ import { SheetViewer as SheetViewerTS } from './src/viewers/sheet/SheetViewer.ts
 import { RigViewer as RigViewerTS } from './src/viewers/rig/RigViewer.ts';
 import { ModelViewer as ModelViewerTS } from './src/viewers/model/ModelViewer.ts';
 import { AudioViewer as AudioViewerTS } from './src/viewers/audio/AudioViewer.ts';
-import { ProjectViewer } from './ui/viewers/project.js';
-import { ExportViewer } from './ui/viewers/export.js';
+import { ProjectViewer as ProjectViewerTS } from './src/viewers/project/ProjectViewer.ts';
+import { ExportViewer as ExportViewerTS } from './src/viewers/export/ExportViewer.ts';
 import { GraphViewer as GraphViewerTS } from './src/viewers/graph/GraphViewer.ts';
 import { LayersViewer as LayersViewerTS } from './src/viewers/layers/LayersViewer.ts';
 import { cleanupPanel } from './ui/cleanup.js';
@@ -29,6 +29,8 @@ const RigViewer = adapt(RigViewerTS);
 const LayersViewer = adapt(LayersViewerTS);
 const ModelViewer = adapt(ModelViewerTS);
 const AudioViewer = adapt(AudioViewerTS);
+const ProjectViewer = adapt(ProjectViewerTS);
+const ExportViewer = adapt(ExportViewerTS);
 const GraphViewer = adapt(GraphViewerTS);
 
 const ACTIVE_REVIEW = new Set(['open', 'in_progress', 'reopened']);

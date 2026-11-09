@@ -2378,3 +2378,6 @@ Deviations from the plan, smallest correct change each, in step order.
 - **Step 7, reloads.** Periodic and `resync` reloads of the layers view keep the chosen clip / view / frame; the rig viewer applies a target's `mode` / `clip` only for a new target.
 - **Step 7, images.** A failed pose / skin / parts / clip image shows its error in the stage without rethrowing; only a failed rig load rethrows. Clip stepping (buttons, `,` `.`, scrubber) pauses playback; Space resumes.
 - **Step 7, small changes.** The layers clamp note goes on the source line (no `.vstatus` there); the weights URL comes from `rigWeights()` (same parameters, different order); canvas-mode layers keep one bitmap per layer instead of an atlas.
+- **Step 11, project tiles.** Each tile is a `button.ov-tile` inside a `div.ov-item[role=listitem]` (`display: contents`) in the `role=list` grid, so tiles are keyboard-reachable; the description line adds "· N hidden" when hidden canvases are left out.
+- **Step 11, export text.** Text and JSON previews get a Copy button in the toolbar (toasts "Copied" / the error); the image preview shows the pixel size in the toolbar.
+- **Step 11, legacy sheet.** `web/ui/viewers/` (including the `sheet.js` kept in step 6) is deleted; nothing outside `web/src/viewers` imports a viewer any more.
