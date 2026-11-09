@@ -121,6 +121,8 @@ Low-poly glTF 2.0 `.glb` with pixel textures (HD-2D look, NEAREST filtering, 32 
 | --- | --- | --- |
 | ![hull](docs/surface/hull_before_after.png) | ![gunship](docs/ships/hero_turntable.png) | ![lightmap](docs/materials/corridor_lightmap.png) |
 
+`art_model unwrap` bakes a multi-part model onto one UV atlas canvas (no seams on round parts, contact shading, worn edges, courses across parts) that you can paint directly or through a view.
+
 More: [docs/3d/README.md](docs/3d/README.md), [materials](docs/materials/README.md), [skinning](docs/skinning/README.md), [mesh processing](docs/meshproc/README.md).
 
 ### Damage and destruction
@@ -206,7 +208,7 @@ Optional: real vanilla texture names and sizes per Minecraft Java version (refer
 | `art_sheet` | Many canvases in one labelled contact sheet, to check a set for consistency | |
 | `art_rig` | Multi-view, multi-animation characters from parts and poses: templates, presets, IK, foot planting, secondary motion, held weapons, depth order, 2D skinning | `create` `info` `update` `pose` `preview` `animate` `turnaround` `templates` `check` `layers` `explain` `debug_render` `consistency` `derive` `zcheck` `skin` `weights` `shapes` `chain` `export` |
 | `art_anim` | Animation library: skeletons, clips, skins, retargeting, batch to game strips + manifest, runtime gun layers, melee | `skeleton` `clip` `skin` `retarget` `render` `batch` `gltf` `list` `info` `weapon` `conform` `weapon_sheet` `composite` `weapon_check` `melee` `melee_check` `melee_sheet` `paired` |
-| `art_model` | 3D low-poly models with pixel textures to `.glb`: kits, props, ships, rigs and clips, sprite renders, hard surface, materials, skinning, mesh processing, ship kits, damage | `create` `update` `info` `list` `delete` `preview` `export` `ctm` `pose` `animate` `render` `check` `trim` `skeleton` `skin` `weights` `material` `boolean` `remesh` `decimate` `cluster_lod` `visibility` `kit` `livery` `generate` `budget` `walk_check` `damage` `fracture` |
+| `art_model` | 3D low-poly models with pixel textures to `.glb`: kits, props, ships, rigs and clips, sprite renders, hard surface, materials, skinning, mesh processing, ship kits, damage, UV atlas | `create` `update` `info` `list` `delete` `preview` `export` `ctm` `pose` `animate` `render` `check` `trim` `skeleton` `skin` `weights` `material` `boolean` `remesh` `decimate` `cluster_lod` `visibility` `kit` `livery` `generate` `budget` `walk_check` `damage` `fracture` `unwrap` |
 | `art_fp` | First-person viewmodels: arms per handling class, gun / magazine / attachment / item sweeps, composite and check; hand-drawn 2D sources | `kit` `sweep` `batch` `composite` `check` `paint` `template` `anchors` `sweep2d` `trace` |
 | `art_fx` | Combat effect flipbooks with engine metadata | `make` `batch` `preview` `list` `export` |
 | `art_planet` | Planets, star systems, landing-zone terrain, rocks, asteroids, skyboxes, space FX | `planet` `system` `terrain` `rocks` `asteroids` `skybox` `fx` `info` |

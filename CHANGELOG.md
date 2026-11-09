@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `art_model unwrap` (opt-in; models without `unwrap` are unchanged): one cohesive UV atlas canvas (`<model>_uv`) for a multi-part model.
+  - Layout: seam-aware charts with zero stretch, one ring island per round part with the seam at the back, power-of-two shelf packing (an error instead of a silent rescale).
+  - Bakes: the part textures in world-pattern space (ring fit closes brick rings), then a cohesion pass (AO, contact line, worn convex edges, ground grime, optional model-wide `courses` and contact `overlays`) quantized to the palette.
+  - The canvas keeps `base`, `cohesion` and `paint` layers (hidden `masks` / `guide`). Paint moves with its island when the layout changes, and paint on a view canvas projects onto the atlas (`do:"view"` / `do:"project"`).
+  - `do:"check"` reports why a model looks detached (`front_seam`, `course_cut`, `no_contact_shading`, `texel_density`, ...). Create / update replies carry a short `cohesion` hint.
+  - Preview, render, rigs, damage, LODs, `bake_ao` and export use the atlas (one material; glass / opacity parts keep theirs). Stale atlases fall back to the part textures and say so. The `/api/model/<name>/uv.png` UI route serves the atlas.
 - Fixes from building the showcase (all additive):
   - `art_anim skin {overwrite:true}` on an existing skin rebuilds its rig from the skeleton's current parts (the shield `melee` adds), keeping the drawn cells. `skin {name, delete:true}` deletes the skin; its rig stays.
   - `art_rig debug_render {animation:"<clip>_<view>", frame}` (or `tag`) renders that frame of an `art_anim` library clip on a skin's rig, not the rest pose.

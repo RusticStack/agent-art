@@ -174,6 +174,7 @@ For 8+ frames or several directions use the rig skill.`,
    Marble floor groups: art_model ${J({ action: 'ctm', name: 'marble_ctm', ctm: { base: 'marble', method: 'full', border: { width: 2, style: 'bevel' } } })} then floors use texture:"marble_ctm" (border only around each connected group).
    Wall trims: ctm {base:"trim", method:"horizontal"} on a ledge run; random {weights:[6,1,1], variants:[...]} for cracked blocks; repeat (base 96x64 = 3x2 cells) for big slab patterns.
    Moss / grime / wear: ${J({ type: 'wall', texture: 'stone', overlays: [{ texture: 'grime', where: ['bottom', 'corners'], falloff: 20 }, { texture: 'moss', where: 'top', falloff: 10 }] })} (own UV set, cut out by strength).
+7. Multi-part prop (column, crate, arch) that must read as ONE object: art_model ${J({ action: 'unwrap', name: 'column_a' })} = one atlas canvas column_a_uv (world-aligned texture, contact AO, edge wear; paint its "paint" layer); unwrap:{do:"check"} reports detached parts.
 Props: extrude ${J({ type: 'extrude', canvas: 'barrel', depth: 6 })}; relief: depth_map:"<height canvas>"; lathe ${J({ type: 'lathe', canvas: 'candle', segments: 12 })} (draw the RIGHT half from x=0; flame on an "emissive" layer).
 Keep pieces light (< 500 tris), reuse a few textures, characters stay 2D billboards.`,
   },
