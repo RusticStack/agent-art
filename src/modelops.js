@@ -201,6 +201,14 @@ function build(engine, def, opts = {}) {
 const variantOf = (engine, def) => (spec) => (spec.model ? getModel(engine, spec.model) : applyPatch(def, { set: spec.set }));
 
 const r4 = (v) => +v.toFixed(3);
+/** create / update replies: over 64 parts (ship templates) the per-part list becomes counts per type + the heaviest parts; art_model info has every part. */
+function partsBrief(s, name) {
+  if (!Array.isArray(s.parts) || s.parts.length <= 64) return s;
+  const types = {};
+  for (const p of s.parts) { const t = types[p.type] || (types[p.type] = { parts: 0, triangles: 0 }); t.parts++; t.triangles += p.triangles || 0; }
+  const heaviest = [...s.parts].sort((x, y) => (y.triangles || 0) - (x.triangles || 0)).slice(0, 5);
+  return { ...s, parts: { count: s.parts.length, types, heaviest, all: `art_model info {name:"${name}"}` } };
+}
 function summary(def, built) {
   def = expandDef(def);
   const { mesh, parts, origin } = built;
@@ -531,14 +539,14 @@ export const MODEL_OPS = {
       const { min, max } = s.bounds_px, cx = (min[0] + max[0]) / 2, cz = (min[2] + max[2]) / 2;
       if (Math.abs(cx) > 0.5 || Math.abs(cz) > 0.5 || Math.abs(min[1]) > 0.5) next += `. Not centred (bbox centre x ${r4(cx)}, z ${r4(cz)}, bottom y ${r4(min[1])}): for a prop / ship / vehicle use update {name:"${def.name}", origin:"bottom"} (centre on X/Z, bottom on y=0)`;
     }
-    return { model: def.name, ...s, next };
+    return { model: def.name, ...partsBrief(s, def.name), next };
   },
   model_update(a, source) {
     const def = getModel(this, a.name);
     const next = applyPatch(def, a);
     const s = summary(next, build(this, next));
     saveModel(this, next, source, 'model updated');
-    return { model: next.name, ...s };
+    return { model: next.name, ...partsBrief(s, next.name) };
   },
   model_info(a) {
     const def = getModel(this, a.name);

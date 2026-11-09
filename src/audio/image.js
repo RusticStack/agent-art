@@ -159,14 +159,21 @@ export function overviewImage({ chs, meas, perception: p, loop, title, target_lu
   });
   // facts
   let tx = bx + bands.length * (bw + 6) + 16, ty2 = y0 + 4;
-  const facts = [];
-  if (rh) facts.push(`DRUMS: ${rh.kick_pattern}`, `HATS: ${rh.hats}`, `FEEL: ${rh.drive_words}`, `SWING ${rh.swing}  TIGHT ${rh.timing_spread_ms}MS`);
-  if (p?.timbre) facts.push(`TONE: ${p.timbre.brightness}`, `DIST: ${p.timbre.distortion_words}`, `SPACE: ${p.timbre.space}${p.timbre.reverb_rt60_s ? ` ${p.timbre.reverb_rt60_s}S` : ''}`);
-  if (p?.tension) facts.push(`TENSION: ${p.tension.words}`);
-  if (p?.genre?.ranking) facts.push(`STYLE: ${p.genre.ranking[0].genre} ${p.genre.ranking[0].match}`);
+  const facts = overviewFacts(p, loop);
   for (const f of facts) { img.text(tx, ty2, f.slice(0, 48), TXT); ty2 += 9; }
   img.text(tx, y0 + G - 6, 'RED=KICK YEL=SNARE CYAN=HATS  PINK=ENERGY  GREEN=TARGET/LOOP', DIM);
   return img.png();
+}
+
+/** The overview image's fact lines. One-shot SFX: no beat, groove or genre to describe (the perception JSON still has the fields). */
+export function overviewFacts(p, loop) {
+  const rh = p?.rhythm, facts = [];
+  const music = !(p?.kind === 'sfx' && !loop);
+  if (rh && music) facts.push(`DRUMS: ${rh.kick_pattern}`, `HATS: ${rh.hats}`, `FEEL: ${rh.drive_words}`, `SWING ${rh.swing}  TIGHT ${rh.timing_spread_ms}MS`);
+  if (p?.timbre) facts.push(`TONE: ${p.timbre.brightness}`, `DIST: ${p.timbre.distortion_words}`, `SPACE: ${p.timbre.space}${p.timbre.reverb_rt60_s ? ` ${p.timbre.reverb_rt60_s}S` : ''}`);
+  if (p?.tension) facts.push(`TENSION: ${p.tension.words}`);
+  if (p?.genre?.ranking && music) facts.push(`STYLE: ${p.genre.ranking[0].genre} ${p.genre.ranking[0].match}`);
+  return facts;
 }
 
 /** Mix image: per-stem 1/3-octave spectra with masking highlights, stem balance bars. */

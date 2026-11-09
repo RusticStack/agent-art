@@ -14,6 +14,28 @@ const OPENABLE = new Set(['door', 'ramp', 'cargo_door', 'canopy', 'ring_door', '
 
 const NAME_RE = /^[A-Za-z0-9_\-.]{1,64}$/;
 
+/**
+ * livery stripes / hazard / decals / mark in their documented shapes; a JSON string (some MCP clients
+ * stringify arrays) is parsed, one object is a one-item list, and a bad entry is a clear error.
+ */
+function liveryArgs(a) {
+  const o = { ...a };
+  const parse = (k, v) => { if (typeof v !== 'string') return v; try { return JSON.parse(v); } catch { throw new Error(`livery ${k} must be ${k === 'mark' ? 'an object {t, side?, seed?, color?}' : 'a list of objects'} (got a string that is not JSON)`); } };
+  for (const k of ['stripes', 'hazard', 'decals']) {
+    if (o[k] === undefined || o[k] === null) { delete o[k]; continue; }
+    const v = parse(k, o[k]), list = Array.isArray(v) ? v : [v];
+    list.forEach((e, i) => {
+      if (!e || typeof e !== 'object' || Array.isArray(e)) throw new Error(`livery ${k}[${i}] must be an object`);
+      const t = e.t, two = (x) => Array.isArray(x) && x.length === 2 && x.every((n) => Number.isFinite(Number(n)));
+      if (k !== 'decals' && !two(t)) throw new Error(`livery ${k}[${i}].t must be [a,b] (0 tail .. 1 nose)`);
+      if (k !== 'decals' && e.u !== undefined && !two(e.u)) throw new Error(`livery ${k}[${i}].u must be [a,b] (0..1 around from the top centre)`);
+    });
+    o[k] = list;
+  }
+  if (o.mark !== undefined) { o.mark = parse('mark', o.mark); if (o.mark !== true && (!o.mark || typeof o.mark !== 'object' || Array.isArray(o.mark))) { if (o.mark === false || o.mark === null) delete o.mark; else throw new Error('livery mark must be {t, side?, seed?, color?} or true'); } }
+  return o;
+}
+
 export function kitOps({ getModel, saveModel, build, models }) {
   return {
     /** art_model kit {prefix?:"kit", colors?, seed?, overwrite?}: paint the kit texture canvases. */
@@ -51,7 +73,7 @@ export function kitOps({ getModel, saveModel, build, models }) {
       const canvas = a.canvas ?? `${a.name}_livery`;
       if (!NAME_RE.test(canvas)) throw new Error('livery canvas name must be 1-64 letters, digits, _ - .');
       if (this.docs.has(canvas) && !a.overwrite) throw new Error(`Canvas "${canvas}" exists (overwrite:true repaints it)`);
-      const r = paintLivery(H, a);
+      const r = paintLivery(H, liveryArgs(a));
       if (this.docs.has(canvas)) this.run('delete', { canvas }, source);
       const d = new Doc({ name: canvas, width: r.width, height: r.height });
       d.layers[0].name = 'color';

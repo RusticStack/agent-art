@@ -136,7 +136,7 @@ export const TOOLS = [
       type: 'object',
       properties: { op: { type: 'string' }, topic: { type: 'string', enum: ['index', 'ops', ...Object.keys(TOPICS)] }, section: { type: 'string' }, full: { type: 'boolean' }, skill: { type: 'string', enum: ['list', ...Object.keys(SKILLS)] } },
     },
-    run: async (call, a) => ({ text: a.skill === 'list' ? skillList() : a.skill ? skillText(a.skill) : helpText(a) }),
+    run: async (call, a) => ({ text: a.skill === 'list' ? skillList() : a.skill ? skillText(a.skill, a) : helpText(a) }),
   },
   {
     name: 'art_sheet',
@@ -315,7 +315,7 @@ export const TOOLS = [
         bake_ao: { type: ['boolean', 'object'] }, bump: { type: ['number', 'object'] }, lods: { type: 'array', items: { type: 'number' } }, lod_mode: { enum: ['nodes', 'files'] }, lod_screen: { type: 'object' },
         impostor: { type: ['boolean', 'object'] }, collision: { type: ['boolean', 'string', 'object'] }, occluder: { type: ['boolean', 'string', 'object'] }, stats: { type: 'boolean' },
         ao: { type: ['boolean', 'object'] }, lod: { type: 'integer' }, morph: { type: 'object' }, merge: { type: ['boolean', 'object'] }, morphs: { type: 'object' }, cull: { type: 'object' }, greeble_kind: { type: 'string' },
-        strips: { type: ['object', 'array'] }, width: { type: 'integer' }, colors: { type: 'object' }, seed: { type: 'integer' },
+        strips: { type: ['object', 'array'] }, width: { type: 'integer' }, colors: { type: 'object' }, seed: { type: 'integer' }, stripes: { type: 'array' }, hazard: { type: 'array' }, decals: { type: 'array' }, mark: { type: ['object', 'boolean'] },
         skeleton: { type: ['object', 'null'] }, skin: { type: ['object', 'null'] }, bones: { type: 'object' }, bone: { type: 'string' }, retarget: { type: 'object' }, profile: { enum: ['three', 'roblox', 'minimal'] }, max_bones: { type: 'integer' }, r15: { type: 'boolean' },
         material: { type: 'string' }, preset: { type: ['string', 'null'] }, materials: { type: 'object' }, packing: { enum: ['gltf_orm', 'roblox', 'unity_mask'] }, tangents: { type: 'boolean' },
         lightmap: { type: ['boolean', 'object'] }, probes: { type: ['boolean', 'object'] }, thickness: { type: ['boolean', 'object'] }, vertex_colors: { type: ['boolean', 'object'] }, uv2: { type: 'string' }, uv3: { type: 'string' },

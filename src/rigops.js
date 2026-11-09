@@ -401,6 +401,7 @@ export const RIG_OPS = {
    */
   rig_debug_render(a) {
     const { d, rig, def } = getRig(this, a.name);
+    if (a.tag === undefined && a.animation !== undefined && !a.preset) a = { ...a, tag: a.animation };
     const { view, poses, source } = a.tag !== undefined || !a.preset ? uiPoses(this, rig, def, a) : uiPoses(this, rig, def, { ...a, tag: undefined });
     const fi = Math.max(0, Math.min(poses.length - 1, Number(a.frame ?? 0) || 0));
     const pose = poses[fi];
@@ -759,10 +760,14 @@ function layerStack(rig, pose, view) {
   return { order, hidden, why };
 }
 
+let clipPoseResolver = null;
+/** The animation library registers how a skin's clip resolves to poses on its rig (avoids an import cycle). */
+export function setClipPoseResolver(fn) { clipPoseResolver = fn; }
+
 /**
  * Poses for the web UI's Layers view: tag "<preset>_<view>" (or a preset name) on an output
  * canvas = the clip's frames through the full pipeline (plant, secondary, depth, weapon); else
- * a stored pose or the rest pose. -> {view, poses, source}
+ * an art_anim library clip of a skin on this rig ("<clip>_<view>"), a stored pose or the rest pose. -> {view, poses, source}
  */
 function uiPoses(engine, rig, def, a) {
   const allViews = [...rig.views, ...Object.keys(rig.mirror)];
@@ -778,6 +783,12 @@ function uiPoses(engine, rig, def, a) {
     const n = a.canvas && a.tag ? engine.docs.get(a.canvas)?.animations?.[a.tag]?.frames.length : null;
     const fp = framePoses(engine, rig, def, { preset, view, animation: undefined, ...(n ? { frames: n } : {}), ...(a.carry !== undefined ? { carry: a.carry } : {}) });
     return { view, poses: fp.poses, source: `preset ${preset}` };
+  }
+  if (a.tag && clipPoseResolver) {
+    // a library clip rendered on this rig (art_anim render: animation "<clip>_<view>")
+    const names = [[a.tag, view]];
+    for (const v of allViews) if (a.tag.endsWith(`_${v}`)) names.unshift([a.tag.slice(0, -v.length - 1), a.view && allViews.includes(a.view) ? a.view : v]);
+    for (const [clip, v] of names) { const r = clipPoseResolver(engine, a.name, clip, v); if (r) return { view: v, poses: r.poses, source: `clip ${r.skin}/${clip}` }; }
   }
   if (a.tag) return { view, poses: [{}], source: `rest pose (no preset for tag "${a.tag}")` };
   return { view, poses: [a.pose !== undefined ? resolvePose(rig, { pose: a.pose }) : {}], source: a.pose !== undefined ? `pose ${a.pose}` : 'rest pose' };

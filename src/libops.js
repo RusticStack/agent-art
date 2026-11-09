@@ -8,7 +8,7 @@ import { packImages } from './sheet.js';
 import { handlingOf, DEFAULT_PITCH, SHEET_VIEWS, classGeometry, weaponAssetDef, conformAsset, renderWeaponCells, sheetImage, socketOf, compositeFrame, pitchCol, HANDLING } from './weaponassets.js';
 import { decodePNG } from './png.js';
 import { rigTemplate, mergeTemplate } from './rigtemplates.js';
-import { getRig, framePoses, feetGround, artComposite } from './rigops.js';
+import { getRig, framePoses, feetGround, artComposite, setClipPoseResolver } from './rigops.js';
 import { applyProportions, normalizeProportions, defaultMasks, normalizeClip, evalClip, retargetClip, LIB_NAME } from './animlib.js';
 import { orderOf } from './depth.js';
 import { encodePNG } from './png.js';
@@ -86,6 +86,16 @@ function skinClip(e, skin, clipName, view) {
   const fp = framePoses(e, rig, def, a);
   return { sk, d, rig, def, clip, fp, getClip };
 }
+
+// art_rig debug_render / layers {tag|animation:"<clip>_<view>"} on a skin's rig: the library clip's frames
+setClipPoseResolver((e, rigName, clip, view) => {
+  for (const n of listNames(e, 'skins')) {
+    let s; try { s = loadSkin(e, n); } catch { continue; }
+    if (s.rig !== rigName || !loadClip(e, s.skeleton, clip)) continue;
+    return { skin: n, poses: skinClip(e, s, clip, view).fp.poses };
+  }
+  return null;
+});
 
 /** Loadout -> render options: equipment set variant + parts of unequipped items hidden. */
 function loadoutOpts(skin, name) {
@@ -199,12 +209,18 @@ export const LIB_OPS = {
   /** A skin: a drawn rig bound to a skeleton (created with the skeleton's proportions, or an existing rig), equipment and loadouts. */
   anim_skin(a, source) {
     const name = checkName(a.name, 'skin');
+    if (a.delete) {
+      const s = loadSkin(this, name);
+      fs.rmSync(libDir(this, 'skins', `${name}.json`));
+      return { skin: name, deleted: true, rig_kept: s.rig, note: `the drawn rig "${s.rig}" is kept (art_cleanup retires it)` };
+    }
     const sk = loadSkeleton(this, a.skeleton);
     let prop = null, propName = null;
     if (typeof a.proportions === 'string') { prop = sk.proportions[a.proportions]; propName = a.proportions; if (!prop) throw new Error(`skeleton "${sk.name}" has no proportions "${a.proportions}" (${Object.keys(sk.proportions).join(', ') || 'none'})`); }
     else if (a.proportions) prop = normalizeProportions({ custom: a.proportions }).custom;
     const rigName = a.rig ?? name;
-    let created = false;
+    let created = false, rebuilt = null;
+    const prevFile = libDir(this, 'skins', `${name}.json`), prevSkin = fs.existsSync(prevFile) ? readJSON(prevFile) : null;
     if (!this.docs.has(`${rigName}_parts`)) {
       const def = applyProportions(sk.def, prop);
       if (a.parts) for (const [k, v] of Object.entries(a.parts)) { if (v === null) delete def.parts[k]; else def.parts[k] = { ...(def.parts[k] || {}), ...v }; }
@@ -213,6 +229,15 @@ export const LIB_OPS = {
       for (const k of RIG_OPTS) if (def[k] !== undefined) args[k] = def[k];
       this.run('rig_create', args, source);
       created = true;
+    } else if (a.overwrite && !a.map && !prevSkin?.retarget) {
+      // overwrite: rebuild the rig from the skeleton's current parts (e.g. a shield / weapon cell melee
+      // added); relayout keeps every drawn cell of the parts that stay. A bound foreign rig (map) is left alone.
+      const def = applyProportions(sk.def, prop);
+      const before = new Set(getRig(this, rigName).rig.order);
+      const parts = { ...def.parts };
+      if (a.parts) for (const [k, v] of Object.entries(a.parts)) parts[k] = v === null ? null : { ...(parts[k] || {}), ...v };
+      this.run('rig_update', { name: rigName, parts, ...(def.poses ? { poses: def.poses } : {}), ...(a.variant_sets ? { variant_sets: a.variant_sets } : {}) }, source);
+      rebuilt = Object.keys(parts).filter((k) => parts[k] && !before.has(k));
     }
     const { rig } = getRig(this, rigName);
     const missing = Object.keys(sk.def.parts).filter((p) => !rig.parts[p] && !(a.map && Object.values(a.map).includes(p)));
@@ -234,7 +259,8 @@ export const LIB_OPS = {
     for (const n of Object.keys(loadouts)) loadoutOpts(skin, n); // validate sets
     writeJSON(libDir(this, 'skins', `${name}.json`), skin);
     const out = { skin: name, skeleton: sk.name, rig: rigName, created, ...(propName ? { proportions: propName } : prop ? { proportions: prop } : {}), equipment: Object.keys(equipment), loadouts: Object.keys(loadouts), ...(missing.length ? { warning: `rig lacks skeleton parts ${missing.join(', ')} (clips drop them; pass map:{skeleton_part: rig_part})` } : {}) };
-    if (created) { const { rig: r2 } = getRig(this, rigName); out.cells = compactCells(Object.fromEntries(r2.views.map((v) => [v, Object.fromEntries(r2.order.filter((n) => !r2.parts[n].art).map((n) => { const c = r2.layout.columns.find((x) => x.part === n && x.variant === 'base'); return [n, [c.x, r2.views.indexOf(v) * r2.layout.rowH, r2.parts[n].w, r2.parts[n].h]]; }))]))); out.next = `draw the cells on canvas "${rigName}_parts" (art_rig consistency checks the views agree), then art_anim render / batch`; }
+    if (rebuilt) { out.rebuilt = true; out.added_parts = rebuilt; }
+    if (created || rebuilt?.length) { const { rig: r2 } = getRig(this, rigName); out.cells = compactCells(Object.fromEntries(r2.views.map((v) => [v, Object.fromEntries(r2.order.filter((n) => !r2.parts[n].art).map((n) => { const c = r2.layout.columns.find((x) => x.part === n && x.variant === 'base'); return [n, [c.x, r2.views.indexOf(v) * r2.layout.rowH, r2.parts[n].w, r2.parts[n].h]]; }))]))); out.next = `draw the cells on canvas "${rigName}_parts" (art_rig consistency checks the views agree), then art_anim render / batch`; }
     return out;
   },
 

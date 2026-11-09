@@ -218,7 +218,7 @@ export function damageOps({ getModel, build, saveModel }) {
           group: g.group, part: g.part, parent: g.parent, method: g.method, boolean: g.boolean, seed: g.seed, chunks: g.result.chunks.filter((c) => c.level === 1).length, debris: g.result.chunks.filter((c) => c.level === 2).length,
           volume_units3: f6(g.result.volume_px3 / scale ** 3), chunk_volume_error: f6(g.result.error), watertight: g.result.chunks.every((c) => c.watertight), mass_kg: f6((g.result.volume_px3 / scale ** 3) * g.density),
           triangles: g.result.chunks.filter((c) => c.level === 1).reduce((s, c) => s + c.mesh.triangles, 0),
-          ...(g.result.closed ? { closed: g.result.closed } : {}),
+          ...(g.result.closed ? { closed: g.result.closed } : {}), ...(g.result.merged ? { merged_shells: g.result.merged.shells } : {}),
         })),
         image: explodedImage(built, fr, a.view ?? 'game', a.size ?? 224), ms,
         next: `export {name:"${def.name}"} writes ${def.name}.damage.glb with <group>_chunk_NN nodes (pivot = centre of mass, collision hull children) + the manifest`,

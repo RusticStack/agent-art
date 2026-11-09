@@ -79,7 +79,7 @@ export function buildLlmsFull() {
     '',
     'art_help {skill:"<name>"} returns each of these; they are also MCP prompts, and `agent-art skills --out DIR` writes them as DIR/agent-art-<name>/SKILL.md.',
     '',
-    skills.map((k) => `### Skill: ${k}\n\nDescription: ${skillDescription(k)}\n\n${skillText(k)}`).join('\n\n'),
+    skills.map((k) => `### Skill: ${k}\n\nDescription: ${skillDescription(k)}\n\n${skillText(k, { full: true })}`).join('\n\n'),
     '',
   ];
   return out.join('\n');

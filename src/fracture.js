@@ -10,6 +10,8 @@ import { convexHull, hullMesh } from './proxies.js';
 import { mulberry32 } from './util.js';
 import { faceBasis } from './ctm.js';
 import { closeOpenMesh } from './remesh.js';
+import { unionAll } from './meshbool.js';
+import { manifoldReport } from './meshkit.js';
 
 const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -179,6 +181,16 @@ export function fracturePart(mesh0, opts) {
     if (!closed) throw new Error(`fracture: part "${opts.name}" is not a closed solid (${ms.open} open edges, ${ms.nonManifold} non-manifold) and could not be closed (cleanup hole fill and voxel remesh failed): ${hint}`);
     mesh = closed.mesh;
   }
+  // a part built from several touching closed shells (a column = plinth + shaft + capital) is united
+  // first: cut separately, the shells of a chunk would touch along non-manifold edges
+  let merged = null;
+  const shells = manifoldReport(mesh).components;
+  if (shells > 1) {
+    try {
+      const u = unionAll(mesh).mesh, us = manifoldStats(u);
+      if (!us.open && !us.nonManifold && !us.flipped && meshVolume(u).volume > 1e-6) { mesh = u; merged = { shells }; }
+    } catch { /* keep the shells */ }
+  }
   const whole = meshVolume(mesh);
   if (!(whole.volume > 1e-6)) throw new Error(`fracture: part "${opts.name}" has no volume (inside-out or flat)`);
   const b = mesh.bounds();
@@ -234,5 +246,5 @@ export function fracturePart(mesh0, opts) {
     c.hullVerts = h ? h.verts.length : 0;
   }
   const sum1 = l1.reduce((s, c) => s + c.volume_px3, 0);
-  return { chunks, volume_px3: whole.volume, center: whole.center, bounds: b, level1_volume_px3: sum1, error: Math.abs(sum1 - whole.volume) / whole.volume, method, pieces, seed, ...(closed ? { closed: { method: closed.method, before: closed.before, after: closed.after, triangles: mesh.triangles, ms: closed.ms } } : {}) };
+  return { chunks, volume_px3: whole.volume, center: whole.center, bounds: b, level1_volume_px3: sum1, error: Math.abs(sum1 - whole.volume) / whole.volume, method, pieces, seed, ...(merged ? { merged } : {}), ...(closed ? { closed: { method: closed.method, before: closed.before, after: closed.after, triangles: mesh.triangles, ms: closed.ms } } : {}) };
 }

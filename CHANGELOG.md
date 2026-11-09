@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Fixes from building the showcase (all additive):
+  - `art_anim skin {overwrite:true}` on an existing skin rebuilds its rig from the skeleton's current parts (the shield `melee` adds), keeping the drawn cells. `skin {name, delete:true}` deletes the skin; its rig stays.
+  - `art_rig debug_render {animation:"<clip>_<view>", frame}` (or `tag`) renders that frame of an `art_anim` library clip on a skin's rig, not the rest pose.
+  - `art_model render camera:"game"` applies `zoom` (screen px per model px at the model centre) and `fov`.
+  - `art_model livery` takes `stripes` / `hazard` / `decals` / `mark` in the documented shapes, also as JSON strings, and names a bad entry; they are in the input schema now.
+  - `art_model fracture` unites a part made of touching closed shells (a column: plinth, shaft, capital) before cutting, so its chunks are manifold and `watertight:true` (reply `merged_shells`).
+  - `art_audio analyze {view:"mix"}` returns the mix image and the mix fields only; stats, report and perception stay in plain `analyze`.
+  - One-shot SFX analysis images leave out the drum, feel, swing and style lines.
+  - `art_fp kit` names the models it kept (`kept`) or replaced, and warns when a non-kit model holds a kit name.
+  - `art_model create` / `update` with over 64 parts (ship templates) reply with part counts per type and the five heaviest parts; `art_model info` has every part.
+  - The `planets-space` skill keeps its steps; its three.js code is in sections (`art_help {skill, section}`, or `full:true`; SKILL.md files and llms-full.txt include it).
+  - Docs: `render light.dir` axes and direction, the `iso_box` `gz` unit (screen px), the melee shield cell scale, the global `art_fp kit` names.
 - Pre-release review fixes:
   - The gunshot checks only apply to `gunshot_*` recipes or an intent that names a gun. Before, `shotgun_pump`, `plasma_shot` and intents such as "one-shot UI chime" were judged as gunshots.
   - A voice take can no longer overwrite another take through its temporary file name.

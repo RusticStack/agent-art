@@ -210,7 +210,7 @@ async function main() {
   } else if (cmd === 'help' && rest[0]) {
     const full = rest.includes('--full');
     const [what, section] = rest.filter((r) => r !== '--full');
-    if (SKILLS[what]) console.log(skillText(what));
+    if (SKILLS[what]) console.log(skillText(what, { full: true }));
     else if (TOPICS[what] || what === 'index' || what === 'ops') console.log(helpText({ topic: what, section, full }));
     else console.log(helpText({ op: what }));
   } else if (cmd === 'usage') {

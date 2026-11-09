@@ -286,10 +286,24 @@ Object.assign(SKILLS, AUDIO_SKILLS, PLANET_SKILLS, FX_SKILLS);
 /** art_help {skill:"list"}: one line per skill. */
 export const skillList = () => `Skills (art_help {skill:"<name>"}):\n${Object.entries(SKILLS).map(([n, x]) => `- ${n}: ${x.title}`).join('\n')}`;
 
-export function skillText(name) {
+/**
+ * A skill's text. Skills with long code (sections) answer with the steps + a section index; opts
+ * {section:"a,b"} = those sections, {full:true} = steps + every section (SKILL.md files, llms-full).
+ */
+export function skillText(name, opts = {}) {
   const s = SKILLS[name];
   if (!s) throw new Error(`Unknown skill "${name}". Skills: ${Object.keys(SKILLS).join(', ')}`);
-  return `# ${s.title}\nWhen: ${s.when}\n\n${s.body}`;
+  const secs = Object.entries(s.sections || {});
+  if (opts.section && secs.length) {
+    const want = [].concat(opts.section).flatMap((x) => String(x).split(',')).map((x) => x.trim()).filter(Boolean);
+    const bad = want.filter((w) => !Object.hasOwn(s.sections, w));
+    if (bad.length) throw new Error(`Unknown section ${bad.join(', ')} of skill "${name}". Sections: ${secs.map(([k]) => k).join(', ')}`);
+    return want.map((w) => `[code: ${w}]\n${s.sections[w].text}`).join('\n\n');
+  }
+  const head = `# ${s.title}\nWhen: ${s.when}\n\n${s.body}`;
+  if (!secs.length) return head;
+  if (opts.full) return `${head}\n\n${secs.map(([k, x]) => `[code: ${k}]\n${x.text}`).join('\n\n')}`;
+  return `${head}\nCODE (art_help {skill:"${name}", section:"<id>"}; several: "a,b"; everything: full:true):\n${secs.map(([k, x]) => `- ${k}: ${x.about}`).join('\n')}`;
 }
 
 /**
@@ -305,5 +319,5 @@ export function skillDescription(name) {
 export function skillFile(name) {
   if (!SKILLS[name]) skillText(name); // throws the "Unknown skill" error with the list
   // JSON string = a valid YAML double-quoted scalar, so colons and quotes in the text are safe
-  return `---\nname: agent-art-${name}\ndescription: ${JSON.stringify(skillDescription(name))}\n---\n\n${skillText(name)}\n`;
+  return `---\nname: agent-art-${name}\ndescription: ${JSON.stringify(skillDescription(name))}\n---\n\n${skillText(name, { full: true })}\n`;
 }

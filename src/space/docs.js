@@ -147,18 +147,26 @@ export const PLANET_SKILLS = {
 2. Bake each world: art_planet ${J({ action: 'planet', name: 'kethra', preset: 'bloom', seed: 7, hue: -6, equirect: 1024, face: 256 })}. Look at the orbit image; iterate on biomes / ramps / sea_level / clouds before going bigger.
    Same palette as your project: palette:"project:<name>" (dither stays ordered).
 3. In three.js: GLTFLoader the .glb; THREE.LOD from <name>_lods children (userData.distance); swap <name>_atmosphere's material for:
-${ATMOSPHERE_SNIPPET}
+   [code: section "atmosphere"]
    City lights (night side only):
-${NIGHT_SNIPPET}
-4. Close approach: stream quadtree tiles instead of LOD0:
-${QUADTREE_SNIPPET}
+   [code: section "night"]
+4. Close approach: stream quadtree tiles (index <name>.tiles.json) instead of LOD0:
+   [code: section "quadtree"]
 5. Far away (a few px): the disc sprite (<name>_disc.png) or:
-${IMPOSTOR_SNIPPET}
+   [code: section "impostor"]
 6. Landing zone: art_planet ${J({ action: 'terrain', planet: 'kethra', lat: 12, lon: 30, size: 512 })}. The patch base elevation and colours come from the same planet field (orbit and ground match). Use anchors (landing_pad, mesa_top, arch) to place colony modules. Look at the overview / eye / wide renders; set scene.fog from meta.fog and add the horizon ring.
-${TERRAIN_SNIPPET}
+   [code: section "terrain"]
    Pixel ground detail everywhere near the camera (instead of only the detail decals):
-${GROUND_SNIPPET}
+   [code: section "ground"]
 7. Space: skybox (scene.background = new THREE.CubeTextureLoader().load([px, nx, py, ny, pz, nz]) with NearestFilter, or the equirect with EquirectangularReflectionMapping), asteroids (field glb is GPU-instanced per variant and LOD; the LOD1+ nodes (userData.lod > 0) are in the file too, so set them visible = false on load or show one level by camera distance), fx sprites (additive planes).
 8. Roblox later: every texture is <= 1024 px; meshes per chunk / tile stay well under 20k triangles; Sky faces map px->Rt, nx->Lf, py->Up, ny->Dn, pz->Ft, nz->Bk; heightfield.json can drive Terrain:WriteVoxels or a MeshPart grid; instanced props become cloned MeshParts from scatter.json.`,
+    sections: {
+      atmosphere: { about: 'three.js atmosphere shell shader', text: ATMOSPHERE_SNIPPET },
+      night: { about: 'night-side city lights shader', text: NIGHT_SNIPPET },
+      quadtree: { about: 'quadtree tile streaming', text: QUADTREE_SNIPPET },
+      impostor: { about: 'far-planet impostor shader', text: IMPOSTOR_SNIPPET },
+      terrain: { about: 'ground patch: chunks, props, heightfield', text: TERRAIN_SNIPPET },
+      ground: { about: 'near-ground pixel detail shader', text: GROUND_SNIPPET },
+    },
   },
 };

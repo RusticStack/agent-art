@@ -319,7 +319,7 @@ const D2R = Math.PI / 180;
  * A camera for a W x H image. spec: "fp" (eye at the model origin looking down -Z, 60° vertical
  * fov), a VIEWS name (orthographic, fitted to `fit` points; "game" = fitted perspective), or
  * {pos:[x,y,z], look:[x,y,z], fov?:60, up?} (perspective, px). zoom = screen px per model px
- * for orthographic views (default: fit). -> {project(p) -> [sx, sy, Z, W, behind], perspective, label}
+ * (orthographic views; "game": at the model centre) (default: fit); fov also sets "game"'s. -> {project(p) -> [sx, sy, Z, W, behind], perspective, label}
  */
 export function makeCamera(spec, IW, IH, fit = [], opts = {}) {
   const margin = opts.margin ?? Math.max(2, Math.round(Math.min(IW, IH) * 0.06));
@@ -351,9 +351,12 @@ export function makeCamera(spec, IW, IH, fit = [], opts = {}) {
   if (min[0] === Infinity) { min.fill(-16); max.fill(16); }
   const center = min.map((x, i) => (x + max[i]) / 2);
   if (v.perspective) {
+    // fov / zoom apply here too (zoom = screen px per model px at the model centre; default: the
+    // bounding sphere fits the frame)
+    const fov = Number.isFinite(Number(opts.fov)) && Number(opts.fov) > 0 ? Number(opts.fov) : v.fov;
     const radius = Math.max(1e-3, Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) / 2);
-    const dist = radius / Math.sin((v.fov / 2) * D2R);
-    return persp([center[0] + zc[0] * dist, center[1] + zc[1] * dist, center[2] + zc[2] * dist], zc, v.fov, v.label);
+    const dist = opts.zoom ? IH / 2 / Math.tan((fov / 2) * D2R) / Number(opts.zoom) : radius / Math.sin((fov / 2) * D2R);
+    return persp([center[0] + zc[0] * dist, center[1] + zc[1] * dist, center[2] + zc[2] * dist], zc, fov, v.label);
   }
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
   for (const p of fit) {

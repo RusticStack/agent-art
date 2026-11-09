@@ -10,7 +10,7 @@ import crypto from 'node:crypto';
 import { Engine } from '../src/engine.js';
 import { decodePNG } from '../src/png.js';
 import { TOOLS } from '../src/mcp.js';
-import { SKILLS } from '../src/skills.js';
+import { SKILLS, skillText } from '../src/skills.js';
 import { helpText } from '../src/docs.js';
 import { normPlanet, bakeEquirect, bakeFace, cubeSphere, facePatch, tileSkirt, heightAt, elevKm, dirToEquirect, equirectDir } from '../src/space/planet.js';
 import { cubeDir, dirToCube, cubePoint, vnorm } from '../src/space/noise.js';
@@ -367,7 +367,7 @@ test('art_planet is wired into MCP, help and skills', () => {
   assert.ok(t);
   assert.deepEqual(t.inputSchema.properties.action.enum, ['planet', 'system', 'terrain', 'rocks', 'asteroids', 'skybox', 'fx', 'info']);
   assert.match(helpText({ topic: 'planets' }), /PLANETS AND SPACE/);
-  assert.match(SKILLS['planets-space'].body, /ShaderMaterial/);
+  assert.match(skillText('planets-space', { full: true }), /ShaderMaterial/); // the shader code moved to skill sections (art_help {skill, section})
   assert.match(SKILLS['planets-space'].body, /tiles\.json/);
   const e = new Engine({ home: tmp() });
   assert.ok(e.run('planet_info', {}).planet_presets.gas);

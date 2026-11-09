@@ -420,13 +420,20 @@ export function listArg(v, all) { if (v === undefined || v === true) return all;
 export const FP_OPS = {
   /** Kit models into the workspace (art_model definitions you can edit). */
   fp_kit(a, source) {
-    const names = [];
-    const make = (def) => { if (!a.overwrite && modelDefs(this).has(def.name)) return; this.run('model_create', { ...def, overwrite: true }, source); names.push(def.name); };
+    const names = [], kept = [], replaced = [], foreign = [];
+    // kit names are global model names (the fp pipeline finds models by class / item name): an existing
+    // model is kept (overwrite:true replaces it), and the reply names both
+    const make = (def) => {
+      const old = modelDefs(this).get(def.name);
+      if (old && !a.overwrite) { kept.push(def.name); if (old.fp?.kind !== def.fp?.kind) foreign.push(def.name); return; }
+      if (old) replaced.push(def.name);
+      this.run('model_create', { ...def, overwrite: true }, source); names.push(def.name);
+    };
     for (const c of listArg(a.guns, GUN_CLASSES)) make(gunModel(c));
     for (const m of listArg(a.mags, MAGS)) make(magModel(m));
     for (const n of listArg(a.attachments, Object.keys(ATTACH))) make(attachModel(n));
     for (const i of listArg(a.items, Object.keys(ITEMS))) make(itemModel(i));
-    return { created: names, next: 'art_fp sweep {out} renders their sweeps; art_model preview {name} shows one; edit parts with art_model update (anchors are sockets)' };
+    return { created: names, ...(kept.length ? { kept, kept_note: 'existing models with these names were left as they are (overwrite:true replaces them)' } : {}), ...(replaced.length ? { replaced } : {}), ...(foreign.length ? { warning: `${foreign.join(', ')}: existing models that are not fp kit models of that kind hold these names, so fp sweep refuses them: rename yours or pass overwrite:true` } : {}), next: 'art_fp sweep {out} renders their sweeps; art_model preview {name} shows one; edit parts with art_model update (anchors are sockets)' };
   },
 
   /** Gun / magazine / attachment / item sweeps -> manifests fp_guns, fp_mags, fp_attach. */

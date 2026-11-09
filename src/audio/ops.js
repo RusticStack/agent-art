@@ -297,6 +297,8 @@ export const AUDIO_OPS = {
     const pub = publicPerception(p);
     if (pub.mix) delete pub.mix.spectra;
     if (p.kind === 'sfx' && pub.rhythm) pub.rhythm.note = 'one-shot SFX: the tempo/groove fields describe onset spacing (hits, tails), not a musical beat; ignore them unless the sound is a loop';
+    // view:"mix" adds the stem image + the mix fields; the overview stats / report / perception stay one call away
+    if (view === 'mix' && p.mix) return { name: a.name, view: 'mix', mix: pub.mix, image, rest: 'stats, report, perception: analyze {name}' };
     if (a.detail !== true) { delete pub.tension?.curve; if (pub.tonal) delete pub.tonal.chords_per_segment; if (pub.tonal) delete pub.tonal.chroma; }
     return { name: a.name, stats: meas.stats, report: listenerReport(p, issues), perception: pub, image, views: p.mix ? 'view:"mix" = stem spectra + masking' : undefined };
   },
