@@ -25,7 +25,7 @@ test('usage: debug level from flag and env', () => {
 
 test('usage: token and image estimates', () => {
   assert.equal(estimateTokens(''), 0);
-  assert.equal(estimateTokens('{"a":1}'), 7); // { " a " : 1 } -> punctuation 1 each, word 1, digit 1
+  assert.equal(estimateTokens('{"a":1}'), 5); // {" a ": 1 } -> punctuation runs, word, digits
   assert.ok(estimateTokens('internationalization') >= 3);
   const png = encodePNG(64, 32, new Uint8ClampedArray(64 * 32 * 4)).toString('base64');
   assert.deepEqual(pngSize(png), { w: 64, h: 32 });

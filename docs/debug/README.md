@@ -61,7 +61,7 @@ One JSON object per line. Every record has `ts`, `session` and `v` (the Agent Ar
 
 ## How tokens are estimated
 
-- **Text:** words count one token per ~6 letters, digit runs one per 3 digits, and every punctuation mark is one token. That is close to Claude's tokenizer on JSON and English. Treat it as an estimate, good for comparing tools and versions but not exact.
+- **Text:** a word with its leading space counts one token per 7 letters, a digit run one per 3 digits, a run of punctuation one per 3 marks, and each newline one. The rule was fitted against Anthropic's public tokenizer on Agent Art's own schemas, descriptions, help topics, skills, README and replies, with about 6% mean error. Newer Claude models tokenize somewhat differently, so treat it as an estimate: good for comparing tools and versions, not for billing. `--transcript` gives the real numbers.
 - **Images:** Claude's rule. The image is scaled to fit 1568 px on the long side and about 1.15 MP, then costs w × h / 750 tokens.
 
 ## Using it to improve Agent Art

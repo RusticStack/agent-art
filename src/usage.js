@@ -25,18 +25,21 @@ export function usageFile(home, env = process.env, now = new Date()) {
 }
 
 /**
- * Rough token count for text an LLM reads (Claude-like BPE): words split about every 6 letters,
- * digit runs every 3, each punctuation mark one token. Within ~15% on JSON and prose; it is an
- * estimate, use it to compare tools and versions, not to bill.
+ * Rough token count for text an LLM reads, dependency free. Fitted against Anthropic's public
+ * tokenizer on Agent Art's own tool schemas, descriptions, help topics, skills, README and replies:
+ * ~6% mean error (worst ~20% on tiny strings). A word (with its leading space) is one token per
+ * 7 letters, digit runs one per 3, a run of punctuation one per 3 marks, each newline one.
+ * Newer Claude tokenizers count somewhat differently: compare tools and versions with it, don't bill.
  */
 export function estimateTokens(text) {
   if (!text) return 0;
   let n = 0;
-  for (const m of String(text).matchAll(/[A-Za-z]+|\d+|[^\sA-Za-z\d]/g)) {
+  for (const m of String(text).matchAll(/ ?[A-Za-z]+| ?\d+|[^\sA-Za-z\d]+|\s+/g)) {
     const t = m[0];
-    if (/^[A-Za-z]/.test(t)) n += Math.ceil(t.length / 6);
-    else if (/^\d/.test(t)) n += Math.ceil(t.length / 3);
-    else n += 1;
+    if (/^ ?[A-Za-z]/.test(t)) n += Math.ceil(t.trim().length / 7);
+    else if (/^ ?\d/.test(t)) n += Math.ceil(t.trim().length / 3);
+    else if (/^\s+$/.test(t)) n += t.includes('\n') ? t.split('\n').length - 1 : (t.length > 1 ? 1 : 0);
+    else n += Math.ceil(t.length / 3);
   }
   return n;
 }
