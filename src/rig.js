@@ -852,11 +852,17 @@ export function footLow(rig, solved, foot) {
   return low;
 }
 
+const TORSO_RE = /^(root|body|torso|trunk|spine\d*|chest|ribs|abdomen|belly|waist|hips?|pelvis|neck|shoulders?)(_|$)/;
 /** Limb ends the ground pass keeps above the ground row: the feet and every hand on a two-bone arm. */
 export function groundEnds(rig) {
   const feet = rig.feet || ['foot_f', 'foot_b'].filter((n) => rig.parts[n]);
-  const two = (n) => { const B = rig.parts[n]?.parent; return !!(B && rig.parts[B].parent); };
-  return [...feet, ...rig.order.filter((n) => /^hand(_|$)/.test(n) && !feet.includes(n) && two(n))];
+  const hands = rig.order.filter((n) => /^hand(_|$)/.test(n) && !feet.includes(n));
+  const ends = [...feet, ...hands, ...(rig.parts.head ? ['head'] : [])];
+  const above = (x, a) => { for (let p = rig.parts[x]?.parent; p; p = rig.parts[p]?.parent) if (p === a) return true; return false; };
+  // a two-bone arm: hand -> B -> A where A is a limb bone, not the torso (no other limb end hangs
+  // under A); a one-bone arm (hand -> arm -> chest) would bend the torso instead of lifting the hand
+  const two = (n) => { const B = rig.parts[n]?.parent, A = B && rig.parts[B]?.parent; return !!(A && rig.parts[A].parent && !TORSO_RE.test(A) && !ends.some((x) => x !== n && above(x, A))); };
+  return [...feet, ...hands.filter(two)];
 }
 
 /** The ground row of a view: the lowest drawn foot row of the rest pose. */
