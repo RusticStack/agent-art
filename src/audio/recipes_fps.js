@@ -3,10 +3,13 @@
 // (rng, v, j) -> {layers, fx?, reverb?, target?, tail?, loop?} like the ones in sfx.js; the layer
 // helpers are passed in so this module has no import cycle with sfx.js.
 // vars (all optional): pitch (semitones), length (x), intensity 0..1, variation 0..1, wet 0..1,
-// reverb; firearms: environment "outdoor"|"indoor"|"canyon"; casing_drop: surface "metal"|"concrete";
+// reverb; firearms: environment "outdoor"|"indoor"|"canyon", distance "near"|"far" (recorded only); casing_drop: surface "metal"|"concrete";
 // footstep: surface "metal"|"dirt"|"concrete"|"snow"|"grate".
 
+import { gunBank } from './samples.js';
+
 export const ENVIRONMENTS = ['outdoor', 'indoor', 'canyon'];
+export const DISTANCES = ['near', 'far'];
 export const CASING_SURFACES = ['metal', 'concrete'];
 export const FOOT_SURFACES = ['metal', 'dirt', 'concrete', 'snow', 'grate'];
 
@@ -58,6 +61,39 @@ export function fpsRecipes({ V, thump, burst, whoosh }) {
     };
   };
 
+  // recorded firearms (CC0 field recordings, src/audio/samples/guns): the seed picks the shot (played at its recorded
+  // pitch: no per-variant pitch jitter; vars.pitch still shifts it), length / intensity shape it, distance near|far picks the close or the distant recording; outdoor = as recorded (real tail), indoor /
+  // canyon add a room / echoes on top
+  const recEnv = (v, j, quiet = 1) => {
+    const env = v.environment || 'outdoor', w = (v.wet ?? 0.7) * quiet;
+    if (!ENVIRONMENTS.includes(env)) throw new Error(`environment must be ${ENVIRONMENTS.join('|')} (got "${env}")`);
+    if (env === 'indoor') return { fx: [{ type: 'eq', bands: [{ type: 'lp', f: 9000 }] }, { type: 'delay', time: j(0.03), feedback: 0.35, mix: 0.5 * w, lp: 4500, hp: 200, pingpong: true }], reverb: { preset: 'crypt', wet: 0.75 * w }, tail: 1.2 };
+    if (env === 'canyon') return { fx: [{ type: 'delay', time: j(0.5), feedback: 0.5, mix: 0.45 * w, lp: 1800, hp: 150, pingpong: true }], reverb: { preset: 'cathedral', wet: 0.1 * w }, tail: 2.5 };
+    return { fx: [], reverb: null, tail: 0.05 };
+  };
+  const recorded = (cls) => (r, v, j) => {
+    const dist = v.distance || 'near';
+    if (!DISTANCES.includes(dist)) throw new Error(`distance must be ${DISTANCES.join('|')} (got "${dist}")`);
+    const env = recEnv(v, j);
+    return {
+      layers: [{ kind: 'sample', sample: gunBank()[cls][dist], pitch: v.pitch_set ?? 0, ...(v.len < 0.98 ? { dur: (dist === 'far' ? 2.2 : 1.4) * v.len } : {}), gain: 3 * (v.intensity - 0.6) }],
+      fx: [...env.fx, { type: 'dc' }], reverb: env.reverb, tail: env.tail,
+    };
+  };
+  // suppressed (no suppressed recording exists in the bank): a recorded pistol / rifle shot without its blast
+  // (low-passed, short) + the action's metal clack
+  const suppressed = (r, v, j) => {
+    const env = recEnv(v, j, 0.4);
+    return {
+      layers: [
+        { kind: 'sample', sample: gunBank()[v.caliber === 'rifle' ? 'rifle' : 'pistol'].near, pitch: v.pitch - 2, dur: 0.35 * v.len, gain: -4 + 3 * (v.intensity - 0.6) },
+        clank(j(3200) * v.pf, 0.05, { gain: -9, at: 0.002 }),
+        { kind: 'crackle', dur: 0.05, density: 60, f: 3200, metal: true, gain: -14, at: 0.02 },
+      ],
+      fx: [{ type: 'eq', bands: [{ type: 'hp', f: 180 }, { type: 'lp', f: 2200 }] }, ...env.fx, { type: 'dc' }], reverb: env.reverb, tail: Math.min(env.tail, 0.4) + 0.05,
+    };
+  };
+
   const bounce = (surface, v, j) => {
     if (!CASING_SURFACES.includes(surface)) throw new Error(`casing_drop surface must be ${CASING_SURFACES.join('|')} (got "${surface}")`);
     const L = [], n = 4 + (v.variation > 0.3 ? 1 : 0);
@@ -89,8 +125,11 @@ export function fpsRecipes({ V, thump, burst, whoosh }) {
 
   return {
     // ---- firearms ----
-    gunshot_rifle: gun(GUNS.rifle), gunshot_pistol: gun(GUNS.pistol), gunshot_marksman: gun(GUNS.marksman), gunshot_shotgun: gun(GUNS.shotgun),
-    gunshot_smg: gun(GUNS.smg), gunshot_lmg: gun(GUNS.lmg), gunshot_suppressed: gun(GUNS.suppressed),
+    // recorded (default) + the synthesized originals as *_synth (unchanged)
+    gunshot_rifle: recorded('rifle'), gunshot_pistol: recorded('pistol'), gunshot_marksman: recorded('marksman'), gunshot_shotgun: recorded('shotgun'),
+    gunshot_smg: recorded('smg'), gunshot_lmg: recorded('lmg'), gunshot_suppressed: suppressed, gunshot_revolver: recorded('revolver'),
+    gunshot_rifle_synth: gun(GUNS.rifle), gunshot_pistol_synth: gun(GUNS.pistol), gunshot_marksman_synth: gun(GUNS.marksman), gunshot_shotgun_synth: gun(GUNS.shotgun),
+    gunshot_smg_synth: gun(GUNS.smg), gunshot_lmg_synth: gun(GUNS.lmg), gunshot_suppressed_synth: gun(GUNS.suppressed),
     // ---- weapon handling ----
     mag_out: (r, v, j) => ({ layers: [clank(j(2600) * v.pf, 0.06, { gain: -2 }), tick(), scrape(0.09 * v.len, j(3200), { at: 0.01 }), thump(j(320) * v.pf, 0.05, { drop: 6, gain: -8, at: 0.07 * v.len }), clank(j(1400) * v.pf, 0.08, { at: 0.075 * v.len, gain: -6 })], reverb: { preset: 'room', wet: 0.06 }, target: -3 }),
     mag_in: (r, v, j) => { const t = 0.06 * v.len; return { layers: [scrape(t, j(2800), { gain: -12 }), clank(j(1800) * v.pf, 0.1, { at: t }), thump(j(260) * v.pf, 0.06, { at: t, gain: -4, drop: 8 }), tick({ at: t, gain: -4 }), clank(j(3600) * v.pf, 0.03, { at: t + 0.04 * v.len, gain: -8 })], reverb: { preset: 'room', wet: 0.06 }, target: -3 }; },
@@ -124,7 +163,8 @@ export function fpsRecipes({ V, thump, burst, whoosh }) {
 }
 
 export const FPS_GROUPS = {
-  firearms: ['gunshot_rifle', 'gunshot_pistol', 'gunshot_marksman', 'gunshot_shotgun', 'gunshot_smg', 'gunshot_lmg', 'gunshot_suppressed'],
+  firearms: ['gunshot_rifle', 'gunshot_pistol', 'gunshot_revolver', 'gunshot_marksman', 'gunshot_shotgun', 'gunshot_smg', 'gunshot_lmg', 'gunshot_suppressed'],
+  firearms_synth: ['gunshot_rifle_synth', 'gunshot_pistol_synth', 'gunshot_marksman_synth', 'gunshot_shotgun_synth', 'gunshot_smg_synth', 'gunshot_lmg_synth', 'gunshot_suppressed_synth'],
   weapon_handling: ['mag_out', 'mag_in', 'bolt_rack', 'dry_fire', 'shotgun_pump', 'casing_drop'],
   scifi: ['laser_bolt', 'plasma_shot', 'shield_hit', 'glitch_tear', 'teleport_swell', 'servo', 'drone_rotor', 'hologram_ui', 'alarm_klaxon', 'radio_squelch_on', 'radio_squelch_off', 'bullet_whiz', 'ricochet'],
   movement: ['footstep'],

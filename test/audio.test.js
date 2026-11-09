@@ -132,7 +132,7 @@ test('docs and skills cover audio', () => {
 
 // ---- FPS recipes + layered-sfx fixes ----
 test('sfx: FPS recipes render, honour environment/surface vars and loopable ones loop seamlessly', () => {
-  for (const g of ['firearms', 'weapon_handling', 'scifi', 'movement']) for (const recipe of RECIPE_GROUPS[g]) {
+  for (const g of ['firearms', 'firearms_synth', 'weapon_handling', 'scifi', 'movement']) for (const recipe of RECIPE_GROUPS[g]) {
     const o = renderSfx({ recipe, seed: 3 });
     const st = measure(o.chs, { loop: o.loop }).stats;
     assert.ok(st.duration > 0.03 && st.duration < 6, `${recipe} ${st.duration}`);
@@ -142,7 +142,7 @@ test('sfx: FPS recipes render, honour environment/surface vars and loopable ones
   }
   const dur = (vars) => measure(renderSfx({ recipe: 'gunshot_rifle', vars }).chs).stats.duration;
   assert.ok(dur({ environment: 'canyon' }) > dur({ environment: 'indoor' }) + 1, 'canyon tail is longer than indoor');
-  assert.ok(measure(renderSfx({ recipe: 'gunshot_marksman' }).chs).stats.duration > measure(renderSfx({ recipe: 'gunshot_pistol' }).chs).stats.duration);
+  assert.ok(measure(renderSfx({ recipe: 'gunshot_marksman_synth' }).chs).stats.duration > measure(renderSfx({ recipe: 'gunshot_pistol_synth' }).chs).stats.duration);
   assert.throws(() => renderSfx({ recipe: 'gunshot_rifle', vars: { environment: 'space' } }), /outdoor\|indoor\|canyon/);
   for (const surface of ['metal', 'dirt', 'concrete', 'snow', 'grate']) assert.ok(renderSfx({ recipe: 'footstep', vars: { surface } }).chs[0].length > 1000, surface);
   assert.throws(() => renderSfx({ recipe: 'footstep', vars: { surface: 'lava' } }), /surface/);
@@ -285,7 +285,7 @@ test('gunshot realism: transient profile separates a noise blast from a pitched 
   const engine = new Engine({ home: tmp() });
   const call = (a) => runTool('art_audio', a, (op, args) => engine.run(op, args));
   const text = (c) => c.map((x) => x.text || '').join('\n');
-  await call({ action: 'sfx', name: 'old_rifle', recipe: 'gunshot_rifle', seed: 1 });
+  await call({ action: 'sfx', name: 'old_rifle', recipe: 'gunshot_rifle_synth', seed: 1 });
   const cr = JSON.parse(text(await call({ action: 'critique', name: 'old_rifle' })));
   assert.ok(cr.issues.some((i) => i.id === 'pitched_ring'), cr.summary);
   // a non-gun impact is not judged as a gunshot; intent turns the checks on
@@ -294,4 +294,24 @@ test('gunshot realism: transient profile separates a noise blast from a pitched 
   assert.ok(!bone.issues.some((i) => /pitched_ring|no_crack|no_tail|soft_attack/.test(i.id)));
   const asGun = JSON.parse(text(await call({ action: 'critique', name: 'bone', intent: 'pistol gunshot' })));
   assert.ok(asGun.issues.some((i) => /pitched_ring|no_crack|no_tail|soft_attack/.test(i.id)), asGun.summary);
+});
+
+test('sfx: recorded gunshots (bundled CC0 bank): seeded picks, distance, synth originals kept, bundled sample ids', async () => {
+  const { gunBank, sampleIds, loadSample } = await import('../src/audio/samples.js');
+  const bank = gunBank();
+  for (const cls of ['pistol', 'revolver', 'smg', 'rifle', 'marksman', 'lmg', 'shotgun']) {
+    assert.ok(bank[cls].near.length >= 2 && bank[cls].far.length >= 1, cls);
+    for (const id of [...bank[cls].near, ...bank[cls].far]) assert.ok(loadSample(id).length > 44100, id);
+  }
+  assert.ok(sampleIds().includes('guns/rifle_1'));
+  assert.deepEqual(renderSfx({ recipe: 'gunshot_rifle', seed: 1 }).chs[0], renderSfx({ recipe: 'gunshot_rifle', seed: 1 }).chs[0]);
+  const picks = new Set([1, 2, 3, 4, 5, 6].map((seed) => renderSfx({ recipe: 'gunshot_rifle', seed }).chs[0].length));
+  assert.ok(picks.size > 1, 'seeds pick different shots / pitches');
+  const near = measure(renderSfx({ recipe: 'gunshot_rifle', seed: 2 }).chs).stats, far = measure(renderSfx({ recipe: 'gunshot_rifle', seed: 2, vars: { distance: 'far' } }).chs).stats;
+  assert.ok(far.duration > near.duration, 'the distant recording rings longer');
+  assert.throws(() => renderSfx({ recipe: 'gunshot_rifle', vars: { distance: 'moon' } }), /near\|far/);
+  assert.ok(measure(renderSfx({ recipe: 'gunshot_rifle', vars: { length: 0.5 } }).chs).stats.duration < near.duration);
+  assert.ok(renderSfx({ recipe: 'gunshot_rifle_synth', seed: 1 }).chs[0].length > 1000);
+  assert.ok(renderSfx({ layers: [{ kind: 'sample', sample: ['guns/pistol_1', 'guns/pistol_2'], pitch: -1 }, { kind: 'sample', sample: 'guns/smg_far', at: 0.1, gain: -12 }] }).chs[0].length > 44100);
+  assert.throws(() => renderSfx({ layers: [{ kind: 'sample', sample: 'guns/nope' }] }), /bundled ids/);
 });

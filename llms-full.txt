@@ -1352,7 +1352,8 @@ SFX: art_audio {action:"sfx", recipe:"gib_burst", seed:1, variants:3, vars:{pitc
   holy: bell_toll choir_hit chant_swell
   ui: click hover confirm level_up
   monster: monster_growl boss_roar
-  firearms: gunshot_rifle gunshot_pistol gunshot_marksman gunshot_shotgun gunshot_smg gunshot_lmg gunshot_suppressed
+  firearms: gunshot_rifle gunshot_pistol gunshot_revolver gunshot_marksman gunshot_shotgun gunshot_smg gunshot_lmg gunshot_suppressed
+  firearms_synth: gunshot_rifle_synth gunshot_pistol_synth gunshot_marksman_synth gunshot_shotgun_synth gunshot_smg_synth gunshot_lmg_synth gunshot_suppressed_synth
   weapon_handling: mag_out mag_in bolt_rack dry_fire shotgun_pump casing_drop
   scifi: laser_bolt plasma_shot shield_hit glitch_tear teleport_swell servo drone_rotor hologram_ui alarm_klaxon radio_squelch_on radio_squelch_off bullet_whiz ricochet
   movement: footstep
@@ -1362,7 +1363,8 @@ SFX: art_audio {action:"sfx", recipe:"gib_burst", seed:1, variants:3, vars:{pitc
   Custom layers: {layers:[{kind:"voice"|"note"|"sfxr"|"crackle"|"drops"|"squelch"|"growl"|"whoosh"|"glide"|"glitch"|"sample"|"recipe", at:s, gain:dB, pan, ...}], fx:[...], reverb:{preset, wet}}.
   SFX are trimmed (no head silence), faded and normalised to peak -1 dBFS (target:-3 for UI).
 FPS / SCI-FI SFX (firearms, weapon_handling, scifi, movement groups above):
-  Firearms gunshot_rifle|pistol|marksman|shotgun|smg|lmg|suppressed layer a transient crack, body, thump, sub, mechanical click and an environment tail: vars.environment "outdoor" (slapback; marksman = long slapback) | "indoor" (room) | "canyon" (long repeating echoes). vars.wet scales the tail, intensity the crack/drive.
+  Firearms gunshot_rifle|pistol|revolver|marksman|shotgun|smg|lmg|suppressed are real recordings (CC0 field recordings of AR-15 / AK-47, Walther PPQ, S&W 642, Tikka / Springfield .30-06, Mosin 7.62x54R, 12-gauge pumps, Swedish K / PPSh; suppressed = a recorded shot without its blast + the action clack): the seed picks the shot (variants are different real shots, played at the recorded pitch), vars.pitch (semitones) / length / intensity shape it, vars.distance "near" (default) | "far" (the distant recording), vars.environment "outdoor" (as recorded, real tail) | "indoor" (room) | "canyon" (long repeating echoes), vars.wet scales the added tail; gunshot_suppressed vars.caliber "pistol"|"rifle".
+  The synthesized originals stay as gunshot_rifle_synth|pistol_synth|marksman_synth|shotgun_synth|smg_synth|lmg_synth|suppressed_synth (crack, body, thump, sub, mechanics; environment outdoor = slapback, marksman = long slapback).
   Handling: mag_out mag_in bolt_rack dry_fire shotgun_pump casing_drop (vars.surface "metal"|"concrete"). footstep vars.surface "metal"|"dirt"|"concrete"|"snow"|"grate".
   Sci-fi: laser_bolt plasma_shot shield_hit glitch_tear teleport_swell servo drone_rotor hologram_ui alarm_klaxon radio_squelch_on radio_squelch_off bullet_whiz ricochet. drone_rotor and alarm_klaxon are loops by default (loop:false = one-shot).
   Steam (art_fx steam): steam_hiss (one-shot burst: a valve opening, a pipe bursting), steam_vent (steady roar, loop), steam_leak (thin sputtering jet, loop); the loops are seamless by default.
@@ -1370,7 +1372,7 @@ FPS / SCI-FI SFX (firearms, weapon_handling, scifi, movement groups above):
 SFX OPTIONS (recipes and custom layers alike):
   fx:[{type:"dc"|"eq"|"comp"|"drive"|"delay"|...}] runs on the mixed layers (also "dc", ["dc","comp"] or {comp:{ratio:4}}). reverb:{preset:"room"|"studio"|"hall"|"plate"|"crypt"|"cathedral", wet:0.3} | "hall" | false. target:-3 or vars.target = peak dBFS. tail:s = padding for delay/reverb tails.
   loop:true | {length:s, crossfade:s} = seamless loop: the end crossfades (equal power) into the start and export writes loop points (WAV smpl, OGG tags).
-  Layer kinds also: sample {sample:"C:/sfx/shot.wav" (an absolute .wav path, stereo is mixed to mono) | [several paths] (the seed picks one), pitch semitones, start s, dur s} layers your own recording with the synth layers; glide {wave|noise:true, pts:[[t,hz],...] or f, dur, a, r, decay, env:"swell", am:{rate,depth}, vib:{rate,depth cents}, lp, bp, q, track} and glitch {dur, density, f}.
+  Layer kinds also: sample {sample:"guns/rifle_1" (bundled: guns/<pistol|revolver|smg|rifle|marksman|lmg|shotgun>_1..3 and _far) | "C:/sfx/shot.wav" (your own .wav, stereo is mixed to mono) | [several] (the seed picks one), pitch semitones, start s, dur s} plays a recording; glide {wave|noise:true, pts:[[t,hz],...] or f, dur, a, r, decay, env:"swell", am:{rate,depth}, vib:{rate,depth cents}, lp, bp, q, track} and glitch {dur, density, f}.
   note/voice layers without instrument/patch use a plain triangle tone; pitch_env/amp/filter/vibrato set on the layer override the patch. pitch_env.amount = start offset in semitones gliding back to the note: positive falls, negative rises; shape:"linear" sweeps evenly over time.
   sfxr layers are DC-blocked (20 Hz high-pass) when they carry an offset; dc:false keeps the raw output.
   info {name} on a recipe asset shows resolved:{layers, fx, reverb, target}: send them back as {layers, fx, reverb, seed} to reproduce and edit the sound. delete {name:"pew_*"} takes wildcards.
@@ -1954,7 +1956,7 @@ When: Game SFX: hits, gore, weapons, gunshots, reloads, lasers, explosions, bell
 
 1. One call per sound, 3 variants each (different seeds = different takes):
    art_audio {"action":"sfx","recipe":"gib_burst","seed":1,"variants":3}
-   Other recipes: gib_burst flesh_squelch bone_crunch blood_splat dismember arterial_spray hit_light hit_heavy crit whip_crack blade_swing crossbow_shot censer_whoosh explosion fire_burst bell_toll choir_hit chant_swell click hover confirm level_up monster_growl boss_roar gunshot_rifle gunshot_pistol gunshot_marksman gunshot_shotgun gunshot_smg gunshot_lmg.
+   Other recipes: gib_burst flesh_squelch bone_crunch blood_splat dismember arterial_spray hit_light hit_heavy crit whip_crack blade_swing crossbow_shot censer_whoosh explosion fire_burst bell_toll choir_hit chant_swell click hover confirm level_up monster_growl boss_roar gunshot_rifle gunshot_pistol gunshot_revolver gunshot_marksman gunshot_shotgun gunshot_smg.
 2. Shape with vars (same seed = same take): {"action":"sfx","recipe":"bone_crunch","seed":4,"variants":3,"vars":{"pitch":-3,"length":1.2,"intensity":0.9,"wet":0.5}}
 3. LOOK at each: art_audio {"action":"analyze","name":"gib_burst_1"} (spectrogram: gore = broadband burst + low thump + wet squelch band 300-1500 Hz; UI = short, mid/high only).
 4. art_audio {"action":"critique","name":"gib_burst_1"} -> fix head_silence / too_long / sub_heavy / harsh with vars or fx, re-run step 1 with the same seed.

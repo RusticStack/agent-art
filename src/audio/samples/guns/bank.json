@@ -1,0 +1,78 @@
+{
+ "pistol": {
+  "weapon": "Walther PPQ, 9mm",
+  "near": [
+   "pistol_1",
+   "pistol_2",
+   "pistol_3"
+  ],
+  "far": [
+   "pistol_far"
+  ]
+ },
+ "revolver": {
+  "weapon": "Smith & Wesson 642, .38 Special",
+  "near": [
+   "revolver_1",
+   "revolver_2"
+  ],
+  "far": [
+   "revolver_far"
+  ]
+ },
+ "smg": {
+  "weapon": "Carl Gustav M45 (9mm), PPSh (7.62x25)",
+  "near": [
+   "smg_1",
+   "smg_2",
+   "smg_3"
+  ],
+  "far": [
+   "smg_far"
+  ]
+ },
+ "rifle": {
+  "weapon": "AR-15 (5.56x45), AK-47 (7.62x39)",
+  "near": [
+   "rifle_1",
+   "rifle_2",
+   "rifle_3"
+  ],
+  "far": [
+   "rifle_far"
+  ]
+ },
+ "marksman": {
+  "weapon": "Tikka T3, Springfield 1917 (.30-06)",
+  "near": [
+   "marksman_1",
+   "marksman_2",
+   "marksman_3"
+  ],
+  "far": [
+   "marksman_far"
+  ]
+ },
+ "lmg": {
+  "weapon": "Mosin Nagant (7.62x54R, the PKM round)",
+  "near": [
+   "lmg_1",
+   "lmg_2",
+   "lmg_3"
+  ],
+  "far": [
+   "lmg_far"
+  ]
+ },
+ "shotgun": {
+  "weapon": "Benelli Nova, Winchester Model 12, Mossberg 190 (12 gauge)",
+  "near": [
+   "shotgun_1",
+   "shotgun_2",
+   "shotgun_3"
+  ],
+  "far": [
+   "shotgun_far"
+  ]
+ }
+}

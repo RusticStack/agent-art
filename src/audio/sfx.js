@@ -383,10 +383,10 @@ export function renderSfxSpec(spec, rng, vars, ctx = {}, depth = 0) {
   return out;
 }
 
-/** A recording: {sample: absolute .wav path | [paths] (one picked by the seed), pitch? semitones, start? s, dur? s (fades out over its last 30%)}. */
+/** A recording: {sample: bundled id ("guns/rifle_1") | absolute .wav path | [several] (one picked by the seed), pitch? semitones, start? s, dur? s (fades out over its last 30%)}. */
 function renderSample(L, r) {
   const id = Array.isArray(L.sample) ? r.pick(L.sample) : L.sample;
-  if (!id || typeof id !== 'string') throw new Error('sample layer needs sample: an absolute .wav path (or a list of paths; the seed picks one)');
+  if (!id || typeof id !== 'string') throw new Error('sample layer needs sample: a bundled id ("guns/rifle_1") or an absolute .wav path (or a list; the seed picks one)');
   const x = loadSample(id);
   const s0 = Math.min(x.length, Math.max(0, Math.round((L.start ?? 0) * SR)));
   const n = L.dur ? Math.min(x.length - s0, Math.round(L.dur * SR)) : x.length - s0;
@@ -403,7 +403,7 @@ function buildRecipe(name, rng, vars) {
   const v = { pitch: 0, length: 1, intensity: 0.6, variation: 0.5, wet: 0.7, ...vars };
   // per-variant jitter: pitch and length drift with the seed (scaled by variation)
   const vp = v.pitch + rng.bi() * 1.5 * v.variation;
-  const vv = { ...v, pitch: vp, pf: Math.pow(2, vp / 12), len: v.length * (1 + rng.bi() * 0.15 * v.variation) };
+  const vv = { ...v, pitch: vp, pitch_set: v.pitch, pf: Math.pow(2, vp / 12), len: v.length * (1 + rng.bi() * 0.15 * v.variation) };
   const j = (x) => x * (1 + rng.bi() * 0.18 * v.variation);
   return fn(rng, vv, j);
 }

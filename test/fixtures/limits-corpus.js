@@ -77,7 +77,8 @@ export function corpus(e, { decodePNG, renderSfx }) {
   }
   // ---- art_audio (0.9.0 recipes)
   for (const r of RECIPES_090) {
-    const s = renderSfx({ recipe: r, seed: 5 });
+    // 1.0: the gunshot_* names play recordings; the 0.9 synthesis is gunshot_*_synth (must stay byte-identical)
+    const s = renderSfx({ recipe: /^gunshot_/.test(r) ? `${r}_synth` : r, seed: 5 });
     D[`audio/${r}`] = sha(Buffer.concat(s.chs.map((c) => Buffer.from(Float32Array.from(c).buffer))));
   }
   // ---- melee: knife skeleton (no proportions) + 0.9.0 rifle clips

@@ -2,9 +2,10 @@
 
 ## Unreleased
 
+- Recorded gunshots. `gunshot_rifle|pistol|marksman|shotgun|smg|lmg|suppressed` play CC0 field recordings from The Free Firearm Sound Library: AR-15 / AK-47, Walther PPQ, Tikka / Springfield .30-06, Mosin 7.62x54R, 12-gauge pumps, Swedish K / PPSh. A new `gunshot_revolver` plays an S&W 642. The seed picks the shot, `vars.distance:"far"` picks the distant recording, and `vars.environment` indoor / canyon adds a room or echoes. `gunshot_suppressed` is a recorded shot without its blast, plus the action clack. The synthesized versions are unchanged as `gunshot_*_synth`. The 28 mono files add 3.8 MB; credits are in `src/audio/samples/CREDITS.md`.
 - Audio critique judges gunshots. When the recipe or intent names a gun, it flags `pitched_ring` (a tonal ring: sounds like a drum, bell or instrument), `no_crack` (no high-frequency snap in the first 20 ms), `soft_attack` and `no_tail`. The numbers are in a new `sfx.transient` block of analyze. Before this, the stock synthesized gunshots scored 100 although they ring like an instrument; now they are flagged.
 - `art_fx make` with a `path` says to export with the same path, and `export` says so when it finds no effects. `art_rig` replies say the parts values are `[x, w, h]`. The 3D damage states help points at `damage:{mode:"files"}` for one glb per state. `agent-art tools` says to use forward slashes in JSON paths.
-- New SFX layer kind `sample` (`{kind:"sample", sample:"C:/sfx/shot.wav" | [paths], pitch, start, dur}`) mixes your own WAV recordings into a sound (stereo is mixed to mono; a list lets the seed pick one).
+- New SFX layer kind `sample` (`{kind:"sample", sample:"guns/rifle_1" | "C:/sfx/shot.wav" | [list], pitch, start, dur}`) plays a bundled recording or your own WAV (stereo is mixed to mono; a list lets the seed pick one).
 - Fixes from the benchmark notes (all additive):
   - `art_audio analyze` / `critique` accept a wildcard (`"gun_*"`) or `names:[...]`, as export and delete already did. They return `{results:[...]}`, and analyze leaves out the images for several sounds.
   - SFX analysis marks its `rhythm` block as onset spacing for one-shots, not a musical beat.
