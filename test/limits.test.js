@@ -31,7 +31,9 @@ test('limits corpus: everything that does not use a changed feature is byte-iden
   assert.equal(Object.keys(golden).length, 260);
   assert.deepEqual(diff, [], `changed: ${diff.slice(0, 10).join(', ')}`);
   // the intentional change (CHANGELOG): the knife disarm_front fit now reaches its optimum (offset
-  // 73.15; 0.9.0 stopped on the search bound at 70), so those clips and the batch manifest differ
+  // 73.15; 0.9.0 stopped on the search bound at 70), so those clips and the batch manifest differ.
+  // Ground contact (feet below the ground row lifted by leg IK) changes melee frame poses, not clip
+  // files: of the corpus only that batch manifest (takedown_rear_victim frames) can see it.
   for (const k of INTENDED) assert.notEqual(now[k], golden[k], `${k} expected to change`);
 });
 
@@ -504,4 +506,33 @@ test('paired fit: the offset search is deterministic and idempotent (interior op
       }
     }
   }
+});
+
+// ---------- ground contact ----------
+test('ground contact: no foot sinks in any melee or paired clip, every view, both proportion sets (128x192); melee_check keeps the warning', () => {
+  const e = new Engine({ home: tmp() });
+  const sinking = (c) => (c.issues || []).filter((i) => /sinks/.test(i));
+  for (const [sk, mel, skel] of [...SETS.slice(0, 2), ['rf', {}, { weapon: { class: 'rifle' } }]]) {
+    e.run('anim_skeleton', { name: sk, template: 'humanoid_hd', frame: [128, 192], proportions: PROPS, ...skel });
+    e.run('anim_melee', { skeleton: sk, ...mel });
+    for (const p of ['heavy', 'light']) e.run('anim_skin', { name: `${sk}_${p}`, skeleton: sk, proportions: p });
+    // the rifle set runs the base skeleton (its solo clips are slow under weapon handling); the knife and shield sets every pairing
+    const runs = sk === 'rf' ? [{ skeleton: sk }] : [{ skeleton: sk }, { skin: `${sk}_heavy`, victim_skin: `${sk}_light` }, { skin: `${sk}_light`, victim_skin: `${sk}_heavy` }];
+    for (const a of runs) {
+      const r = e.run('anim_melee_check', a);
+      assert.deepEqual(r.views, ['side', 'front_side', 'front', 'back_side', 'back']);
+      for (const [n, c] of Object.entries(r.clips)) {
+        assert.deepEqual(sinking(c), [], `${sk} ${JSON.stringify(a)} ${n}`);
+        assert.ok(c.foot_sink_px <= 1, `${sk} ${n}: foot_sink_px ${c.foot_sink_px}`);
+      }
+    }
+  }
+  // the warning stays: the knockdown keys with ground:false (no ground contact) sink in front / back
+  const kd = e.run('anim_info', { skeleton: 'kn', clip: 'knockdown', full: true });
+  e.run('anim_clip', { skeleton: 'kn', name: 'kd_raw', keys: kd.keys, frames: kd.frames, fps: kd.fps, loop: false, secondary: true, melee: kd.melee, ground: false });
+  const r = e.run('anim_melee_check', { skeleton: 'kn', clips: ['kd_raw', 'knockdown'] }).clips;
+  assert.equal(r.knockdown.pass, true);
+  assert.ok(r.kd_raw.foot_sink_px > 10, `ungrounded knockdown sinks ${r.kd_raw.foot_sink_px} px`);
+  assert.match(sinking(r.kd_raw)[0], /^a foot sinks [\d.]+ px below the ground \(foot_[fb], (front|back)\w* frame \d+\)$/);
+  assert.throws(() => e.run('anim_clip', { skeleton: 'kn', name: 'kd_bad', keys: kd.keys, frames: kd.frames, ground: 'yes' }), /ground must be true \| false/);
 });

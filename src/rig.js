@@ -840,6 +840,59 @@ function setInView(P, view, part, fields) {
 }
 
 /**
+ * Lowest row of a foot as drawn (its cell box scaled by sx / sy and turned by its world rotation
+ * about the pivot), in the solved view's frame px. null when the foot is hidden.
+ */
+export function footLow(rig, solved, foot) {
+  const p = partIn(rig, foot, solved.src), v = poseOf(rig, solved.VP, foot), W = solved.world[foot];
+  if (!W || p.hidden || v.hide) return null;
+  const r = W.rot * D2R, c = Math.cos(r), s = Math.sin(r), fx = W.flip ? -1 : 1;
+  let low = -Infinity;
+  for (const x of [-p.pivot[0], p.w - 1 - p.pivot[0]]) for (const y of [-p.pivot[1], p.h - 1 - p.pivot[1]]) low = Math.max(low, W.y + fx * x * v.sx * s + y * v.sy * c);
+  return low;
+}
+
+/** The ground row of a view: the lowest drawn foot row of the rest pose. */
+export function groundRow(rig, view, feet = rig.feet) {
+  const rest = solvePose(rig, {}, view);
+  return Math.max(...(feet || []).map((f) => footLow(rig, rest, f) ?? -Infinity));
+}
+
+/**
+ * Ground contact (melee clips): a foot drawn below the view's ground row is lifted onto it by
+ * two-bone leg IK (front / back with scale_children: in depth, the leg foreshortens toward the
+ * viewer; otherwise in the screen plane, the knee kept on its side), the foot keeping its world
+ * rotation. Frames with no sinking foot are returned untouched.
+ */
+export function groundFeet(rig, poses, view, feet = rig.feet, { tol = 0.25 } = {}) {
+  const src = rig.mirror[view] || view;
+  const deep = /^(front|back)$/.test(src) && rig.scaleChildren;
+  const g = groundRow(rig, view, feet);
+  if (!Number.isFinite(g)) return poses;
+  for (const f of feet) ikChain(rig, f);
+  return poses.map((P0) => {
+    let P = P0;
+    for (let it = 0; it < 4; it++) {
+      const s = solvePose(rig, P, view);
+      const fix = [];
+      for (const foot of feet) { const low = footLow(rig, s, foot); if (low !== null && low > g + tol) fix.push([foot, low - g]); }
+      if (!fix.length) break;
+      if (P === P0) P = structuredClone(P0);
+      P.views = P.views || {};
+      P.views[src] = P.views[src] || {};
+      const ik = { ...(P.views[src].ik || {}) };
+      for (const [foot, d] of fix) {
+        const [A, B] = ikChain(rig, foot), W = s.world, a = W[A], b = W[B], e = W[foot];
+        const bend = (b.x - a.x) * (e.y - a.y) - (b.y - a.y) * (e.x - a.x) >= 0 ? 1 : -1;
+        ik[foot] = { ...(ik[foot] || {}), target: [e.x, e.y - d], bend, plane: deep ? 'depth' : 'screen', rot: e.rot, weight: 1, rot_weight: 1 };
+      }
+      P.views[src].ik = ik;
+    }
+    return P;
+  });
+}
+
+/**
  * Foot planting (ik_feet / plant): per foot, frames whose FK ankle is within tol px of the rest
  * ground are contact frames; in each contact run the ankle is pinned to the ground row and its x
  * moves linearly from the run's first to last frame (a standing foot stays put, a walking stance

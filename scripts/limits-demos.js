@@ -3,7 +3,7 @@
 // damage blend at every LOD, a rigged damaged door opening (the exported glb's clip sampled), open-mesh
 // fracture, the gun disarm strip with its gun track, front / back paired checks (depth staging), a
 // two-proportion takedown, skinned damage LODs + fracture chunks riding a bone, and a rigged plain export
-// with LOD children per rig node + AO on the rest pose. sprite_overlay_before_after.png comes from
+// with LOD children per rig node + AO on the rest pose, and melee ground contact (feet kept on the ground row). sprite_overlay_before_after.png comes from
 // scripts/sprite-overlay-demo.js. glb images are drawn from the exported files (a small glTF reader + the software
 // rasteriser), so they show what an engine loads.
 // Usage: node scripts/limits-demos.js [workDir]
@@ -402,5 +402,23 @@ const frameOf = (canvas, f) => { const d = e.get(canvas), fh = d.frameHeight || 
     items.push({ img: pane(shot(sceneGroups(G, 'turret', { clip: 'turn', t: 0.5, hide, uvSet: { set: 1, image: aoImg } }), 150, 'game', fit)), label: `LOD${L.level}, ${L.triangles} tris, AO, turned 45` });
   }
   save('rigged_lods_ao.png', packImages(items, { labels: true, checker: false, columns: 3 }));
+}
+
+// ---------- 12. ground contact: melee clips without (ground:false) and with the leg IK onto the ground row ----------
+{
+  const items = [];
+  const groundLine = (img, row) => { const d = new Uint8ClampedArray(img.data); for (let x = 0; x < img.width; x++) if (!d[(row * img.width + x) * 4 + 3]) d.set([120, 200, 120, 255], (row * img.width + x) * 4); return { ...img, data: d }; };
+  const lowest = (img) => { let low = 0; for (let y = 0; y < img.height; y++) for (let x = 0; x < img.width; x++) if (img.data[(y * img.width + x) * 4 + 3]) low = y; return low; };
+  for (const [clip, view, f] of [['knockdown', 'front', 13], ['takedown_rear_victim', 'side', 21], ['get_up', 'side', 7]]) {
+    const c = e.run('anim_info', { skeleton: 'pk', clip, full: true });
+    e.run('anim_clip', { skeleton: 'pk', name: `${clip}_raw`, keys: c.keys, frames: c.frames, fps: c.fps, loop: false, secondary: true, melee: c.melee, ground: false });
+    const sink = e.run('anim_melee_check', { skeleton: 'pk', clips: [`${clip}_raw`, clip], views: [view] }).clips;
+    for (const [name, lab] of [[`${clip}_raw`, 'ground:false'], [clip, 'ground contact']]) {
+      e.run('anim_render', { skin: 'pk_v', clip: name, view, canvas: `gc_${name}_${view}` });
+      const row = lowest(frameOf(`gc_${name}_${view}`, 0));
+      items.push({ img: pane(groundLine(frameOf(`gc_${name}_${view}`, f), row)), label: lab === 'ground:false' ? `${clip.replace('_victim', '')} ${view} f${f}: ${sink[name].foot_sink_px} px` : `grounded: ${sink[name].foot_sink_px} px` });
+    }
+  }
+  save('ground_contact.png', packImages(items, { labels: true, checker: false, columns: 6 }));
 }
 log('done');

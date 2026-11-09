@@ -82,7 +82,7 @@ function skinClip(e, skin, clipName, view) {
   const clip = getClip(clipName);
   if (!clip) throw new Error(`skeleton "${sk.name}" has no clip "${clipName}" (clips: ${listNames(e, 'clips', sk.name).join(', ') || 'none'})`);
   const ev = evalClip(rig, clip, getClip, sk);
-  const a = { animation: `${clipName}_${view}`, view, _poses: ev.poses, frames: ev.poses.length, loop: ev.loop, fps: ev.fps, events: ev.events.length ? ev.events : undefined, ...(clip.plant !== undefined ? { plant: clip.plant } : {}), ...(clip.secondary !== undefined ? { secondary: clip.secondary } : {}), ...(clip.carry !== undefined ? { carry: clip.carry } : {}) };
+  const a = { animation: `${clipName}_${view}`, view, _poses: ev.poses, frames: ev.poses.length, loop: ev.loop, fps: ev.fps, events: ev.events.length ? ev.events : undefined, ...(clip.plant !== undefined ? { plant: clip.plant } : {}), ...(clip.secondary !== undefined ? { secondary: clip.secondary } : {}), ...(clip.carry !== undefined ? { carry: clip.carry } : {}), ...((clip.ground ?? !!clip.melee) ? { ground: true } : {}) };
   const fp = framePoses(e, rig, def, a);
   return { sk, d, rig, def, clip, fp, getClip };
 }

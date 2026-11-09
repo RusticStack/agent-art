@@ -5,7 +5,7 @@ import { encodePNG } from './png.js';
 import { packImages } from './sheet.js';
 import { rigTemplate, mergeTemplate, RIG_TEMPLATES, TEMPLATE_FRAME, hdWeaponConfig } from './rigtemplates.js';
 import { weaponArt, weaponMetrics, CARRY_STATES, ATTACHMENT_TYPES, WEAPON_CLASSES, POINT_NAMES } from './weapon.js';
-import { normalizeRig, normalizeSecondary, cellOf, renderPose, animatePoses, resolvePose, lowestRow, shiftFrame, poseAnchors, plantFeet, simulateSecondary, ikChain, solvePose, partIn, poseOf, stableRotations, eventFrames } from './rig.js';
+import { normalizeRig, normalizeSecondary, cellOf, renderPose, animatePoses, resolvePose, lowestRow, shiftFrame, poseAnchors, plantFeet, groundFeet, simulateSecondary, ikChain, solvePose, partIn, poseOf, stableRotations, eventFrames } from './rig.js';
 import { depthPass, findFlicker, layerIssues, orderOf } from './depth.js';
 import { consistencyReport, deriveCells } from './consistency.js';
 import { ccdChain } from './chain2d.js';
@@ -633,6 +633,8 @@ export function framePoses(engine, rig, def, a) {
     if (feet.length) poses = plantFeet(rig, poses, view, feet, { loop });
     else notes.push('plant: this rig has no foot parts with a two-bone leg (foot -> shin -> thigh); set rig "feet" or pass plant:[parts]');
   }
+  // ground: a foot drawn below the ground row is lifted onto it by leg IK (melee clips)
+  if (a.ground) poses = groundFeet(rig, poses, view, rig.feet || ['foot_f', 'foot_b'].filter((n) => rig.parts[n]));
   // secondary: damped follow-through for rig.secondary parts (or an inline {part:{stiffness,damping}})
   if (a.secondary) {
     const config = typeof a.secondary === 'object' ? normalizeSecondary(rig.parts, a.secondary) : rig.secondary;
