@@ -339,7 +339,7 @@ export const TOOLS = [
   },
   {
     name: 'art_audio',
-    description: 'Sound effects, music and audio analysis you read as images + reports (you cannot hear). sfx {recipe|params|layers, seed, variants, vars, fx, reverb, target, loop}; instrument {name, patch, notes}; generate {generator,...}; song {name, text (notation) | song (JSON), intent, genre}; render; analyze {name, view:"mix"} = image + listener report; critique {name, intent, genre}; compare {name, reference}; import {path}; export {name|"x_*", format, stems, layers}; list; info; delete {name|"x_*"}. Details: art_help {topic:"audio"|"music"|"mixing"|"perception"}.',
+    description: 'Sound effects, music and audio analysis you read as images + reports (you cannot hear). sfx {recipe|params|layers, seed, variants, vars, fx, reverb, target, loop}; instrument {name, patch, notes}; generate {generator,...}; song {name, text (notation) | song (JSON), intent, genre}; render; analyze {name|"x_*", view:"mix"} = image + listener report; critique {name|"x_*", intent, genre}; compare {name, reference}; import {path}; export {name|"x_*", format, stems, layers}; list; info; delete {name|"x_*"}. Details: art_help {topic:"audio"|"music"|"mixing"|"perception"}.',
     inputSchema: {
       type: 'object',
       properties: {

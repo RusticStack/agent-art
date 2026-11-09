@@ -653,7 +653,7 @@ export function damageExport(engine, def, built, a, { file, scale, skinned = nul
   return {
     after() { for (const [f, buf] of side) fs.writeFileSync(f, buf); },
     files: side.map(([f]) => f),
-    result: { damage: { files: side.map(([f]) => path.basename(f)), mode, profile: profile || 'web', states: manifest.states.map((s) => ({ name: s.name, triangles: s.triangles, sockets: s.sockets?.length ?? 0, ...(s.lods ? { lods: s.lods.map((l) => l.triangles) } : {}) })), ...(manifest.fracture ? { fracture: manifest.fracture.groups.map((g) => ({ group: g.group, chunks: g.chunks.length })) } : {}), ...(blend ? { mask: `${blend.mask.width}x${blend.mask.height}` } : {}), glbs: outFiles, ms } },
+    result: { damage: { files: side.map(([f]) => path.basename(f)), mode, profile: profile || 'web', states: manifest.states.map((s) => ({ name: s.name, triangles: s.triangles, sockets: s.sockets?.length ?? 0, ...(s.lods ? { lods: s.lods.map((l) => l.triangles) } : {}) })), ...(manifest.fracture ? { fracture: manifest.fracture.groups.map((g) => ({ group: g.group, chunks: g.chunks.length })) } : {}), ...(blend ? { mask: `${blend.mask.width}x${blend.mask.height}`, intact_note: 'the blend-ready intact node is not identical to the plain <name>.glb: its vertices are split along the chart-UV seams (unique mask UVs per face, so more vertices) and it carries the dent morph + mask channels; at blend 0 it looks the same' } : {}), glbs: outFiles, ms } },
     manifest,
   };
 }

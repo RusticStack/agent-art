@@ -30,7 +30,7 @@ export function compactCells(cells) {
       parts[k] = [c[0], c[2], c[3]];
     }
   }
-  return { rows, parts, cell: '[x, rows[view], w, h]' };
+  return { rows, parts, cell: "[x, rows[view], w, h] = each part's cell rectangle in px on parts_canvas (draw the part there)" };
 }
 
 function metaSummary(meta) {

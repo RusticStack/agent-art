@@ -147,3 +147,12 @@ test('usage: off by default (no debug folder)', async () => {
   await new Promise((r) => p.on('close', r));
   assert.equal(fs.existsSync(path.join(home, 'debug')), false);
 });
+
+test('docs: general path rules in the workflow guide, cells lists light / profile values', async () => {
+  const { helpText } = await import('../src/docs.js');
+  const w = helpText({ topic: 'workflow' });
+  assert.match(w, /Paths .*absolute.*"\.\/x".*exports folder/);
+  const c = helpText({ op: 'cells' });
+  assert.match(c, /top-left \(default\)\|top\|top-right/);
+  assert.match(c, /round \(default\)\|flat/);
+});

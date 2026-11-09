@@ -155,7 +155,7 @@ More: [docs/planets/README.md](docs/planets/README.md).
 
 ### Sound effects and music: `art_audio`
 
-Agents cannot hear, so `art_audio` turns audio into things they can read: an analysis image (waveform, beat grid, spectrogram, loudness, band balance, stem masking) and a listener report in plain words (felt tempo, drum feel, key and chords, timbre, what is buried or repetitive, fit to a genre and the stated intent). It makes SFX from seeded recipes (gore, combat, firearms, sci-fi, UI, monsters, footsteps) with variants, music from a compact text notation with generators and instrument presets, and mixes and masters to a LUFS target. Export is WAV with loop points, mp3 / ogg / opus through ffmpeg, stems and adaptive layers; renders run at 44.1 kHz, and `sample_rate:48000` delivers 48 kHz with sample-exact loop points.
+Agents cannot hear, so `art_audio` turns audio into things they can read: an analysis image (waveform, beat grid, spectrogram, loudness, band balance, stem masking) and a listener report in plain words (felt tempo, drum feel, key and chords, timbre, what is buried or repetitive, fit to a genre and the stated intent). It makes SFX from seeded recipes (gore, combat, firearms, sci-fi, UI, monsters, footsteps) with variants (the `sample` layer mixes in your own WAV recordings), music from a compact text notation with generators and instrument presets, and mixes and masters to a LUFS target. Export is WAV with loop points, mp3 / ogg / opus through ffmpeg, stems and adaptive layers; renders run at 44.1 kHz, and `sample_rate:48000` delivers 48 kHz with sample-exact loop points.
 
 ![Audio player with waveform, spectrum and the analysis report](docs/ui/09-audio-player.png)
 

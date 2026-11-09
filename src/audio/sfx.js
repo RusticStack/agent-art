@@ -6,6 +6,8 @@ import { applyFx, reverbAlgo, FX_TYPES, REVERBS } from './fx.js';
 import { renderVoice, midiToFreq, noteToMidi } from './voice.js';
 import { resolvePatch, merge } from './presets.js';
 import { truePeak } from './analysis.js';
+import { loadSample } from './samples.js';
+import { resampleHQ } from './wav.js';
 import { fpsRecipes, FPS_GROUPS } from './recipes_fps.js';
 
 // ---------- sfxr ----------
@@ -358,6 +360,7 @@ export function renderSfxSpec(spec, rng, vars, ctx = {}, depth = 0) {
       case 'squelch': m = squelch(L, r); break;
       case 'growl': m = renderGrowl(L, r); break;
       case 'whoosh': m = renderWhoosh(L, r); break;
+      case 'sample': m = renderSample(L, r); break;
       case 'recipe': {
         if (depth > 3) throw new Error('recipe nesting too deep');
         const sub = buildRecipe(L.recipe, r, vars);
@@ -365,7 +368,7 @@ export function renderSfxSpec(spec, rng, vars, ctx = {}, depth = 0) {
         parts.push({ chs: st, at: L.at ?? 0, gain: L.gain ?? 0 });
         continue;
       }
-      default: throw new Error(`layer kind "${L.kind}" unknown (voice note sfxr crackle drops squelch growl whoosh glide glitch recipe)`);
+      default: throw new Error(`layer kind "${L.kind}" unknown (voice note sfxr crackle drops squelch growl whoosh glide glitch sample recipe)`);
     }
     parts.push({ chs: panMono(m, L.pan ?? 0, 1), at: L.at ?? 0, gain: L.gain ?? 0 });
   }
@@ -380,6 +383,20 @@ export function renderSfxSpec(spec, rng, vars, ctx = {}, depth = 0) {
   return out;
 }
 
+/** A recording: {sample: absolute .wav path | [paths] (one picked by the seed), pitch? semitones, start? s, dur? s (fades out over its last 30%)}. */
+function renderSample(L, r) {
+  const id = Array.isArray(L.sample) ? r.pick(L.sample) : L.sample;
+  if (!id || typeof id !== 'string') throw new Error('sample layer needs sample: an absolute .wav path (or a list of paths; the seed picks one)');
+  const x = loadSample(id);
+  const s0 = Math.min(x.length, Math.max(0, Math.round((L.start ?? 0) * SR)));
+  const n = L.dur ? Math.min(x.length - s0, Math.round(L.dur * SR)) : x.length - s0;
+  let m = Float32Array.from(x.subarray(s0, s0 + n));
+  if (L.dur) { const fo = Math.round(n * 0.3); for (let i = n - fo; i < n; i++) m[i] *= ((n - i) / fo) ** 2; }
+  const pf = Math.pow(2, (L.pitch ?? 0) / 12);
+  if (Math.abs(pf - 1) > 1e-4) m = resampleHQ(m, SR * pf, SR);
+  return m;
+}
+
 function buildRecipe(name, rng, vars) {
   const fn = RECIPES[name];
   if (!fn) throw new Error(`Unknown recipe "${name}". Recipes: ${Object.entries(RECIPE_GROUPS).map(([g, l]) => `${g}: ${l.join(' ')}`).join('; ')}`);
@@ -392,7 +409,7 @@ function buildRecipe(name, rng, vars) {
 }
 
 const parseJson = (v) => (typeof v === 'string' && /^\s*[[{]/.test(v) ? JSON.parse(v) : v);
-const LAYER_KINDS = ['voice', 'note', 'sfxr', 'crackle', 'drops', 'squelch', 'growl', 'whoosh', 'glide', 'glitch', 'recipe'];
+const LAYER_KINDS = ['voice', 'note', 'sfxr', 'crackle', 'drops', 'squelch', 'growl', 'whoosh', 'glide', 'glitch', 'sample', 'recipe'];
 
 /** The layer spec a definition renders (recipes resolved with the seed): {layers, fx, reverb, target, loop, tail}. */
 export function resolveSfxSpec(def, rng = makeRng(def.seed ?? 1)) {

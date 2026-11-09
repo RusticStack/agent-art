@@ -237,3 +237,35 @@ test('art_audio: fx/reverb/loop schema, info shows resolved layers, delete wildc
   assert.deepEqual(Object.keys(sd.song.tracks).sort(), ['b', 'p']);
   assert.equal(sd.song.sections.a.b, 'a2');
 });
+
+test('art_audio analyze / critique accept wildcards and names; SFX rhythm fields carry a one-shot note', async () => {
+  const engine = new Engine({ home: tmp() });
+  const call = (a) => runTool('art_audio', a, (op, args) => engine.run(op, args));
+  const text = (c) => c.map((x) => x.text || '').join('\n');
+  await call({ action: 'sfx', name: 'hit', recipe: 'bone_crunch', variants: 2, seed: 2 });
+  const cr = JSON.parse(text(await call({ action: 'critique', name: 'hit_*' })));
+  assert.deepEqual(cr.results.map((r) => r.name), ['hit_1', 'hit_2']);
+  assert.ok(cr.results.every((r) => Array.isArray(r.issues) && typeof r.report === 'string'));
+  const an = await call({ action: 'analyze', names: ['hit_2'] });
+  assert.ok(!an.some((c) => c.type === 'image'));
+  assert.equal(JSON.parse(text(an)).results[0].name, 'hit_2');
+  const one = await call({ action: 'analyze', name: 'hit_1' });
+  assert.ok(one.some((c) => c.type === 'image'));
+  assert.match(text(one), /one-shot SFX/);
+  await assert.rejects(() => call({ action: 'critique', name: 'zzz_*' }), /no sound matches/);
+});
+
+test('sfx: sample layer mixes own WAV recordings (absolute path or a list the seed picks from)', async () => {
+  const dir = tmp();
+  const a = path.join(dir, 'a.wav'), b = path.join(dir, 'b.wav');
+  const tone = (f) => Float32Array.from({ length: 22050 }, (_, i) => 0.5 * Math.sin((2 * Math.PI * f * i) / 48000) * (1 - i / 22050));
+  fs.writeFileSync(a, encodeWAV([tone(440), tone(440)], { sr: 48000 }));
+  fs.writeFileSync(b, encodeWAV([tone(880)], { sr: 48000 }));
+  const one = renderSfx({ layers: [{ kind: 'sample', sample: a }] });
+  assert.ok(one.chs[0].length > 10000);
+  assert.deepEqual(renderSfx({ seed: 4, layers: [{ kind: 'sample', sample: [a, b] }] }).chs[0], renderSfx({ seed: 4, layers: [{ kind: 'sample', sample: [a, b] }] }).chs[0]);
+  const short = renderSfx({ layers: [{ kind: 'sample', sample: a, dur: 0.1, pitch: 12 }] });
+  assert.ok(short.chs[0].length < one.chs[0].length);
+  assert.throws(() => renderSfx({ layers: [{ kind: 'sample', sample: 'rel/x.wav' }] }), /absolute/);
+  assert.throws(() => renderSfx({ layers: [{ kind: 'sample', sample: path.join(dir, 'none.wav') }] }), /not found/);
+});

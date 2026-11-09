@@ -280,7 +280,7 @@ function fxExport(a) {
     writeJSON(path.join(dir, f), out);
     written.push({ group: g, file: f, effects: Object.keys(ents).length });
   }
-  return { dir, written, valid: !issues.length, issues: issues.slice(0, 40) };
+  return { dir, written, valid: !issues.length, issues: issues.slice(0, 40), note: `${MANIFEST} is the working manifest make/batch keep updating; ship the <group>.fx.json file(s) above with the PNGs (the game loads those)` };
 }
 
 export const FX_OPS = { fx_make: fxMake, fx_batch: fxBatch, fx_preview: fxPreview, fx_list: fxList, fx_export: fxExport };

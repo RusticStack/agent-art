@@ -544,7 +544,7 @@ Parameters:
 
 ### art_audio
 
-Sound effects, music and audio analysis you read as images + reports (you cannot hear). sfx {recipe|params|layers, seed, variants, vars, fx, reverb, target, loop}; instrument {name, patch, notes}; generate {generator,...}; song {name, text (notation) | song (JSON), intent, genre}; render; analyze {name, view:"mix"} = image + listener report; critique {name, intent, genre}; compare {name, reference}; import {path}; export {name|"x_*", format, stems, layers}; list; info; delete {name|"x_*"}. Details: art_help {topic:"audio"|"music"|"mixing"|"perception"}.
+Sound effects, music and audio analysis you read as images + reports (you cannot hear). sfx {recipe|params|layers, seed, variants, vars, fx, reverb, target, loop}; instrument {name, patch, notes}; generate {generator,...}; song {name, text (notation) | song (JSON), intent, genre}; render; analyze {name|"x_*", view:"mix"} = image + listener report; critique {name|"x_*", intent, genre}; compare {name, reference}; import {path}; export {name|"x_*", format, stems, layers}; list; info; delete {name|"x_*"}. Details: art_help {topic:"audio"|"music"|"mixing"|"perception"}.
 
 Parameters:
 - action (string, required): one of sfx | instrument | generate | song | render | analyze | critique | compare | import | export | list | info | delete
@@ -846,7 +846,7 @@ example: {"op":"quantize","dither":"bayer"}
 shade {colors:[dark..light],light?,of?,depth?,profile?,per_color?,region} — AUTO form shading of drawn shapes (use instead of hand shading). Shades shapes you already drew (any flat color) from ONE light direction using a ramp dark->light: rounded volume from the shape outline, no pillow shading. of: which colors form the shape (default every painted pixel in the region). light: top-left (default)|top|top-right|left|right|bottom-left|bottom|bottom-right or degrees. profile: round (dome, default)|flat (bevelled edges + flat top, set depth px)|sharp. per_color:true shades each flat color as its own part (e.g. arm vs body). bias -0.3..0.3 shifts lighter/darker; contrast; dither:true; wrap:true for tileable textures; cleanup:0 keeps lone pixels. Workflow: block in flat silhouettes -> shade -> outline -> hand detail. region = x?,y?,w?,h? (defaults to the whole canvas/frame).
 example: {"op":"shade","colors":["r0","r1","r2","r3","r4"],"of":"r2","light":"top-left"}
 
-cells {colors:[dark..light],gap_color?,size?,gap?,layout?,stretch?,seed?,region} — tileable shaded stones/scales/cracks. Fills the region with a tileable pattern of separately shaded cells: cobblestone (size 5, gap 1), scales (layout brick), bricks (layout brick, stretch 2, profile flat, depth 1), cracked earth (gap_color dark, size 8), gravel (size 3). variation = per-cell tone shift (steps), jitter 0..1, depth/profile/light like shade. region = x?,y?,w?,h? (defaults to the whole canvas/frame).
+cells {colors:[dark..light],gap_color?,size?,gap?,layout?,stretch?,seed?,region} — tileable shaded stones/scales/cracks. Fills the region with a tileable pattern of separately shaded cells: cobblestone (size 5, gap 1), scales (layout brick), bricks (layout brick, stretch 2, profile flat, depth 1), cracked earth (gap_color dark, size 8), gravel (size 3). variation = per-cell tone shift (steps), jitter 0..1, depth/profile/light like shade (light: top-left (default)|top|top-right|left|right|bottom-left|bottom|bottom-right or degrees; profile: round (default)|flat (bevelled, set depth px)|sharp). region = x?,y?,w?,h? (defaults to the whole canvas/frame).
 example: {"op":"cells","colors":["s0","s1","s2","s3"],"gap_color":"#2e2c36","size":5,"seed":3}
 
 noise {colors,weights?,scale?,octaves?,despeckle?,seed?,region} — tileable noise. Tileable value noise. weights = exact share of each color. scale = feature size px (1 = per-pixel). despeckle:1-2 absorbs lone pixels (flat cartoon surfaces). Prefer cells/shade for stone; noise is for subtle variation. "keep" in colors leaves those pixels unchanged (sparse noise). Under a mask, transparent colors do not erase (no holes in the masked art) unless erase:true. region = x?,y?,w?,h? (defaults to the whole canvas/frame).
@@ -923,6 +923,7 @@ GOOD PIXEL ART, STEP BY STEP
 5. Detail by hand (grid rows): eyes, highlights, texture marks. 1px details only where they read.
 6. Check: art_critique (numbers + coordinates), then art_view. Fix, repeat. Finish with quantize if effects were used.
 Avoid: pillow shading (light on every edge), noise/speckle everywhere, pure black outlines, too many colors, isolated stray pixels.
+Paths (every export / import / out / path arg): absolute (C:/x/y.png, forward slashes are fine on Windows) | "./x" = the server's working directory | bare relative = the workspace exports folder (the reply gives the full path). A path ending in an extension is a file; otherwise it is a folder or file stem (the tool's reply lists what it wrote).
 
 ### Topic: textures
 
@@ -1358,7 +1359,7 @@ SFX: art_audio {action:"sfx", recipe:"gib_burst", seed:1, variants:3, vars:{pitc
   steam: steam_hiss steam_vent steam_leak
   sfxr: sfxr_pickup sfxr_laser sfxr_explosion sfxr_powerup sfxr_hit sfxr_jump sfxr_blip
   sfxr: {params:{wave:"square|saw|sine|noise", freq:0.3, slide:-0.2, attack, sustain, punch, decay, lpf_freq, hpf_freq, vib_strength, arp_mod, repeat_speed, phaser_offset, duty...}} (sfxr ranges 0..1 / -1..1).
-  Custom layers: {layers:[{kind:"voice"|"note"|"sfxr"|"crackle"|"drops"|"squelch"|"growl"|"whoosh"|"glide"|"glitch"|"recipe", at:s, gain:dB, pan, ...}], fx:[...], reverb:{preset, wet}}.
+  Custom layers: {layers:[{kind:"voice"|"note"|"sfxr"|"crackle"|"drops"|"squelch"|"growl"|"whoosh"|"glide"|"glitch"|"sample"|"recipe", at:s, gain:dB, pan, ...}], fx:[...], reverb:{preset, wet}}.
   SFX are trimmed (no head silence), faded and normalised to peak -1 dBFS (target:-3 for UI).
 FPS / SCI-FI SFX (firearms, weapon_handling, scifi, movement groups above):
   Firearms gunshot_rifle|pistol|marksman|shotgun|smg|lmg|suppressed layer a transient crack, body, thump, sub, mechanical click and an environment tail: vars.environment "outdoor" (slapback; marksman = long slapback) | "indoor" (room) | "canyon" (long repeating echoes). vars.wet scales the tail, intensity the crack/drive.
@@ -1369,7 +1370,7 @@ FPS / SCI-FI SFX (firearms, weapon_handling, scifi, movement groups above):
 SFX OPTIONS (recipes and custom layers alike):
   fx:[{type:"dc"|"eq"|"comp"|"drive"|"delay"|...}] runs on the mixed layers (also "dc", ["dc","comp"] or {comp:{ratio:4}}). reverb:{preset:"room"|"studio"|"hall"|"plate"|"crypt"|"cathedral", wet:0.3} | "hall" | false. target:-3 or vars.target = peak dBFS. tail:s = padding for delay/reverb tails.
   loop:true | {length:s, crossfade:s} = seamless loop: the end crossfades (equal power) into the start and export writes loop points (WAV smpl, OGG tags).
-  Layer kinds also: glide {wave|noise:true, pts:[[t,hz],...] or f, dur, a, r, decay, env:"swell", am:{rate,depth}, vib:{rate,depth cents}, lp, bp, q, track} and glitch {dur, density, f}.
+  Layer kinds also: sample {sample:"C:/sfx/shot.wav" (an absolute .wav path, stereo is mixed to mono) | [several paths] (the seed picks one), pitch semitones, start s, dur s} layers your own recording with the synth layers; glide {wave|noise:true, pts:[[t,hz],...] or f, dur, a, r, decay, env:"swell", am:{rate,depth}, vib:{rate,depth cents}, lp, bp, q, track} and glitch {dur, density, f}.
   note/voice layers without instrument/patch use a plain triangle tone; pitch_env/amp/filter/vibrato set on the layer override the patch. pitch_env.amount = start offset in semitones gliding back to the note: positive falls, negative rises; shape:"linear" sweeps evenly over time.
   sfxr layers are DC-blocked (20 Hz high-pass) when they carry an offset; dc:false keeps the raw output.
   info {name} on a recipe asset shows resolved:{layers, fx, reverb, target}: send them back as {layers, fx, reverb, seed} to reproduce and edit the sound. delete {name:"pew_*"} takes wildcards.

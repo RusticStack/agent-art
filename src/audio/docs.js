@@ -66,7 +66,7 @@ LOOP: create (sfx/song) -> analyze (image + listener report) -> critique (ranked
 SFX: art_audio {action:"sfx", recipe:"gib_burst", seed:1, variants:3, vars:{pitch:0 (semitones), length:1, intensity:0.6, variation:0.5, wet:0.7, reverb?}} -> assets gib_burst_1..3. Recipes:
 ${Object.entries(RECIPE_GROUPS).map(([g, l]) => `  ${g}: ${l.join(' ')}`).join('\n')}
   sfxr: {params:{wave:"square|saw|sine|noise", freq:0.3, slide:-0.2, attack, sustain, punch, decay, lpf_freq, hpf_freq, vib_strength, arp_mod, repeat_speed, phaser_offset, duty...}} (sfxr ranges 0..1 / -1..1).
-  Custom layers: {layers:[{kind:"voice"|"note"|"sfxr"|"crackle"|"drops"|"squelch"|"growl"|"whoosh"|"glide"|"glitch"|"recipe", at:s, gain:dB, pan, ...}], fx:[...], reverb:{preset, wet}}.
+  Custom layers: {layers:[{kind:"voice"|"note"|"sfxr"|"crackle"|"drops"|"squelch"|"growl"|"whoosh"|"glide"|"glitch"|"sample"|"recipe", at:s, gain:dB, pan, ...}], fx:[...], reverb:{preset, wet}}.
   SFX are trimmed (no head silence), faded and normalised to peak -1 dBFS (target:-3 for UI).
 FPS / SCI-FI SFX (firearms, weapon_handling, scifi, movement groups above):
   Firearms gunshot_rifle|pistol|marksman|shotgun|smg|lmg|suppressed layer a transient crack, body, thump, sub, mechanical click and an environment tail: vars.environment "outdoor" (slapback; marksman = long slapback) | "indoor" (room) | "canyon" (long repeating echoes). vars.wet scales the tail, intensity the crack/drive.
@@ -77,7 +77,7 @@ FPS / SCI-FI SFX (firearms, weapon_handling, scifi, movement groups above):
 SFX OPTIONS (recipes and custom layers alike):
   fx:[{type:"dc"|"eq"|"comp"|"drive"|"delay"|...}] runs on the mixed layers (also "dc", ["dc","comp"] or {comp:{ratio:4}}). reverb:{preset:"room"|"studio"|"hall"|"plate"|"crypt"|"cathedral", wet:0.3} | "hall" | false. target:-3 or vars.target = peak dBFS. tail:s = padding for delay/reverb tails.
   loop:true | {length:s, crossfade:s} = seamless loop: the end crossfades (equal power) into the start and export writes loop points (WAV smpl, OGG tags).
-  Layer kinds also: glide {wave|noise:true, pts:[[t,hz],...] or f, dur, a, r, decay, env:"swell", am:{rate,depth}, vib:{rate,depth cents}, lp, bp, q, track} and glitch {dur, density, f}.
+  Layer kinds also: sample {sample:"C:/sfx/shot.wav" (an absolute .wav path, stereo is mixed to mono) | [several paths] (the seed picks one), pitch semitones, start s, dur s} layers your own recording with the synth layers; glide {wave|noise:true, pts:[[t,hz],...] or f, dur, a, r, decay, env:"swell", am:{rate,depth}, vib:{rate,depth cents}, lp, bp, q, track} and glitch {dur, density, f}.
   note/voice layers without instrument/patch use a plain triangle tone; pitch_env/amp/filter/vibrato set on the layer override the patch. pitch_env.amount = start offset in semitones gliding back to the note: positive falls, negative rises; shape:"linear" sweeps evenly over time.
   sfxr layers are DC-blocked (20 Hz high-pass) when they carry an offset; dc:false keeps the raw output.
   info {name} on a recipe asset shows resolved:{layers, fx, reverb, target}: send them back as {layers, fx, reverb, seed} to reproduce and edit the sound. delete {name:"pew_*"} takes wildcards.

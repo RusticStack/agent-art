@@ -65,6 +65,13 @@ function matchNames(s, name) {
   const re = new RegExp(`^${name.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`);
   return [...s.defs.keys()].filter((n) => re.test(n)).sort();
 }
+/** analyze / critique with a wildcard name or names:[...]: the matching names (null = a single sound). */
+function manyNames(self, a, verb) {
+  if (!a.names && !(a.name && a.name.includes('*'))) return null;
+  const names = a.names || matchNames(store(self), a.name);
+  if (!names.length) throw new Error(`${verb}: no sound matches "${a.name}" (art_audio list shows the names)`);
+  return names;
+}
 // partial song update: only tracks or only sections merge into the saved song (null removes a key)
 function mergeSong(old, nu) {
   const out = { ...old };
@@ -278,6 +285,8 @@ export const AUDIO_OPS = {
 
   /** Image (overview: waveform+beats+onsets, spectrogram, loudness/energy, stereo; mix: stem spectra + masking) + stats + perception. */
   audio_analyze(a) {
+    const many = manyNames(this, a, 'analyze');
+    if (many) return { results: many.map((name) => { const r = AUDIO_OPS.audio_analyze.call(this, { ...a, name, names: undefined }); delete r.image; return r; }), tip: 'images are left out for several sounds: analyze {name} one at a time to see the spectrogram' };
     const def = getDef(this, a.name);
     const au = getAudio(this, a.name);
     const { full, meas, p } = perceptionFor(this, a.name, au, def, a);
@@ -286,11 +295,14 @@ export const AUDIO_OPS = {
     const image = view === 'mix' && p.mix ? mixImage(p.mix) : overviewImage({ chs: full.chs, meas, perception: p, loop: full.loop, title: a.name, target_lufs: full.meta.target_lufs ?? (def.kind === 'song' ? -14 : -18), timeline: full.meta.timeline });
     const pub = publicPerception(p);
     if (pub.mix) delete pub.mix.spectra;
+    if (p.kind === 'sfx' && pub.rhythm) pub.rhythm.note = 'one-shot SFX: the tempo/groove fields describe onset spacing (hits, tails), not a musical beat; ignore them unless the sound is a loop';
     if (a.detail !== true) { delete pub.tension?.curve; if (pub.tonal) delete pub.tonal.chords_per_segment; if (pub.tonal) delete pub.tonal.chroma; }
     return { name: a.name, stats: meas.stats, report: listenerReport(p, issues), perception: pub, image, views: p.mix ? 'view:"mix" = stem spectra + masking' : undefined };
   },
 
   audio_critique(a) {
+    const many = manyNames(this, a, 'critique');
+    if (many) return { results: many.map((name) => AUDIO_OPS.audio_critique.call(this, { ...a, name, names: undefined })) };
     const def = getDef(this, a.name);
     const au = getAudio(this, a.name);
     const { full, meas, p } = perceptionFor(this, a.name, au, def, a);

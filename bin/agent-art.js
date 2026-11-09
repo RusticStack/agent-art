@@ -178,7 +178,8 @@ async function main() {
     }
     if (failed) process.exitCode = 1;
   } else if (cmd === 'tools') {
-    const text = [`${INSTRUCTIONS}\n`, ...TOOLS.map((t) => `${t.name}: ${t.description}\n  args: ${Object.keys(t.inputSchema.properties || {}).join(', ')}\n`)].join('\n');
+    const cliNote = 'CLI bridge: agent-art tool <art_tool> <json|-> [--out view.png]. --out is only written when the reply has an image. Each call is a fresh process: art_undo history only survives between calls while "agent-art serve" is running (same AGENT_ART_HOME / port).\n';
+    const text = [`${INSTRUCTIONS}\n`, cliNote, ...TOOLS.map((t) => `${t.name}: ${t.description}\n  args: ${Object.keys(t.inputSchema.properties || {}).join(', ')}\n`)].join('\n');
     console.log(text);
     // what a CLI agent loads instead of the MCP tool list
     cliUsage()?.start({ client: { name: 'cli' }, instructions: INSTRUCTIONS, tools: TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })), prompts: [] });

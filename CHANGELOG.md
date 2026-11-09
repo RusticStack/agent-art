@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- New SFX layer kind `sample` (`{kind:"sample", sample:"C:/sfx/shot.wav" | [paths], pitch, start, dur}`) mixes your own WAV recordings into a sound (stereo is mixed to mono; a list lets the seed pick one).
+- Fixes from the benchmark notes (all additive):
+  - `art_audio analyze` / `critique` accept a wildcard (`"gun_*"`) or `names:[...]`, as export and delete already did. They return `{results:[...]}`, and analyze leaves out the images for several sounds.
+  - SFX analysis marks its `rhythm` block as onset spacing for one-shots, not a musical beat.
+  - `art_fx export` says that `fx.json` is the working manifest and `<group>.fx.json` is the file to ship.
+  - Damage exports say why the blend-ready intact node differs from the plain glb.
+  - `art_rig` replies say that a cell is a px rectangle on the parts canvas.
+  - The `cells` op lists its `light` / `profile` values.
+  - `art_help workflow` has the general path rules: absolute, `./`, bare relative, and file vs folder.
+  - `agent-art tools` says that `--out` only gets images and that undo needs a running `agent-art serve`.
 - Token diet, measured with 12 Haiku benchmark runs (the same six tasks with and without it, logged with the new debug mode). Results held; what Agent Art added to the agents' context fell 26% (help reads 58%; the 3D tasks used 18-22% fewer tokens end to end). Nothing is removed:
   - `art_help {topic}` on a long topic answers with its core and an index of sections (a one-line summary and token size each); `{topic, section:"a,b"}` returns sections and `full:true` the whole topic as before. `3d` 18.6k -> 1.2k tokens, `rig` 4k -> 350, `melee` 3k -> 350. CLI: `agent-art help <topic> [section] [--full]`.
   - The `art_help` description no longer repeats the topic list (the schema enum has it).
