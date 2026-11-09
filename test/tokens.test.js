@@ -54,3 +54,13 @@ test('msys paths: an export to a Git Bash path lands on the drive (Windows)', { 
   await runTool('art_export', { canvas: 'm', path: bash }, call);
   assert.ok(fs.existsSync(target), `written to ${target}`);
 });
+
+test('ship templates: a metre-sized length explains the px unit (builds unchanged)', () => {
+  const e = new Engine({ home: fs.mkdtempSync(path.join(os.tmpdir(), 'aa-shiplen-')) });
+  assert.throws(() => e.run('model_create', { name: 'f', template: 'fighter', length: 20 }), { message: /^part \d+ \(box\): .* \(length is in px \(32 px = 1 m\): length:20 = 0\.63 m; for a 20 m ship pass length:640\)\n/ });
+  const h = e.run('model_create', { name: 'h', template: 'hauler', length: 20 });
+  assert.match(h.next, /^NOTE: length is in px/);
+  const f = e.run('model_create', { name: 'f72', template: 'fighter', length: 72 });
+  assert.ok(f.triangles > 0 && !/NOTE/.test(f.next), 'a short but working length is untouched');
+  assert.ok(!/NOTE/.test(e.run('model_create', { name: 'd', template: 'dropship' }).next), 'default length: no note');
+});

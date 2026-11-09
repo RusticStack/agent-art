@@ -181,6 +181,19 @@ export function capitalRingTemplate(o = {}) {
 
 export const SHIP_TEMPLATES = { gunship: gunshipTemplate, fighter: fighterTemplate, dropship: dropshipTemplate, hauler: haulerTemplate, capital_ring: capitalRingTemplate };
 
+/**
+ * length is in px (32 px = 1 m). Agents often pass metres (length:20 for a 20 m fighter = 0.6 m), and
+ * a tiny ship's detail parts then fail with a part error that does not say why. For a fighter /
+ * dropship / hauler with length < 160 px (5 m) this is the hint model_create adds to such an error
+ * (and to the reply under 2 m); builds are unchanged. null otherwise.
+ */
+export function shipLengthHint(a = {}) {
+  if (!['fighter', 'dropship', 'hauler'].includes(a.template) || a.length === undefined || a.length === null) return null;
+  const L = Number(a.length);
+  if (!Number.isFinite(L) || L >= 160) return null;
+  return { length: L, text: `length is in px (32 px = 1 m): length:${L} = ${(L / 32).toFixed(2)} m; for a ${L} m ship pass length:${Math.round(L * 32)}` };
+}
+
 // ---------- kit textures (kittex.js) ----------
 export { paintKitTextures } from './kittex.js';
 const hex = (c) => { const v = parseInt(String(c).replace('#', '').slice(0, 6), 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255, 255]; };

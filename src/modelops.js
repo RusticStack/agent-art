@@ -14,6 +14,7 @@ import { BAYER4 } from './util.js';
 import { normalizeWeapon3D, armsChains, solveHold3D, frameIssues3D, offsetOf } from './weapon3d.js';
 import { rigInfo, rigSummary, rigScene, rigMeta, resolveOffsets, clipKeys, sampleClip, posedWorld, angleMatrix, subtree, quatOfMat, nodeTRS } from './modelrig.js';
 import { MODEL_TEMPLATES } from './modeltemplates.js';
+import { shipLengthHint } from './shipgen.js';
 import { normPBR, normBump, bumpNormal, mrTexture, heightFromData } from './surface.js';
 import { exportExtras, previewExtras, wantsExtras, MODEL_EXTRA_OPS } from './modelexport.js';
 import { skinOps, skinCtx, skinnedOf, skinSamples, skinPosed, assembleSkinned, isSkinned, skelAnimate, skelPose, skeletonInfo } from './skinops.js';
@@ -524,14 +525,25 @@ export const MODEL_OPS = {
   model_create(a, source) {
     if (!NAME_RE.test(a.name || '')) throw new Error('model "name" must be 1-64 chars of letters, digits, _ - .');
     if (models(this).has(a.name) && !a.overwrite) throw new Error(`Model "${a.name}" exists (overwrite:true replaces it; art_model update changes it)`);
-    const tpl = a.template !== undefined ? fromTemplate(a) : null;
-    const def = { name: a.name, parts: tpl ? tpl.parts : a.parts, grid: a.grid ?? tpl?.grid ?? 32, scale: a.scale ?? tpl?.scale ?? 32, origin: a.origin ?? 'auto' };
-    if (tpl) { for (const k of ['sockets', 'poses', 'clips', 'weapon', 'melee']) if (tpl[k]) def[k] = tpl[k]; if (a.notes === undefined) def.notes = tpl.notes; def.template = a.template; }
-    for (const k of MODEL_KEYS) if (a[k] !== undefined && a[k] !== null && def[k] === undefined) def[k] = a[k];
-    def.created = Date.now();
-    const s = summary(def, build(this, def));
+    const hint = shipLengthHint(a);
+    let tpl, def, built;
+    try {
+      tpl = a.template !== undefined ? fromTemplate(a) : null;
+      def = { name: a.name, parts: tpl ? tpl.parts : a.parts, grid: a.grid ?? tpl?.grid ?? 32, scale: a.scale ?? tpl?.scale ?? 32, origin: a.origin ?? 'auto' };
+      if (tpl) { for (const k of ['sockets', 'poses', 'clips', 'weapon', 'melee']) if (tpl[k]) def[k] = tpl[k]; if (a.notes === undefined) def.notes = tpl.notes; def.template = a.template; }
+      for (const k of MODEL_KEYS) if (a[k] !== undefined && a[k] !== null && def[k] === undefined) def[k] = a[k];
+      def.created = Date.now();
+      built = build(this, def);
+    } catch (e) {
+      if (!hint) throw e;
+      const [first, ...usage] = String(e.message).split('\n'); // before the usage block
+      e.message = [`${first} (${hint.text})`, ...usage].join('\n');
+      throw e;
+    }
+    const s = summary(def, built);
     saveModel(this, def, source, 'model created');
-    let next = `art_model preview {name:"${def.name}"} to look at it, update {set:{i:{..}}|add|remove} to iterate, export {name} for .glb`;
+    let next = hint && hint.length < 64 ? `NOTE: ${hint.text}. ` : '';
+    next += `art_model preview {name:"${def.name}"} to look at it, update {set:{i:{..}}|add|remove} to iterate, export {name} for .glb`;
     if (s.rig) next += `. Rig: pose {name, pose, parts:{<node>:{rot,at}}}, animate {name, clip, keys:[{pose|parts, t}]}, preview {name, clip, view:"fp"|"side"}, render {name, canvas, clip} = pixel sprites`;
     // origin "auto" keeps part coordinates (kit pieces snap to the grid); a standalone prop or vehicle
     // that is off-centre is easier to place in an engine with origin:"bottom"
