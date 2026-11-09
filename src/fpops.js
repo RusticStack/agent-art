@@ -559,12 +559,12 @@ export const FP_OPS = {
         if (this.docs.has(name)) this.docs.delete(name);
         const d = new Doc({ name, width: p.width, height: p.height });
         d.layers[0].data.set(p.data);
-        d.meta = { fp_paint: { root, group, sweep: a.sweep, sheet: i, cell: sw.cell, note: 'paint inside the cells; anchors stay where they are (art_fp paint {action:"import"})' } };
+        d.meta = { fp_paint: { root, group, sweep: a.sweep, sheet: i, cell: sw.cell, note: 'paint inside the cells; anchors stay where they are (art_fp paint {mode:"import", sweep})' } };
         this.attach(d);
         this.changed?.(d, { op: 'fp_paint', source, label: `fp paint ${a.sweep} sheet ${i}`, structural: true });
         return name;
       });
-      return { canvases, cell: sw.cell, cells: steps(sw.yaw) * steps(sw.pitch), next: 'paint the canvases (art_draw), then art_fp paint {action:"import", sweep}' };
+      return { canvases, cell: sw.cell, cells: steps(sw.yaw) * steps(sw.pitch), next: 'paint the canvases (art_draw), then art_fp paint {mode:"import", sweep}' };
     }
     const olds = [], news = [];
     const written = sw.sheets.map((rel, i) => {

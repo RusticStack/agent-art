@@ -16,6 +16,7 @@ import { KIT_BUILDS } from '../src/fpkit.js';
 import { sources2d, sweep2d, colorSet, suggestAnchors, anchorsOffArt, artOf, GUIDES, MASKS } from '../src/fp2d.js';
 import { skin2dOf, handPose, POSE_OF, HAND_POSES } from '../src/fp2darms.js';
 import { decodePNG } from '../src/png.js';
+import { runTool } from '../src/mcp.js';
 import { drawDemoSet } from '../scripts/fp2d-art.js';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'agent-art-fp2d-'));
@@ -157,6 +158,18 @@ test('fp2d: painted cells come back as overrides and survive the next sweep2d', 
   const g2 = m2.anchors.grip[c], i = (Math.round(g2[1]) * m2.cell[0] + Math.round(g2[0])) * 4;
   assert.deepEqual([...cells[c].subarray(i, i + 4)], [255, 0, 255, 255], 'the painted pixel is kept at the grip');
   assert.equal(s2.sweeps.vandal.palette_ok, true, 'override colours join the palette');
+});
+
+test('art_fp paint through the MCP tool: exports by default, imports with mode:"import"', async () => {
+  const e = engine(), out = tmp();
+  drawDemoSet(e, { arms: false });
+  e.run('fp_sweep2d', { out });
+  const call = async (op, a) => e.run(op, a);
+  const parse = (content) => JSON.parse(content.find((c) => c.type === 'text').text);
+  const ex = parse(await runTool('art_fp', { action: 'paint', out, sweep: 'vandal' }, call));
+  assert.ok(ex.canvases?.length > 0, `export reached: ${JSON.stringify(ex).slice(0, 200)}`);
+  const im = parse(await runTool('art_fp', { action: 'paint', mode: 'import', out, sweep: 'vandal' }, call));
+  assert.ok(!im.canvases && 'overrides' in im, `import reached: ${JSON.stringify(im).slice(0, 200)}`);
 });
 
 test('fp2d arms: the same clips drive the drawn skin; poses per frame; colours only from the drawings', () => {

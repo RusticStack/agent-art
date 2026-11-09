@@ -277,7 +277,8 @@ npx -y @rusticstack/agent-art skills --out ~/.claude/skills
 
 ```sh
 agent-art serve [--port 7420] [--home DIR] [--open]   # the web UI + HTTP API
-agent-art mcp   [--port 7420] [--home DIR] [--open]   # MCP stdio server (also runs or reuses the web UI)
+agent-art mcp   [--port 7420] [--home DIR] [--open]   # MCP stdio server (also runs or reuses the web UI); --debug logs usage
+agent-art usage [--since DATE] [--tool art_x] [--json] [--transcript F]   # report from the debug logs
 agent-art tools                                       # tool list + server instructions (for agents without MCP)
 agent-art tool art_draw - --out view.png <<'EOF'      # call any MCP tool; an image reply goes to --out
 {"canvas":"stone","commands":[{"op":"cells","size":5,"colors":["#555","#777","#999"]}],"preview":true}
@@ -302,7 +303,21 @@ Every feature and more screenshots: [docs/ui/README.md](docs/ui/README.md).
 
 ## Debug and usage logging
 
-(documented separately)
+Turn on the debug mode to see what Agent Art costs an agent and where agents struggle, then tune tool descriptions, replies and defaults from evidence:
+
+```sh
+agent-art mcp --debug            # or AGENT_ART_DEBUG=1; "--debug full" also keeps the call arguments
+agent-art usage                  # report: per-session overhead, cost per tool and action, biggest and slowest calls,
+                                 # error groups, repeats and retries, art_help reads, suggestions
+agent-art usage --transcript ~/.claude/projects/<project>/<session>.jsonl   # plus the real billed tokens from Claude Code
+```
+
+Every session, list call and tool call becomes one JSONL record in `<workspace>/debug/usage-<date>.jsonl`:
+- the estimated tokens of the arguments and reply (text and images);
+- time, errors, and the engine ops the call ran;
+- repeated or retried calls.
+
+It is off by default, logs only argument shapes unless you ask for `full`, and never sends anything anywhere. Record format, token estimates and an optimisation loop: [docs/debug/README.md](docs/debug/README.md).
 
 ## Configuration
 
@@ -312,8 +327,10 @@ Every feature and more screenshots: [docs/ui/README.md](docs/ui/README.md).
 | Web UI / API port | `--port N` | `AGENT_ART_PORT` | `7420` (`mcp` takes the next free port when it has to host and 7420 is taken) |
 | Open the browser on start | `--open` | `AGENT_ART_OPEN=1` (`mcp` only) | off |
 | ffmpeg for mp3 / ogg / opus export | | `AGENT_ART_FFMPEG` | `ffmpeg` on `PATH` |
+| Debug usage log (`mcp` only) | `--debug [full]` | `AGENT_ART_DEBUG=1` or `full` | off |
+| Debug log file | | `AGENT_ART_DEBUG_FILE` | `<workspace>/debug/usage-<date>.jsonl` |
 
-The workspace holds `canvases/*.json` (layers stored as PNG), `models/*.json` (3D model definitions), `projects/`, `exports/` and `packs/`, plus `graph.json` (asset graph and review notes), `reviews/` (review note crops), `ui-state.json` (hidden and pinned assets in the UI), `trash/` (cleanup batches and single deletes, until emptied) and `config.json`. Since 0.3.0 there is no implicit fallback to a `./workspace` folder next to a source checkout, because it silently split work between clients started from different folders. If that folder exists, `serve` and `mcp` print a note; pass `--home ./workspace` to keep using it.
+The workspace holds `canvases/*.json` (layers stored as PNG), `models/*.json` (3D model definitions), `projects/`, `exports/` and `packs/`, plus `graph.json` (asset graph and review notes), `reviews/` (review note crops), `ui-state.json` (hidden and pinned assets in the UI), `debug/` (usage logs, only with `--debug`), `trash/` (cleanup batches and single deletes, until emptied) and `config.json`. Since 0.3.0 there is no implicit fallback to a `./workspace` folder next to a source checkout, because it silently split work between clients started from different folders. If that folder exists, `serve` and `mcp` print a note; pass `--home ./workspace` to keep using it.
 
 `<workspace>/config.json` holds `cleanup.allow_paths` (folders outside `exports/` that cleanup may move files from) and `cleanup.trash_deletes` (`false` makes single deletes hard deletes again). Only the user sets them, in the file or in the web UI under Cleanup › Settings; the agent can read them with `art_cleanup config`.
 

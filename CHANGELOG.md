@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- MCP debug mode: `agent-art mcp --debug [full]` (or `AGENT_ART_DEBUG=1|full`) logs every session, list call and tool call to `<workspace>/debug/usage-<date>.jsonl` (`AGENT_ART_DEBUG_FILE` overrides). Each record has the per-session overhead (instructions, tool definitions, prompts) and, per call, the estimated tokens of the arguments and reply (images by Claude's image rule), time, engine ops, errors, repeats and retries. The default level keeps only argument shapes. `agent-art usage` reports it by tool and action, with the biggest and slowest calls, error groups, art_help reads and suggestions; `--transcript` adds the real billed usage from a Claude Code session log. Off by default. See `docs/debug/README.md`.
+- Fix: `art_fp {action:"paint"}` could only import (the op read the tool's own `action`). Export is now the default and import is `mode:"import"`.
+- MCP prompts use the new skill descriptions.
 - Docs pass: the README is restructured (quick start, a first asset in 5 calls, a feature tour, a tools table with every action, complete help-topic and skill lists, configuration) with the deep detail moved to `docs/<area>/README.md` pages; new `llms.txt` and a generated `llms-full.txt` (`npm run docs:llms`, both shipped on npm, drift-tested by `test/llms.test.js`); skill files get trigger-oriented, YAML-safe frontmatter descriptions; `art_help` and the MCP instructions list every help topic (`fp`, `damage`, `skin2d`, `melee`, `materials`, `cleanup` were missing from one or the other).
 
 ## 0.10.0

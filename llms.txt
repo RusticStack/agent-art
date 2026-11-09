@@ -30,6 +30,7 @@ Workflow for a sprite: `art_palette ramp` -> flat silhouettes with `art_draw` ->
 - [Sound effects and music](https://github.com/RusticStack/agent-art/blob/main/docs/audio/README.md): `art_audio` SFX, music notation, analysis and listener reports, export
 - [Web UI](https://github.com/RusticStack/agent-art/blob/main/docs/ui/README.md): timeline, viewers, layers view, asset graph, review notes
 - [Cleanup](https://github.com/RusticStack/agent-art/blob/main/docs/cleanup/README.md): `art_cleanup` plans, trash, restore, and the asset-type registration hook
+- [Debug and usage logging](https://github.com/RusticStack/agent-art/blob/main/docs/debug/README.md): `mcp --debug` per-call usage log (estimated tokens, time, errors) and the `agent-art usage` report
 
 ## Help topics
 
