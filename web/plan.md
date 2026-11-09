@@ -2326,3 +2326,18 @@ Each is additive, has unit and e2e tests named in its section, and steps 10b (su
 3. **Default 3D mode.** Material preview (first plan) costs a heavier GLB per reload. The alternative is Solid › Studio, which is exactly today's look. The plan keeps Material preview unless the step 8b timing says otherwise.
 4. **Colour input.** The native colour input is replaced in the toolbar by a swatch that opens the new picker (the OS dialog stays reachable inside it). Say so if you want the native input to stay visible as well.
 5. **Scope.** Review 2 adds roughly three steps of work (10b, 18b, 18c) on top of the first plan. They are ordered so the parity rewrite never waits on them.
+
+---
+
+## Implementation notes
+
+Deviations from the plan, smallest correct change each, in step order.
+
+- **Step 2, seeding.** The activity log lives in memory in the server process, so ops seeded before the server starts never appear in the timeline. `e2e/seed.ts` has two lists: `SEED` (run in-process before the server starts: assets, exports, graph, reviews) and `LIVE_SEED` (run through the live server after it is healthy: two draws and one expected failure), so the timeline specs have entries.
+- **Step 2, base URL.** `playwright.config.ts` is evaluated before global setup picks the port, so the base URL comes from a fixture override that reads `e2e/.state.json`, not from `use.baseURL`.
+- **Step 2, collapsed project rows.** Canvases inside a project are collapsed in the browser, so the smoke and viewer specs use the loose canvas `spark` for row checks.
+- **Step 3, early files.** `lib/util/icons.ts`, `lib/util/dom.ts` (`renderJson`), `lib/util/jsonTokens.ts` and `viewers/types.ts` were written in step 3 (they are plain modules the step 3 tests and later steps need) rather than with their first consumer.
+- **Step 3, toast bus.** `toast` / `onToast` live in `lib/util/notify.ts` (the module-level callback the plan describes), so `client.ts` can report op failures without importing a store.
+- **Step 3, `refreshUiToken`.** It also keeps the fetched page HTML (`lastFetchedIndex()`), which the step 12 resync uses to compare the entry script URL, so `/` is fetched once per reconnect.
+- **Step 3, `EventStream.onOpen`.** `reconnect` is `false` only for the very first `hello`; every later `hello` (after any error) is a reconnect.
+- **Server, model thumbnails.** `/api/model/<n>/thumb.png` cached one image per model whatever `size` asked for. The cache key is now model + size, and `size` is clamped to 16..1024 (default 128). Test in `test/ui.test.js`.

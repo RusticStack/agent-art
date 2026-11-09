@@ -113,7 +113,7 @@ function sendBin(res, type, buf, extra = {}) {
 export function startServer(engine, { port, host = '127.0.0.1', uiDir = UI_DIR }) {
   const clients = new Set();
   const uiToken = crypto.randomBytes(24).toString('hex');
-  const modelThumbs = new Map(); // model name -> {key, png}
+  const modelThumbs = new Map(); // `${model name}\n${size}` -> {key, png}
   engine.on('event', (ev) => {
     const msg = `data: ${JSON.stringify(ev)}\n\n`;
     for (const c of clients) c.write(msg);
@@ -209,9 +209,11 @@ export function startServer(engine, { port, host = '127.0.0.1', uiDir = UI_DIR }
           return sendBin(res, 'image/png', encodePNG(d.width, d.height, data));
         }
         if (s[2] === 'thumb.png') {
-          const key = `${def.updated || 0}`;
-          let t = modelThumbs.get(name);
-          if (!t || t.key !== key || snapId) { t = { key, png: modelThumbnail(engine, def, Number(url.searchParams.get('size') || 128)) }; if (!snapId) modelThumbs.set(name, t); }
+          // cached per model and size (the 3D viewer's WebGL fallback asks for a large one)
+          const size = Math.max(16, Math.min(1024, Math.round(Number(url.searchParams.get('size')) || 128)));
+          const key = `${def.updated || 0}`, cacheKey = `${name}\n${size}`;
+          let t = modelThumbs.get(cacheKey);
+          if (!t || t.key !== key || snapId) { t = { key, png: modelThumbnail(engine, def, size) }; if (!snapId) modelThumbs.set(cacheKey, t); }
           return sendBin(res, 'image/png', t.png);
         }
         // materials v2 channel views (UI channel dropdown): ?profile=three (tangents, ORM, extensions,

@@ -137,6 +137,12 @@ test('ui: asset index, model GLB, rig layer stack + debug render, audio, exports
     assert.ok(gltf.nodes.some((n) => n.name === 'socket_top'), 'sockets are nodes');
     const thumb = Buffer.from(await (await fetch(U('/api/model/crate/thumb.png'))).arrayBuffer());
     assert.equal(thumb.subarray(1, 4).toString(), 'PNG');
+    // the thumbnail cache is keyed by size too (a cached 128 px image must not answer ?size=512)
+    const thumbWidth = (b) => b.readUInt32BE(16);
+    const big = Buffer.from(await (await fetch(U('/api/model/crate/thumb.png?size=512'))).arrayBuffer());
+    assert.ok(thumbWidth(big) > thumbWidth(thumb), `size=512 gives a larger image (${thumbWidth(big)} vs ${thumbWidth(thumb)})`);
+    const again = Buffer.from(await (await fetch(U('/api/model/crate/thumb.png'))).arrayBuffer());
+    assert.equal(thumbWidth(again), thumbWidth(thumb), 'the default size is still served from its own cache entry');
     assert.equal((await fetch(U('/api/model/nope/glb'))).status, 404);
     // the viewer does not write files (export does)
     assert.ok(!fs.existsSync(path.join(home, 'exports', 'crate.glb')));
