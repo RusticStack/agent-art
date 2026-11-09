@@ -269,3 +269,29 @@ test('sfx: sample layer mixes own WAV recordings (absolute path or a list the se
   assert.throws(() => renderSfx({ layers: [{ kind: 'sample', sample: 'rel/x.wav' }] }), /absolute/);
   assert.throws(() => renderSfx({ layers: [{ kind: 'sample', sample: path.join(dir, 'none.wav') }] }), /not found/);
 });
+
+test('gunshot realism: transient profile separates a noise blast from a pitched thump; critique flags pitched / dull guns', async () => {
+  const { transientProfile } = await import('../src/audio/perception.js');
+  const rng = makeRng(7), n = SR;
+  const blast = new Float32Array(n), thump = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const t = i / SR, w = rng.next() * 2 - 1;
+    blast[i] = w * (Math.exp(-t / 0.004) + 0.12 * Math.exp(-t / 0.25));
+    thump[i] = Math.sin(2 * Math.PI * 180 * t) * Math.exp(-t / 0.15);
+  }
+  const b = transientProfile(blast), th = transientProfile(thump);
+  assert.ok(b.ring_db < 12 && b.snap > 0.25 && b.attack_ms < 2 && b.decay30_s > 0.2, JSON.stringify(b));
+  assert.ok(th.ring_db > 15, JSON.stringify(th));
+  const engine = new Engine({ home: tmp() });
+  const call = (a) => runTool('art_audio', a, (op, args) => engine.run(op, args));
+  const text = (c) => c.map((x) => x.text || '').join('\n');
+  await call({ action: 'sfx', name: 'old_rifle', recipe: 'gunshot_rifle', seed: 1 });
+  const cr = JSON.parse(text(await call({ action: 'critique', name: 'old_rifle' })));
+  assert.ok(cr.issues.some((i) => i.id === 'pitched_ring'), cr.summary);
+  // a non-gun impact is not judged as a gunshot; intent turns the checks on
+  await call({ action: 'sfx', name: 'bone', recipe: 'bone_crunch', seed: 1 });
+  const bone = JSON.parse(text(await call({ action: 'critique', name: 'bone' })));
+  assert.ok(!bone.issues.some((i) => /pitched_ring|no_crack|no_tail|soft_attack/.test(i.id)));
+  const asGun = JSON.parse(text(await call({ action: 'critique', name: 'bone', intent: 'pistol gunshot' })));
+  assert.ok(asGun.issues.some((i) => /pitched_ring|no_crack|no_tail|soft_attack/.test(i.id)), asGun.summary);
+});

@@ -987,6 +987,37 @@ export function pitchSweep(mono, { from = 0 } = {}) {
   for (let i = 1; i < run.length; i++) { const d = Math.log2(run[i].f / run[i - 1].f); if (Math.abs(d) < 0.005) continue; moved++; if (Math.sign(d) === Math.sign(sweep)) along++; }
   return { sweep: r2(sweep), held_s: r2(held), frames: run.length, monotonic: r2(moved ? along / moved : 1) };
 }
+/** Transient realism for impacts / gunshots: attack (10% -> peak, ms), snap = share of the first 20 ms above 2 kHz,
+ *  body = share of the first 150 ms in 50-400 Hz, ring_db = strongest spectral peak over its +-25-bin median in 10-250 ms
+ *  (Welch, 70 Hz-5 kHz; noise sits at 5-10 dB, a pitched drum / bell / modal ring at 15+), decay30_s = time until the
+ *  20 ms RMS is 30 dB under the attack. */
+export function transientProfile(mono, sr = SR) {
+  let pk = 0, pi = 0; for (let i = 0; i < mono.length; i++) { const a = Math.abs(mono[i]); if (a > pk) { pk = a; pi = i; } }
+  if (pk < 1e-6) return null;
+  let on = 0; while (on < mono.length && Math.abs(mono[on]) < 0.1 * pk) on++;
+  const welch = (a, b, N) => {
+    const P = new Float64Array(N / 2), w = hann(N); let frames = 0;
+    for (let st = on + Math.round(a * sr); st + N <= Math.min(mono.length, on + Math.round(b * sr)); st += N / 2) {
+      const re = new Float64Array(N), im = new Float64Array(N);
+      for (let i = 0; i < N; i++) re[i] = mono[st + i] * w[i];
+      fft(re, im); for (let k = 0; k < N / 2; k++) P[k] += re[k] * re[k] + im[k] * im[k]; frames++;
+    }
+    return { P, frames, hz: sr / N };
+  };
+  const share = ({ P, hz }, lo, hi) => { let a = 0, t = 0; for (let k = 1; k < P.length; k++) { t += P[k]; if (k * hz >= lo && k * hz < hi) a += P[k]; } return t ? a / t : 0; };
+  const T = welch(0.01, 0.25, 2048); let ring = 1, ringHz = 0;
+  for (let k = 5; k < T.P.length - 26; k++) {
+    const fq = k * T.hz; if (fq < 70 || fq > 5000 || !(T.P[k] > T.P[k - 1] && T.P[k] >= T.P[k + 1])) continue;
+    const nb = []; for (let j = -25; j <= 25; j++) if (Math.abs(j) > 2) nb.push(T.P[k + j]);
+    nb.sort((x, y) => x - y); const p = T.P[k] / (nb[nb.length >> 1] + 1e-20);
+    if (p > ring) { ring = p; ringHz = fq; }
+  }
+  const rms = (st, n) => { let e = 0; for (let i = st; i < Math.min(mono.length, st + n); i++) e += mono[i] * mono[i]; return Math.sqrt(e / n); };
+  const w20 = Math.round(0.02 * sr), r0 = rms(on, w20); let t30 = null;
+  for (let st = on; st < mono.length; st += Math.round(0.01 * sr)) if (rms(st, w20) < r0 * 0.0316) { t30 = (st - on) / sr; break; }
+  return { attack_ms: r2(((pi - on) / sr) * 1000), snap: r2(share(welch(0, 0.02, 256), 2000, 12000)), body: r2(share(welch(0, 0.15, 1024), 50, 400)), ring_db: r1(10 * Math.log10(ring)), ring_hz: Math.round(ringHz), decay30_s: t30 === null ? r2(mono.length / sr) : r2(t30), frames: T.frames };
+}
+
 function sfxShape(mono, meas, rhy, tim) {
   const w = Math.round(0.005 * SR), env = [];
   for (let i = 0; i < mono.length; i += w) { let e = 0; for (let k = i; k < Math.min(mono.length, i + w); k++) e += mono[k] * mono[k]; env.push(10 * Math.log10(e / w + 1e-12)); }
@@ -1049,7 +1080,7 @@ function sfxShape(mono, meas, rhy, tim) {
   else if (tonal) reads = dur < 0.4 ? 'a UI blip/click' : 'a tonal sting';
   else if (attack <= 15 && dur < 0.8) reads = b.presence + b.high > 25 ? 'a sharp crack / snap (whip, bone, blade)' : 'a punchy impact / hit';
   else reads = attack <= 15 ? 'an impact with a tail' : 'a textured noise event';
-  return { duration: r2(dur), pitch_clarity: r2(clarity), attack_ms: attack, attack_words: attackW, hits, hits_words: hitsW, decay_s: r2(decay), decay_words: decayW, tone_words: toneW, pitch_words: pitchW, sweep_octaves: sw.sweep, reads_as: reads };
+  return { duration: r2(dur), pitch_clarity: r2(clarity), transient: transientProfile(mono), attack_ms: attack, attack_words: attackW, hits, hits_words: hitsW, decay_s: r2(decay), decay_words: decayW, tone_words: toneW, pitch_words: pitchW, sweep_octaves: sw.sweep, reads_as: reads };
 }
 function firstSeconds(chs, p, stems, dur = 5) {
   const N = Math.min(chs[0].length, dur * SR);

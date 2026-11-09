@@ -4,7 +4,7 @@ import { GENRES } from './genres.js';
 
 const r1 = (v) => Math.round(v * 10) / 10;
 
-export function critiqueAudio(stats, { kind = 'music', target_lufs, target_peak = null, loop = false, perception = null, recipe = null, genre = null } = {}) {
+export function critiqueAudio(stats, { kind = 'music', target_lufs, target_peak = null, loop = false, perception = null, recipe = null, genre = null, intent = null } = {}) {
   const issues = [];
   const add = (id, audibility, message, fix) => issues.push({ id, audibility: r1(audibility), message, fix });
   if (stats.clipped_samples > 0 || stats.true_peak_dbtp > 0) add('clipping', 0.95, `${stats.clipped_samples} clipped samples, true peak ${stats.true_peak_dbtp} dBTP (audible crackle/distortion)`, kind === 'music' ? 'lower track gains or keep master ceiling at -1 (master:{ceiling:-1})' : 'lower layer gains; the sfx normaliser targets -1 dBFS (target:-1)');
@@ -43,6 +43,15 @@ export function critiqueAudio(stats, { kind = 'music', target_lufs, target_peak 
     if (dur < 0.03) add('too_short', 0.4, `${dur} s is too short to read as a sound (a click)`, 'vars:{length:1.5}');
     if (b.sub > 45) add('sub_heavy', 0.35, `${b.sub}% of energy is sub-bass: vanishes on laptop/phone speakers`, 'add mid content (a burst or crackle layer 300 Hz-3 kHz)');
     if (b.presence > 35 && !ui) add('harsh', 0.35, `presence band ${b.presence}%: harsh`, 'fx {type:"eq",bands:[{type:"peak",f:3200,gain:-3}]}');
+  }
+  // gunshots / firearms (by recipe or stated intent): a real shot is a broadband noise blast, not a pitched hit
+  const gunText = `${recipe || ''} ${intent || ''}`;
+  const tr = perception?.sfx?.transient;
+  if (kind !== 'music' && tr && /gun|shot|rifle|pistol|revolver|smg|lmg|carbine|shotgun|sniper|marksman|firearm|muzzle/i.test(gunText) && !/suppress|silenc/i.test(gunText)) {
+    if (tr.ring_db > 12) add('pitched_ring', 0.85, `a pitched ring at ${tr.ring_hz} Hz, ${tr.ring_db} dB above the surrounding noise: it sounds like a drum, bell or instrument, not a gunshot (real shots measure 5-10 dB)`, 'remove tonal layers (voice / note / modal clank / sine thump); build the blast from noise bursts (layers kind sfxr noise, crackle, glide noise:true) or a recording (kind sample)');
+    if (tr.snap < 0.2) add('no_crack', 0.75, `only ${Math.round(tr.snap * 100)}% of the first 20 ms is above 2 kHz: a dull thud with no crack (a near gunshot is 25-45%)`, 'add a 2-5 ms white-noise burst high-passed at ~2 kHz at t=0, raise vars.intensity, cut low-mids');
+    if (tr.attack_ms > 3) add('soft_attack', 0.55, `${tr.attack_ms} ms from onset to peak: a gunshot peaks within 1-2 ms`, 'remove attack ramps / pre-delay on the blast layer; fx {type:"transient", attack:8}');
+    if (tr.decay30_s < 0.1 && !/indoor|room|suppress/i.test(gunText)) add('no_tail', 0.45, `it is 30 dB down after ${Math.round(tr.decay30_s * 1000)} ms: no environment tail, so it reads as a click / thud (an outdoor shot rolls on for 0.3-1.5 s)`, 'vars.environment "outdoor"|"canyon", or a reverb / noise tail layer');
   }
   if (stats.channels === 2 && stats.stereo && (stats.stereo.correlation < 0.1 || stats.stereo.mono_loss_db < -4)) add('mono_collapse', 0.55, `stereo correlation ${stats.stereo.correlation}, mono fold-down loses ${-stats.stereo.mono_loss_db} dB: parts vanish in mono`, 'reduce width / double-tracking spread, avoid inverting one side');
   if (perception) {

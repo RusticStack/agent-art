@@ -151,7 +151,7 @@ function fxMake(a, source) {
   const r = makeOne(this, a, dir, group, man, source);
   writeJSON(path.join(dir, MANIFEST), man);
   const img = upscale(peakImage(r), Math.max(1, Math.min(4, Math.floor(512 / Math.max(r.meta.sheet[0], r.meta.sheet[1])))));
-  return { ...summary(r), dir, group, meta: r.meta, image: encodePNG(img.width, img.height, img.data) };
+  return { ...summary(r), dir, group, meta: r.meta, ...(a.path ? { next: `export with the same folder: art_fx {action:"export", path:${JSON.stringify(a.path)}} (the manifest lives in ${dir})` } : {}), image: encodePNG(img.width, img.height, img.data) };
 }
 
 function fxBatch(a, source) {
@@ -259,7 +259,7 @@ function fxList(a) {
 function fxExport(a) {
   const dir = this.resolvePath(a.path || 'fx', this.exportDir), man = readManifest(dir);
   const groups = a.group ? [groupOf(a)] : Object.keys(man.groups);
-  if (!groups.length) throw new Error(`no effects in ${path.join(dir, MANIFEST)}: run art_fx make / batch first`);
+  if (!groups.length) throw new Error(`no effects in ${path.join(dir, MANIFEST)}: run art_fx make / batch first${a.path ? '' : ' (effects made with a path:"..." are exported with that same path)'}`);
   const issues = [], written = [];
   for (const g of groups) {
     const ents = man.groups[g];

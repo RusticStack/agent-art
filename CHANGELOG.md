@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Audio critique judges gunshots. When the recipe or intent names a gun, it flags `pitched_ring` (a tonal ring: sounds like a drum, bell or instrument), `no_crack` (no high-frequency snap in the first 20 ms), `soft_attack` and `no_tail`. The numbers are in a new `sfx.transient` block of analyze. Before this, the stock synthesized gunshots scored 100 although they ring like an instrument; now they are flagged.
+- `art_fx make` with a `path` says to export with the same path, and `export` says so when it finds no effects. `art_rig` replies say the parts values are `[x, w, h]`. The 3D damage states help points at `damage:{mode:"files"}` for one glb per state. `agent-art tools` says to use forward slashes in JSON paths.
 - New SFX layer kind `sample` (`{kind:"sample", sample:"C:/sfx/shot.wav" | [paths], pitch, start, dur}`) mixes your own WAV recordings into a sound (stereo is mixed to mono; a list lets the seed pick one).
 - Fixes from the benchmark notes (all additive):
   - `art_audio analyze` / `critique` accept a wildcard (`"gun_*"`) or `names:[...]`, as export and delete already did. They return `{results:[...]}`, and analyze leaves out the images for several sounds.
