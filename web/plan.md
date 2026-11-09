@@ -2348,3 +2348,10 @@ Deviations from the plan, smallest correct change each, in step order.
 - **Step 5, tool keys.** `CanvasViewer.onKey` handles the paint-tool letters only without Shift, so `Shift+G` still reaches the global "open the graph" shortcut.
 - **Step 5, snapshots.** The canvas viewer instance is reused between a live canvas and its snapshots, so the tool / colour / undo groups are hidden (`hidden`) rather than not built while a snapshot is shown; the e2e check is "tool group hidden".
 - **Step 5, seed.** A loose 8×8 canvas `scratch` is seeded for the painting e2e tests, so they do not change assets other specs look at.
+- **Step 6, legacy `sheet.js`.** `web/ui/viewers/sheet.js` stays until step 11, because the legacy export viewer still imports it; the app uses the TS `SheetViewer` everywhere else.
+- **Step 6, one-shot tags.** A tag with `loop: false` stops on its last frame (legacy ignored the flag and obeyed only the Loop toggle); pressing play on a finished one-shot restarts it.
+- **Step 6, compass label.** The centre label is the direction group's base name (`walk_cycle` for `walk_cycle_front`); legacy cut at the first underscore.
+- **Step 6, anim key.** The load key is `[kind, name]`; another `tag` on the same canvas only switches the select.
+- **Step 6, extra file.** Pure scale / status maths are in `anim/logic.ts` (the plan names only `directions.ts`).
+- **Step 6, DPR backing.** Anim cells and the sheet canvas keep a 1:1 backing store with `image-rendering: pixelated` (legacy behaviour): integer-scaled pixel art at a fractional DPR is uneven either way, and a DPR backing would change the layout.
+- **Step 6, assets index.** The adapter passes `assetsRev: 0`, so a rig output opened before the asset index arrives picks up its views on the next reload (any change or resync). Fixed for real when the workspace store bumps `assetsRev` (step 12).

@@ -54,6 +54,9 @@ export class AppPage {
   hexInput(): Locator { return this.colorPopover().locator('input.hex-in'); }
   zoomLabel(): Locator { return this.slot('A').locator('.zoom-label'); }
   gridToggle(): Locator { return this.slot('A').locator('label.toggle', { hasText: 'Grid' }).locator('input'); }
+  animCells(s: 'A' | 'B' = 'A'): Locator { return this.slot(s).locator('canvas.anim-cell'); }
+  animPlayButton(): Locator { return this.slot('A').locator('.anim-viewer .vtoolbar button[title^="Play / pause"]'); }
+  sheetCanvas(s: 'A' | 'B' = 'A'): Locator { return this.slot(s).locator('canvas.sheet-canvas'); }
   frameLabel(): Locator { return this.slot('A').locator('.frames-controls .mono'); }
   swapButton(): Locator { return this.page.locator('#swapB'); }
   closeCompareButton(): Locator { return this.page.locator('#closeB'); }

@@ -11,8 +11,8 @@ import { Timeline } from './ui/timeline.js';
 import { Inspector, reviewDialog } from './ui/inspector.js';
 import { adapt } from './src/viewers/legacyAdapter.ts';
 import { CanvasViewer as CanvasViewerTS, TOOL_KEYS } from './src/viewers/canvas/CanvasViewer.ts';
-import { AnimViewer } from './ui/viewers/anim.js';
-import { SheetViewer } from './ui/viewers/sheet.js';
+import { AnimViewer as AnimViewerTS } from './src/viewers/anim/AnimViewer.ts';
+import { SheetViewer as SheetViewerTS } from './src/viewers/sheet/SheetViewer.ts';
 import { RigViewer } from './ui/viewers/rig.js';
 import { ModelViewer } from './ui/viewers/model.js';
 import { AudioViewer } from './ui/viewers/audio.js';
@@ -23,6 +23,8 @@ import { LayersViewer } from './ui/viewers/layers.js';
 import { cleanupPanel } from './ui/cleanup.js';
 
 const CanvasViewer = adapt(CanvasViewerTS);
+const AnimViewer = adapt(AnimViewerTS);
+const SheetViewer = adapt(SheetViewerTS);
 
 const ACTIVE_REVIEW = new Set(['open', 'in_progress', 'reopened']);
 
