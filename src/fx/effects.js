@@ -158,6 +158,67 @@ function muzzleStar(F, o, st, t, fp) {
   }
   if (W.smoke || sup) drawPuffs(F, st.gas, t, cx, cy, CW * 0.4, { dens: 1, under: sup ? 0 : I });
 }
+/** Pivot x of a diagonal muzzle cell: room behind the muzzle for the star a 3/4-front flash shows. */
+export const diagPivotX = (o) => (o.view === 'front_side' ? Math.round(o.cell[0] * 0.24) : Math.max(2, Math.round(o.cell[0] * 0.08)));
+/**
+ * Third-person 3/4 views (yaw 45 deg). front_side: the muzzle swings toward the camera, so the flame
+ * is foreshortened (x 0.7) and widened, and the flash-hider star at the muzzle shows (squashed on
+ * the yaw axis). back_side: the muzzle points away, the flame tapers into depth and the star is
+ * hidden behind the muzzle. Drawn per view (no scaled side sprite), so pixels stay crisp.
+ */
+function muzzleDiag(F, o, st, t) {
+  const W = WEAPONS[o.variant], { W: CW, H: CH } = F, cy = CH / 2, toward = o.view === 'front_side';
+  const px = diagPivotX(o), sup = o.suppressed, I = (0.08 + 0.92 * (1 - t) ** 1.7) * (sup ? 0.55 : 1);
+  const room = CW - px - 1, K = 0.7;
+  const Lt = Math.min(room, CW * W.len * K * (0.85 + 0.35 * Math.sqrt(t))) * (sup ? 0.3 : 1), Wt = CH * W.wid * (toward ? 1.18 : 0.95) * (0.9 + 0.3 * t) * (sup ? 0.6 : 1);
+  if (W.energy) {
+    glow(F, px + 1, cy, Wt * (toward ? 0.7 : 0.45) * (1 - t * 0.5), I * 1.4);
+    for (let x = 0; x < Lt; x++) { const v = I * (1 - x / Lt) ** (toward ? 0.5 : 0.8); emit(F, px + x, cy, v * 1.3); emit(F, px + x, cy - 1, v * 0.5); emit(F, px + x, cy + 1, v * 0.5); }
+    // the emitter ring seen at 45 deg: an ellipse half as wide as it is tall
+    ring(F, px + 2 + t * Lt * 0.3, cy, Wt * (0.5 + t), 1.2, I * (toward ? 1 : 0.7), { sx: 0.55 });
+    if (W.energy === 'plasma') for (const d of st.drops) { const a = t * 1.2 + d.t0; glow(F, px + d.x * Lt * (0.4 + a), cy + d.y * Wt * a * 0.8, 1.2, I * 0.9); }
+    return;
+  }
+  const kf = Math.round(t * 16);
+  for (let y = 0; y < CH; y++) for (let x = px; x < CW; x++) {
+    const u = (x - px) / Lt;
+    if (u >= 1) continue;
+    // away: the far end shrinks with depth; toward: the near end is fat
+    const prof = Math.pow(Math.sin(Math.PI * Math.pow(u, toward ? 0.45 : 0.6)), 0.8) * (1 - (toward ? 0.2 : 0.5) * u) + (u < 0.14 ? 0.4 : 0), w = Wt * 0.5 * prof;
+    const n = hash3(x >> 1, y >> 1, st.seed + kf), v = Math.abs(y + 0.5 - cy) / Math.max(0.6, w * (0.75 + 0.5 * n));
+    if (v < 1) emit(F, x, y, I * (1 - v) ** 0.7 * (1 - u) ** (toward ? 0.35 : 0.5) * 1.5);
+  }
+  for (let d = 0; d < W.diamonds && !sup; d++) glow(F, px + Lt * (0.3 + d * 0.3), cy, Wt * 0.2 * (toward ? 1.1 : 0.85), I * 0.85);
+  if (!sup) {
+    if (toward) {
+      // the flash-hider star faces the camera at 45 deg: spikes squashed along x (cos 45)
+      const R = Math.min(px - 1, CH * 0.42);
+      glow(F, px, cy, R * 0.45 * (0.8 + 0.4 * t), I * 1.5, { k: 0 });
+      for (const p of st.spikes) { const L = R * p.l * (0.75 + 0.5 * Math.sqrt(t)); streak(F, px, cy, px + Math.cos(p.a) * L * 0.7, cy + Math.sin(p.a) * L, t < 0.5 ? 2 : 1, I * 1.4, I * 0.2); }
+    } else {
+      glow(F, px + 1, cy, Wt * 0.3 * (0.8 + 0.4 * t), I * 1.1, { k: 0 });
+      for (const p of st.prongs) streak(F, px, cy, px + Math.cos(p.a) * Lt * p.l * 0.8, cy + Math.sin(p.a) * Lt * p.l * 0.6, 1, I * 1.1, I * 0.3);
+    }
+  }
+  if (W.brake && !sup) for (const s of [-1, 1]) for (let j = 0; j < 3; j++) streak(F, px + 2 + j * 2, cy, px + 2 + j * 2 - Lt * 0.1, cy + s * CH * (toward ? 0.42 : 0.3) * I, 2, I * 1.1, I * 0.2);
+  if (W.pellets && !sup) drawSparks(F, st.pellets, t * 0.6, px, cy, CW * K, 1.3);
+  if (W.smoke || sup) drawPuffs(F, st.gas, t, px, cy, CW * (sup ? 0.4 : 0.6), { dens: sup ? 0.9 : 1.2, under: sup ? 0 : I });
+}
+/** Default ids of the muzzle sprites a runtime picks per 8-way facing (relative to the camera). */
+export function muzzleViewTable(o) {
+  const id = (view) => ['muzzle', o.variant, view, o.suppressed ? 'sup' : null].filter(Boolean).join('_');
+  return {
+    E: { fx: id('side') }, W: { fx: id('side'), flip_x: true },
+    SE: { fx: id('front_side') }, SW: { fx: id('front_side'), flip_x: true },
+    NE: { fx: id('back_side') }, NW: { fx: id('back_side'), flip_x: true },
+    S: { fx: id('front') }, N: { fx: id('front'), scale: 0.5, behind: true, note: 'muzzle points away: draw behind the gun at 50% (or hide)' },
+    note: 'E = muzzle pointing screen right (side view); S = toward the camera; SE / SW = 3/4 toward the camera (front_side), NE / NW = 3/4 away (back_side); flip_x mirrors the sprite and its pivot',
+  };
+}
+/** Default fp aim variant spread (deg) around the base aim: the muzzle anchor's on-screen motion range (hip fire .. ADS, recoil, sway). */
+export const FP_AIM_STEP = 25;
+const DIAG = new Set(['front_side', 'back_side']);
+export const FP_AIMS = 5;
 function muzzleBuild(o) {
   const r = rnd(o, 11), W = WEAPONS[o.variant], n = W.prongs;
   const base = r() * TAU;
@@ -168,7 +229,7 @@ function muzzleBuild(o) {
     wisps: Array.from({ length: 5 }, () => ({ a: r() * TAU, s: seedOf(o.seed, 13 + Math.floor(r() * 1e6)) })),
     drops: Array.from({ length: 5 }, () => ({ x: range(r, 0.2, 0.9), y: (r() - 0.5) * 1.6, t0: r() * 0.3 })),
     pellets: sparkSet(r, W.pellets || 0, { dir: 0, cone: 8, speed: [1.2, 1.8], life: [0.4, 0.7], delay: 0, g: 0 }),
-    gas: puffSet(r, o.suppressed ? 3 : 5, { dir: o.view === 'side' ? -10 : -90, cone: o.view === 'side' ? 25 : 180, speed: [0.15, 0.35], r0: [1, 2], r1: [3, o.cell[0] * 0.12], life: [0.7, 1], delay: 0.2 }),
+    gas: puffSet(r, o.suppressed ? 3 : 5, { dir: o.view === 'side' || DIAG.has(o.view) ? -10 : -90, cone: o.view === 'side' || DIAG.has(o.view) ? 25 : 180, speed: [0.15, 0.35], r0: [1, 2], r1: [3, o.cell[0] * 0.12], life: [0.7, 1], delay: 0.2 }),
   };
 }
 
@@ -180,7 +241,7 @@ const LOOP = (n) => ({ frames: n, loop: true });
 
 export const FX = {
   muzzle: {
-    about: 'muzzle flash per weapon class; view side (third-person, points +x) | front (into camera) | fp (screen space, centred on the fp muzzle anchor); suppressed:true; smoke after: smoke/muzzle',
+    about: 'muzzle flash per weapon class; view side (third-person, points +x) | front_side (3/4 toward the camera) | back_side (3/4 away) | front (into camera) | fp (screen space, centred on the fp muzzle anchor, aim variants); suppressed:true; smoke after: smoke/muzzle',
     variants: Object.keys(WEAPONS),
     defaults: (o) => {
       const c = WEAPONS[o.variant].cell, cell = o.view === 'fp' ? Math.round(c * 2.4) : o.view === 'front' ? Math.round(c * 0.8) : c;
@@ -188,11 +249,11 @@ export const FX = {
     },
     ramps: (o) => ({ E: [E(o, WEAPONS[o.variant].energy || 'fire'), E(o, 'spark')], M: [M(o.suppressed ? 'smoke_light' : 'smoke')] }),
     build: muzzleBuild,
-    frame: (F, o, st, t) => (o.view === 'side' ? muzzleSide(F, o, st, t) : muzzleStar(F, o, st, t, o.view === 'fp')),
+    frame: (F, o, st, t) => (o.view === 'side' ? muzzleSide(F, o, st, t) : DIAG.has(o.view) ? muzzleDiag(F, o, st, t) : muzzleStar(F, o, st, t, o.view === 'fp')),
     meta: (o) => {
       const W = WEAPONS[o.variant], sup = o.suppressed, k = sup ? 0.3 : 1, col = LIGHT_HEX[W.energy || 'fire'];
       return {
-        pivot: o.view === 'side' ? [1, o.cell[1] / 2] : [o.cell[0] / 2, o.cell[1] / 2], facing: o.view === 'fp' ? 'screen' : o.view === 'front' ? 'camera' : 'camera_axis',
+        pivot: o.view === 'side' ? [1, o.cell[1] / 2] : DIAG.has(o.view) ? [diagPivotX(o), o.cell[1] / 2] : [o.cell[0] / 2, o.cell[1] / 2], facing: o.view === 'fp' ? 'screen' : o.view === 'front' ? 'camera' : 'camera_axis',
         size_m: W.size_m * (sup ? 0.5 : 1), sound: [sup ? 'gunshot_suppressed' : W.sound],
         light: { color: col, radius_m: W.light[1] * k, intensity: [[0, W.light[0] * 4 * k], [33, W.light[0] * 2 * k], [66, W.light[0] * 0.4 * k], [100, 0]] },
         fp: o.view === 'fp' ? { anchor: 'muzzle', frame: FP_FRAME, aim_deg: +((o.aim * 180) / Math.PI).toFixed(2), shake: { amp_px: W.shake * k, freq_hz: 18, decay_ms: 140 }, flash: sup ? null : { color: col, alpha: 0.08 + W.shake * 0.01, ms: 33 }, events: ['fire'] } : null,
@@ -200,8 +261,8 @@ export const FX = {
           { cell: 'particles:spark', count: sup ? [0, 1] : [W.pellets ? 4 : 1, W.pellets ? 8 : 3], velocity: { dir: [0, 0, -1], cone_deg: 12, speed_mps: [20, 40] }, gravity_mps2: 9.81, drag: 2, lifetime_s: [0.05, 0.15], size_over_life: [[0, 1], [1, 0.3]], color_over_life: [[0, '#fff4c0'], [1, '#ff8030']] },
           { cell: 'particles:smoke', count: [1, 2], velocity: { dir: [0, 0.3, -1], cone_deg: 25, speed_mps: [0.5, 1.5] }, gravity_mps2: -0.4, drag: 3, lifetime_s: [0.5, 1.1], size_over_life: [[0, 0.4], [1, 1.6]], color_over_life: [[0, '#8a8a92'], [1, '#5e5e66']], alpha_over_life: [[0, 0.6], [1, 0]] },
         ],
-        views: o.view === 'side' ? { E: 'as is', W: 'flip x', NE: 'scale x 0.7', SE: 'scale x 0.7', NW: 'flip x, scale x 0.7', SW: 'flip x, scale x 0.7', S: 'use the front variant', N: 'hide (muzzle points away) or front at 50%' } : undefined,
-        notes: o.view === 'fp' ? `Draw the cell pivot on the frame's muzzle anchor (fp v2 anchor "muzzle", art_model render "socket_muzzle") for 1-2 frames after a "fire" event; baked for aim ${((o.aim * 180) / Math.PI).toFixed(0)} deg (muzzle -> frame centre)` : undefined,
+        views: o.view === 'side' || DIAG.has(o.view) ? muzzleViewTable(o) : undefined,
+        notes: o.view === 'fp' ? `Draw the cell pivot on the frame's muzzle anchor (fp v2 anchor "muzzle", art_model render "socket_muzzle") for 1-2 frames after a "fire" event; ${o.aims && o.aims.length > 1 ? `aim variants in fp.aims (${o.aims.map((x) => Math.round((x * 180) / Math.PI)).join(', ')} deg): per shot draw the variant nearest the muzzle's screen aim (anchor -> frame centre, or the socket's screen rotation)` : `baked for aim ${((o.aim * 180) / Math.PI).toFixed(0)} deg (muzzle -> frame centre)`}` : DIAG.has(o.view) ? `3/4 ${o.view === 'front_side' ? 'toward' : 'away from'} the camera: pivot on the muzzle; drawn for this view (not a scaled side sprite)` : undefined,
       };
     },
   },
@@ -492,7 +553,7 @@ export const FX = {
         puff(F, (leak ? 3 : W / 2) + sp[0], (leak ? H * 0.6 : H - 3) + sp[1], (1 + a * (leak ? 7 : 9)) * p.s, smooth01(a / 0.1) * (1 - a) ** 1.4 * 1.2, { m: 0, lift: 0.4 });
       }
     },
-    meta: (o) => ({ pivot: o.variant === 'leak' ? [3, Math.round(o.cell[1] * 0.6)] : [o.cell[0] / 2, o.cell[1] - 3], facing: o.variant === 'leak' ? 'camera_axis' : 'camera_up', size_m: 1.5, sound: [], light: null, emitters: [], notes: 'no art_audio recipe yet for a steam hiss: layer a filtered noise sfx' }),
+    meta: (o) => ({ pivot: o.variant === 'leak' ? [3, Math.round(o.cell[1] * 0.6)] : [o.cell[0] / 2, o.cell[1] - 3], facing: o.variant === 'leak' ? 'camera_axis' : 'camera_up', size_m: 1.5, sound: [o.variant === 'leak' ? 'steam_leak' : 'steam_vent', 'steam_hiss'], light: null, emitters: [], notes: `sound: loop ${o.variant === 'leak' ? 'steam_leak' : 'steam_vent'} (art_audio, seamless) while the effect plays; steam_hiss as a one-shot when it starts (a valve opening / a pipe bursting)` }),
   },
   strobe: {
     about: 'alarm strobe glow card loop: red | amber | blue | green; mode pulse (double flash) | beacon (rotating)',

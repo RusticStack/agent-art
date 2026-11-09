@@ -8,9 +8,9 @@ import { encodeGIF } from '../gif.js';
 import { packImages, packSize } from '../sheet.js';
 import { Doc } from '../doc.js';
 import { upscale } from '../space/noise.js';
-import { FX, FX_TYPES, WEAPONS, SURFACES, FP_FRAME, FP_MUZZLE } from './effects.js';
+import { FX, FX_TYPES, WEAPONS, SURFACES, FP_FRAME, FP_MUZZLE, FP_AIMS, FP_AIM_STEP } from './effects.js';
 import { DECAL_KINDS } from './decals.js';
-import { normFx, renderFx, validateFxMeta, presetItems, renderAt, BLENDS, FACINGS, ALL_TYPES } from './render.js';
+import { normFx, renderFx, validateFxMeta, presetItems, renderAt, BLENDS, FACINGS, ALL_TYPES, MUZZLE_VIEWS } from './render.js';
 import { compositeOver, backdrop, hexRGB, texLimit, MAX_TEX } from './raster.js';
 
 import { checkName } from '../util.js';
@@ -52,9 +52,9 @@ function groupOf(a) {
 function fxFiles(group, r) {
   const f = (s) => `${group}/${r.o.id}${s}.png`;
   if (r.decal) return { file: f(''), normal: f('_n'), height: f('_h'), ...(r.decal.emissive ? { emissive: f('_e') } : {}) };
-  return { file: f(''), ...(r.straight ? { straight: f('_straight') } : {}) };
+  return { file: f(''), ...(r.straight ? { straight: f('_straight') } : {}), ...Object.fromEntries((r.variants || []).flatMap((v, i) => (v.base ? [] : [[`aim${i}`, f(`_aim${i}`)], ...(v.straight ? [[`aim${i}_straight`, f(`_aim${i}_straight`)]] : [])]))) };
 }
-const filesOfMeta = (m) => [m.file, m.roblox?.file, ...Object.values(m.maps || {})].filter(Boolean);
+const filesOfMeta = (m) => [m.file, m.roblox?.file, ...Object.values(m.maps || {}), ...(m.fp?.aims || []).flatMap((v) => [v.file, v.straight])].filter(Boolean);
 /** PNG [width, height] from the IHDR chunk (null when the file is not a PNG). */
 function pngSize(f) {
   let fd;
@@ -101,6 +101,12 @@ function writeFx(dir, group, r) {
   }
   meta.file = png(dir, F.file, r.sheet.width, r.sheet.height, r.sheet.data);
   meta.roblox.file = r.straight ? png(dir, F.straight, r.straight.width, r.straight.height, r.straight.data) : meta.file;
+  (r.variants || []).forEach((v, i) => {
+    const e = meta.fp.aims[i];
+    if (v.base) { e.file = meta.file; if (r.straight) e.straight = meta.roblox.file; return; }
+    e.file = png(dir, F[`aim${i}`], v.sheet.width, v.sheet.height, v.sheet.data);
+    if (v.straight) e.straight = png(dir, F[`aim${i}_straight`], v.straight.width, v.straight.height, v.straight.data);
+  });
   return meta;
 }
 function toCanvas(engine, name, r, source) {
@@ -126,7 +132,7 @@ function makeOne(engine, a, dir, group, man, source) {
   if (canvas) toCanvas(engine, canvas, r, source);
   return r;
 }
-const summary = (r) => { const m = r.meta; return { id: m.id, file: m.file, sheet: m.sheet, cell: m.cell, frames: m.frames, fps: m.fps, loop: m.loop, blend: m.blend, ...(m.roblox?.flipbook ? { roblox: m.roblox.flipbook } : {}), ms: r.ms }; };
+const summary = (r) => { const m = r.meta; return { id: m.id, file: m.file, sheet: m.sheet, cell: m.cell, frames: m.frames, fps: m.fps, loop: m.loop, blend: m.blend, ...(m.roblox?.flipbook ? { roblox: m.roblox.flipbook } : {}), ...(m.fp?.aims ? { aims: m.fp.aims.map((v) => v.aim_deg) } : {}), ms: r.ms }; };
 
 // ---------- ops ----------
 function fxMake(a, source) {
@@ -190,7 +196,8 @@ function fxPreview(a) {
     }
     if (args.type === 'muzzle') { args.view ??= 'fp'; if (args.anchor === undefined && args.aim_deg === undefined) args.anchor = at.slice(0, 2), args.frame_size = [d.width, fh]; }
   }
-  const o = normFx({ ...args, palette_rgb: paletteOf(this, a.palette) });
+  // a preview draws one aim (the anchor's): fp aim variants are for make / batch
+  const o = normFx({ ...args, ...(args.type === 'muzzle' && args.view === 'fp' && args.aims === undefined ? { aims: false } : {}), palette_rgb: paletteOf(this, a.palette) });
   // size everything before rendering: a scaled frame stays <= PREVIEW_MAX px (2x over a canvas frame,
   // never below its native size) and the frame strip fits one sheet; the scale steps down to fit
   const asked = scale, cols = Math.min(o.frames, bgImg ? 2 : 8), side = bgImg ? 2 * PREVIEW_MAX : PREVIEW_MAX;
@@ -232,7 +239,7 @@ function fxList(a) {
   return {
     types: Object.fromEntries(FX_TYPES.map((t) => [t, { about: FX[t].about, variants: FX[t].variants }]).concat([['decal', { about: 'decal atlas (albedo + normal + height + emissive), rows = kinds, columns = seeded variants', variants: ['all', ...Object.keys(DECAL_KINDS)] }]])),
     weapon_classes: Object.fromEntries(Object.entries(WEAPONS).map(([k, w]) => [k, { cell: w.cell, sound: w.sound }])), surfaces: Object.fromEntries(Object.entries(SURFACES).map(([k, s]) => [k, { blend: s.blend, decal: s.decal, sound: s.sound }])),
-    muzzle_views: ['side', 'front', 'fp'], fp: { frame: FP_FRAME, default_anchor: FP_MUZZLE }, blends: BLENDS, facings: FACINGS, presets: ['all', 'muzzle', 'impact'], limits: { sheet_px: MAX_TEX, frames: '1..64 (Roblox: 4, 16, 64)', size: '4..256 px per cell' },
+    muzzle_views: MUZZLE_VIEWS, fp: { frame: FP_FRAME, default_anchor: FP_MUZZLE, aims: `default ${FP_AIMS} variants, ${FP_AIM_STEP} deg apart around the base aim (aims: N | [deg..] | false)` }, blends: BLENDS, facings: FACINGS, presets: ['all', 'muzzle', 'impact'], limits: { sheet_px: MAX_TEX, frames: '1..64 (Roblox: 4, 16, 64)', size: '4..256 px per cell' },
     manifest: man ? Object.fromEntries(Object.entries(man.groups).map(([g, m]) => [g, Object.keys(m).length])) : null,
   };
 }

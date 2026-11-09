@@ -1,6 +1,6 @@
 // art_fx pipeline: options -> frames -> flipbook sheet (<= 1024 px, Roblox grid) + engine metadata,
 // and the metadata schema check every export goes through.
-import { FX, FX_TYPES, WEAPONS, SURFACES, FP_FRAME, FP_MUZZLE } from './effects.js';
+import { FX, FX_TYPES, WEAPONS, SURFACES, FP_FRAME, FP_MUZZLE, FP_AIMS, FP_AIM_STEP } from './effects.js';
 import { DECAL_KINDS, decalAtlas } from './decals.js';
 import { fields, resolve, packSheet, lockRamp, colorsOf, seedOf, MAX_TEX, frameDiff } from './raster.js';
 import { RECIPES } from '../audio/sfx.js';
@@ -8,6 +8,8 @@ import { RECIPES } from '../audio/sfx.js';
 export const BLENDS = ['additive', 'alpha', 'premultiplied', 'distortion', 'mixed'];
 export const FACINGS = ['camera', 'camera_up', 'camera_axis', 'velocity', 'surface', 'screen'];
 export const ALL_TYPES = [...FX_TYPES, 'decal'];
+export const MUZZLE_VIEWS = ['side', 'front_side', 'back_side', 'front', 'fp'];
+const DEG = Math.PI / 180;
 const HEX = /^#[0-9a-f]{6}$/i;
 const ID_RE = /^[A-Za-z0-9_\-.]{1,64}$/;
 
@@ -33,11 +35,13 @@ export function normFx(a = {}) {
   if (!T.variants.includes(o.variant)) throw new Error(`${type} variant must be one of ${T.variants.join(', ')} (got ${JSON.stringify(o.variant)})`);
   if (type === 'muzzle') {
     o.view = a.view ?? 'side';
-    if (!['side', 'front', 'fp'].includes(o.view)) throw new Error('muzzle view: side | front | fp');
+    if (!MUZZLE_VIEWS.includes(o.view)) throw new Error(`muzzle view: ${MUZZLE_VIEWS.join(' | ')}`);
     o.suppressed = !!a.suppressed;
     const anchor = a.anchor ?? FP_MUZZLE, frame = a.frame_size ?? FP_FRAME;
     o.aim = a.aim_deg !== undefined ? (Number(a.aim_deg) * Math.PI) / 180 : Math.atan2(frame[1] / 2 - anchor[1], frame[0] / 2 - anchor[0]);
     if (!Number.isFinite(o.aim)) throw new Error('"aim_deg" / "anchor" must be numbers');
+    if (o.view === 'fp') { o.aims = aimList(a.aims, o.aim); if (Array.isArray(a.aims)) o.aim = o.aims[nearestAim(o.aims, o.aim)]; }
+    else if (a.aims !== undefined) throw new Error('"aims" is for view:"fp" (first-person flashes)');
   }
   if (a.color !== undefined) { if (!HEX.test(a.color)) throw new Error('"color" must be #rrggbb'); o.color = a.color; }
   if (type === 'strobe') { o.mode = a.mode ?? 'pulse'; if (!['pulse', 'beacon'].includes(o.mode)) throw new Error('strobe mode: pulse | beacon'); }
@@ -58,6 +62,32 @@ export function normFx(a = {}) {
   o.id = a.name ?? [type, o.variant, o.view, o.suppressed ? 'sup' : null, o.mode && o.mode !== 'pulse' ? o.mode : null].filter(Boolean).join('_');
   if (!ID_RE.test(o.id)) throw new Error('"name" must be 1-64 chars of letters, digits, _ - .');
   return o;
+}
+
+/**
+ * fp aim variants (radians, sorted, the base aim included): aims = N (1..9, spread FP_AIM_STEP deg
+ * around the base aim; default FP_AIMS) | [deg, ...] (explicit screen angles) | false / 1 = one.
+ */
+function aimList(v, base) {
+  if (v === false || v === 1) return [base];
+  const wrap = (r) => Math.atan2(Math.sin(r), Math.cos(r));
+  let list;
+  if (Array.isArray(v)) {
+    if (!v.length || v.length > 9 || !v.every((x) => typeof x === 'number' && Number.isFinite(x))) throw new Error('"aims" must be 1..9 (variants around the base aim) or a list of 1-9 screen angles in degrees');
+    list = v.map((d) => wrap(d * DEG));
+  } else {
+    const n = v === undefined ? FP_AIMS : Math.round(Number(v));
+    if (!(n >= 1 && n <= 9)) throw new Error('"aims" must be 1..9 (variants around the base aim) or a list of 1-9 screen angles in degrees');
+    list = Array.from({ length: n }, (_, k) => (k === (n - 1) / 2 ? base : wrap(base + (k - (n - 1) / 2) * FP_AIM_STEP * DEG)));
+  }
+  const seen = new Set();
+  return list.filter((r) => { const k = Math.round(r / DEG * 100); if (seen.has(k)) return false; seen.add(k); return true; }).sort((x, y) => x - y);
+}
+/** Index of the aim variant nearest a screen angle (radians). */
+export function nearestAim(aims, r) {
+  let best = 0, bd = Infinity;
+  aims.forEach((a, i) => { const d = Math.abs(Math.atan2(Math.sin(r - a), Math.cos(r - a))); if (d < bd - 1e-9) { bd = d; best = i; } });
+  return best;
 }
 
 /** Time of frame k: loops sample [0, 1) (frame N would be frame 0), one-shots [0, 1]. */
@@ -82,13 +112,21 @@ export function renderFx(o) {
   const cache = {}, frames = [];
   for (let k = 0; k < o.frames; k++) frames.push(renderAt(o, frameTime(o, k), k, cache));
   const sheet = packSheet(frames, o.cell[0], o.cell[1]);
-  let straight = null;
-  if (o.blend === 'premultiplied') {
-    // Roblox / straight-alpha fallback: glow pixels (alpha 0, colour set) become opaque
-    straight = { ...sheet, data: sheet.data.slice() };
-    for (let i = 0; i < straight.data.length; i += 4) if (!straight.data[i + 3] && (straight.data[i] | straight.data[i + 1] | straight.data[i + 2])) straight.data[i + 3] = 255;
+  const straight = straightOf(o, sheet);
+  // fp aim variants: the base aim is the main sheet; every other aim is drawn again (same seed,
+  // same particles), never a rotated bitmap
+  const variants = [];
+  if (o.aims && o.aims.length > 1) {
+    for (const aim of o.aims) {
+      if (aim === o.aim) { variants.push({ aim, base: true }); continue; }
+      const ov = { ...o, aim }, c2 = {}, fr = [];
+      for (let k = 0; k < o.frames; k++) fr.push(renderAt(ov, frameTime(o, k), k, c2));
+      const sh = packSheet(fr, o.cell[0], o.cell[1]);
+      variants.push({ aim, sheet: sh, straight: straightOf(o, sh), frames: fr });
+    }
   }
   const T = FX[o.type], m = T.meta(o), dur = Math.round((o.frames / o.fps) * 1000);
+  if (variants.length) m.fp = { ...m.fp, aims: variants.map((v) => ({ aim_deg: +(v.aim / DEG).toFixed(2), file: null, ...(o.blend === 'premultiplied' ? { straight: null } : {}) })), pick: 'nearest aim_deg to the muzzle\'s screen aim (deg, atan2 of anchor -> frame centre; or the socket rotation)' };
   const meta = {
     id: o.id, type: o.type, variant: o.variant, ...(o.view ? { view: o.view } : {}), ...(o.type === 'muzzle' ? { suppressed: o.suppressed } : {}), ...(o.mode ? { mode: o.mode } : {}),
     seed: o.seed, file: null, sheet: [sheet.width, sheet.height], cell: o.cell, grid: [sheet.grid.cols, sheet.grid.rows], frames: o.frames, fps: o.fps, loop: o.loop, duration_ms: dur, blend: o.blend,
@@ -102,7 +140,14 @@ export function renderFx(o) {
     palette_locked: !!o.palette && m.palette_locked !== false, colors: colorsOf([sheet.data]).length,
     ...(m.notes ? { notes: m.notes } : {}),
   };
-  return { o, frames, sheet, straight, meta };
+  return { o, frames, sheet, straight, meta, ...(variants.length ? { variants } : {}) };
+}
+/** Roblox / straight-alpha fallback of a premultiplied sheet: glow pixels (alpha 0, colour set) become opaque. */
+function straightOf(o, sheet) {
+  if (o.blend !== 'premultiplied') return null;
+  const s = { ...sheet, data: sheet.data.slice() };
+  for (let i = 0; i < s.data.length; i += 4) if (!s.data[i + 3] && (s.data[i] | s.data[i + 1] | s.data[i + 2])) s.data[i + 3] = 255;
+  return s;
 }
 
 function renderDecals(o) {
@@ -157,6 +202,8 @@ export function validateFxMeta(m) {
   }
   if (m.light !== null) req(m.light && HEX.test(m.light.color) && isNum(m.light.radius_m) && m.light.radius_m > 0 && curve(m.light.intensity, (v) => isNum(v) && v >= 0, Infinity), 'light {color, radius_m, intensity [[ms, v]]} | null');
   if (m.fp !== null) req(m.fp && (!m.fp.shake || (isNum(m.fp.shake.amp_px) && isNum(m.fp.shake.decay_ms))) && (!m.fp.flash || (HEX.test(m.fp.flash.color) && isNum(m.fp.flash.alpha) && isNum(m.fp.flash.ms))), 'fp {shake, flash} | null');
+  if (m.fp?.aims !== undefined) req(Array.isArray(m.fp.aims) && m.fp.aims.length >= 2 && m.fp.aims.every((v, i) => isNum(v.aim_deg) && (v.file === null || (typeof v.file === 'string' && v.file.endsWith('.png'))) && (i === 0 || v.aim_deg > m.fp.aims[i - 1].aim_deg)) && (m.fp.aims.every((v) => v.file === null) || m.fp.aims.some((v) => v.file === m.file)) && m.fp.aims.some((v) => Math.abs(v.aim_deg - m.fp.aim_deg) < 0.01), 'fp.aims [{aim_deg (ascending), file (null until written)}] including the base sheet');
+  if (m.views !== undefined) req(m.views && typeof m.views === 'object' && ['E', 'W', 'SE', 'SW', 'NE', 'NW', 'S', 'N'].every((k) => m.views[k] && typeof m.views[k].fx === 'string'), 'views {E, W, SE, SW, NE, NW, S, N: {fx, flip_x?}}');
   req(m.roblox && 'flipbook' in m.roblox && isNum(m.roblox.light_emission), 'roblox');
   if (m.type === 'decal') req(m.maps && typeof m.maps.albedo === 'string' && typeof m.maps.normal === 'string' && typeof m.maps.height === 'string' && m.cells && typeof m.cells === 'object', 'decal maps + cells');
   return e;
@@ -177,7 +224,13 @@ export function loopSeam(frames) {
 /** Every effect: all muzzle classes x views (+ suppressed side), every other type x variant, decal atlas, particles. */
 export function presetItems(name = 'all') {
   const items = [];
-  if (name === 'all' || name === 'muzzle') for (const c of Object.keys(WEAPONS)) { for (const view of ['side', 'front', 'fp']) items.push({ type: 'muzzle', variant: c, view }); if (!['launcher', 'energy', 'plasma'].includes(c)) items.push({ type: 'muzzle', variant: c, view: 'side', suppressed: true }); }
+  if (name === 'all' || name === 'muzzle') for (const c of Object.keys(WEAPONS)) {
+    for (const view of ['side', 'front', 'fp']) items.push({ type: 'muzzle', variant: c, view });
+    if (!['launcher', 'energy', 'plasma'].includes(c)) items.push({ type: 'muzzle', variant: c, view: 'side', suppressed: true });
+    // 0.9.1: every 8-way facing has its own sprite (3/4 views, suppressed front / 3/4)
+    for (const view of ['front_side', 'back_side']) items.push({ type: 'muzzle', variant: c, view });
+    if (!['launcher', 'energy', 'plasma'].includes(c)) for (const view of ['front_side', 'back_side', 'front']) items.push({ type: 'muzzle', variant: c, view, suppressed: true });
+  }
   if (name === 'muzzle') return items;
   if (name === 'impact') return Object.keys(SURFACES).map((s) => ({ type: 'impact', variant: s }));
   if (name !== 'all') throw new Error('preset: all | muzzle | impact');

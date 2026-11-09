@@ -72,6 +72,7 @@ FPS / SCI-FI SFX (firearms, weapon_handling, scifi, movement groups above):
   Firearms gunshot_rifle|pistol|marksman|shotgun|smg|lmg|suppressed layer a transient crack, body, thump, sub, mechanical click and an environment tail: vars.environment "outdoor" (slapback; marksman = long slapback) | "indoor" (room) | "canyon" (long repeating echoes). vars.wet scales the tail, intensity the crack/drive.
   Handling: mag_out mag_in bolt_rack dry_fire shotgun_pump casing_drop (vars.surface "metal"|"concrete"). footstep vars.surface "metal"|"dirt"|"concrete"|"snow"|"grate".
   Sci-fi: laser_bolt plasma_shot shield_hit glitch_tear teleport_swell servo drone_rotor hologram_ui alarm_klaxon radio_squelch_on radio_squelch_off bullet_whiz ricochet. drone_rotor and alarm_klaxon are loops by default (loop:false = one-shot).
+  Steam (art_fx steam): steam_hiss (one-shot burst: a valve opening, a pipe bursting), steam_vent (steady roar, loop), steam_leak (thin sputtering jet, loop); the loops are seamless by default.
   Example: {action:"sfx", recipe:"gunshot_rifle", variants:4, vars:{environment:"canyon", intensity:0.8}}.
 SFX OPTIONS (recipes and custom layers alike):
   fx:[{type:"dc"|"eq"|"comp"|"drive"|"delay"|...}] runs on the mixed layers (also "dc", ["dc","comp"] or {comp:{ratio:4}}). reverb:{preset:"room"|"studio"|"hall"|"plate"|"crypt"|"cathedral", wet:0.3} | "hall" | false. target:-3 or vars.target = peak dBFS. tail:s = padding for delay/reverb tails.
