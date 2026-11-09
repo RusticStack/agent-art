@@ -22,6 +22,8 @@ export class AppPage {
   browserPane(): Locator { return this.page.locator('#browser'); }
   browserRow(name: string, kind = 'canvas'): Locator { return this.page.locator(`#browser .row[data-id="${kind}:${name}"]`).first(); }
   browserSection(key: string): Locator { return this.page.locator(`#browser .section[data-key="${key}"]`); }
+  /** The first row under the Pinned header (rows are siblings of the section header in the legacy tree). */
+  pinnedRow(id: string): Locator { return this.page.locator(`#browser .section[data-key="pinned"] + .row[data-id="${id}"]`); }
   filterInput(): Locator { return this.page.locator('#browser input.search'); }
   async openAsset(name: string, kind = 'canvas') {
     const row = this.browserRow(name, kind);
@@ -61,6 +63,19 @@ export class AppPage {
   audioWave(s: 'A' | 'B' = 'A'): Locator { return this.slot(s).locator('canvas.wave'); }
   audioReport(s: 'A' | 'B' = 'A'): Locator { return this.slot(s).locator('.audio-report'); }
   graph(): Locator { return this.slot('A').locator('.graph-viewer'); }
+  graphFlow(): Locator { return this.graph().locator('.svelte-flow'); }
+  graphCards(): Locator { return this.graph().locator('.svelte-flow__node'); }
+  graphCard(id: string): Locator { return this.graph().locator(`.svelte-flow__node[data-id="${id}"]`); }
+  graphCounts(): Locator { return this.graph().locator('.vtoolbar .mono.muted'); }
+  graphViewSelect(): Locator { return this.graph().locator('.vtoolbar select[aria-label="View"]'); }
+  graphLayoutSelect(): Locator { return this.graph().locator('.vtoolbar select[title="Layout"]'); }
+  /** window.agentArt.debug.viewer(slot): the slot viewer's debugInfo(), or null when the hook is absent. */
+  async viewerDebug<T>(s: 'A' | 'B' = 'A'): Promise<T | null> {
+    return this.page.evaluate((slot) => {
+      const w = window as unknown as { agentArt?: { debug?: { viewer?(x: string): unknown } } };
+      return (w.agentArt?.debug?.viewer?.(slot) ?? null) as T | null;
+    }, s);
+  }
   modelViewer(): Locator { return this.slot('A').locator('.viewer.model-viewer'); }
   modelCanvas(): Locator { return this.slot('A').locator('.model-stage canvas'); }
   modelFallback(): Locator { return this.slot('A').locator('.model-stage img.fallback'); }
@@ -92,8 +107,11 @@ export class AppPage {
   reviewCards(): Locator { return this.page.locator('#inspector .review-card'); }
   // ---- dialogs, toasts ----
   dialog(): Locator { return this.page.locator('.modal:not(#help):not([hidden])').last(); }
-  helpDialog(): Locator { return this.page.locator('#help'); }
-  toasts(): Locator { return this.page.locator('#toasts .toast'); }
+  helpDialog(): Locator { return this.page.getByRole('dialog', { name: 'Keyboard shortcuts' }); }
+  /** The toast stack (role=status, "Notifications") and its toasts; errors are role=alert. */
+  toastRegion(): Locator { return this.page.getByRole('status', { name: 'Notifications' }); }
+  toasts(): Locator { return this.toastRegion().locator('.toast'); }
+  errorToasts(): Locator { return this.toastRegion().getByRole('alert'); }
   async openCleanup() { await this.topButton('cleanup').click(); await expect(this.dialog()).toBeVisible(); }
   async press(key: string) { await this.page.keyboard.press(key); }
   /** Parts that differ between runs (clock times, durations, the temp workspace path): masked in shots. */

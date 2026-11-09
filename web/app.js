@@ -12,15 +12,6 @@ import { Timeline } from './ui/timeline.js';
 import { Inspector, reviewDialog } from './ui/inspector.js';
 import { adapt } from './src/viewers/legacyAdapter.ts';
 import { CanvasViewer as CanvasViewerTS, TOOL_KEYS } from './src/viewers/canvas/CanvasViewer.ts';
-import { AnimViewer as AnimViewerTS } from './src/viewers/anim/AnimViewer.ts';
-import { SheetViewer as SheetViewerTS } from './src/viewers/sheet/SheetViewer.ts';
-import { RigViewer as RigViewerTS } from './src/viewers/rig/RigViewer.ts';
-import { ModelViewer as ModelViewerTS } from './src/viewers/model/ModelViewer.ts';
-import { AudioViewer as AudioViewerTS } from './src/viewers/audio/AudioViewer.ts';
-import { ProjectViewer as ProjectViewerTS } from './src/viewers/project/ProjectViewer.ts';
-import { ExportViewer as ExportViewerTS } from './src/viewers/export/ExportViewer.ts';
-import { GraphViewer as GraphViewerTS } from './src/viewers/graph/GraphViewer.ts';
-import { LayersViewer as LayersViewerTS } from './src/viewers/layers/LayersViewer.ts';
 import { cleanupPanel } from './ui/cleanup.js';
 import { assets } from './src/state/assets.svelte.ts';
 import { uiState } from './src/state/uiState.svelte.ts';
@@ -31,23 +22,50 @@ import { workspace } from './src/state/workspace.svelte.ts';
 import { connection } from './src/state/connection.svelte.ts';
 import * as live from './src/state/live.svelte.ts';
 import { watch } from './src/state/legacyWatch.svelte.ts';
+import { toasts } from './src/state/toasts.svelte.ts';
+import { dialogs } from './src/state/dialogs.svelte.ts';
+import { mount } from 'svelte';
+import Toasts from './src/components/ui/Toasts.svelte';
 
 const CanvasViewer = adapt(CanvasViewerTS);
-const AnimViewer = adapt(AnimViewerTS);
-const SheetViewer = adapt(SheetViewerTS);
-const RigViewer = adapt(RigViewerTS);
-const LayersViewer = adapt(LayersViewerTS);
-const ModelViewer = adapt(ModelViewerTS);
-const AudioViewer = adapt(AudioViewerTS);
-const ProjectViewer = adapt(ProjectViewerTS);
-const ExportViewer = adapt(ExportViewerTS);
-const GraphViewer = adapt(GraphViewerTS);
+// Every viewer except the canvas editor is its own lazy chunk (plan 7.1). One adapted class per kind,
+// so the instanceof reuse check in open() keeps working.
+const LOADERS = {
+  anim: () => import('./src/viewers/anim/AnimViewer.ts').then((m) => m.AnimViewer),
+  sheet: () => import('./src/viewers/sheet/SheetViewer.ts').then((m) => m.SheetViewer),
+  rig: () => import('./src/viewers/rig/RigViewer.ts').then((m) => m.RigViewer),
+  model: () => import('./src/viewers/model/ModelViewer.ts').then((m) => m.ModelViewer),
+  audio: () => import('./src/viewers/audio/AudioViewer.ts').then((m) => m.AudioViewer),
+  project: () => import('./src/viewers/project/ProjectViewer.ts').then((m) => m.ProjectViewer),
+  export: () => import('./src/viewers/export/ExportViewer.ts').then((m) => m.ExportViewer),
+  graph: () => import('./src/viewers/graph/GraphViewer.ts').then((m) => m.GraphViewer),
+  layers: () => import('./src/viewers/layers/LayersViewer.ts').then((m) => m.LayersViewer),
+};
+const adapted = { canvas: Promise.resolve(CanvasViewer) };
+function loadViewerClass(kind) {
+  if (!adapted[kind]) {
+    adapted[kind] = LOADERS[kind]().then((C) => adapt(C));
+    adapted[kind].catch(() => { delete adapted[kind]; });
+  }
+  return adapted[kind];
+}
+
+/** A dialog other than Help is open (K2, E10): the Svelte dialogs first, legacy .modal DOM until step 17. */
+const dialogOpen = () => dialogs.blocking || !!document.querySelector('.modal:not(#help)');
 
 class App {
   constructor() {
     this.api = api;
+    /** e2e / devtools: window.agentArt.debug.viewer('A') -> the slot viewer's debugInfo(). */
+    this.debug = { viewer: (slot) => this.slots[slot]?.viewer?.inner?.debugInfo?.() ?? null };
     workspace.navigator = (t, o) => { void this.open(t, o); };
-    workspace.dialogOpen = () => !!document.querySelector('.modal:not(#help)');
+    workspace.dialogOpen = dialogOpen;
+    mount(Toasts, { target: document.body });
+    // DialogHost (Bits UI dialogs) is a lazy chunk, mounted when the first dialog opens.
+    let dialogHost = null;
+    watch(() => dialogs.stack.length, (n) => {
+      if (n && !dialogHost) dialogHost = import('./src/components/dialogs/DialogHost.svelte').then((m) => mount(m.default, { target: document.body }));
+    });
     this.slots = { A: { host: $('slotA'), viewer: null, target: null, tabs: $('tabsA'), title: $('titleA') }, B: { host: $('slotB'), viewer: null, target: null, tabs: $('tabsB'), title: $('titleB') } };
     this.browser = new Browser($('browser'), this);
     this.timeline = new Timeline($('timelinePane'), this);
@@ -55,7 +73,7 @@ class App {
     this.setupLayout();
     this.setupTopbar();
     this.setupKeys();
-    onToast((text, kind) => this.toast(text, kind));
+    onToast((text, kind) => toasts.push(text, kind));
   }
   // ---------- state lives in the stores (web/src/state); these getters keep the legacy surface ----------
   get assets() { return assets.index; }
@@ -127,16 +145,16 @@ class App {
 
   // ---------- viewers ----------
   viewerClass(t) {
-    if (t.kind === 'canvas') return { edit: CanvasViewer, anim: AnimViewer, sheet: SheetViewer, layers: LayersViewer, rig: RigViewer }[t.snap ? 'edit' : t.view || 'edit'] || CanvasViewer;
-    if (t.kind === 'rig') return t.view === 'layers' ? LayersViewer : RigViewer;
-    if (t.kind === 'model') return ModelViewer;
-    if (t.kind === 'audio') return AudioViewer;
-    if (t.kind === 'project') return ProjectViewer;
-    if (t.kind === 'graph') return GraphViewer;
+    if (t.kind === 'canvas') return { edit: 'canvas', anim: 'anim', sheet: 'sheet', layers: 'layers', rig: 'rig' }[t.snap ? 'edit' : t.view || 'edit'] || 'canvas';
+    if (t.kind === 'rig') return t.view === 'layers' ? 'layers' : 'rig';
+    if (t.kind === 'model') return 'model';
+    if (t.kind === 'audio') return 'audio';
+    if (t.kind === 'project') return 'project';
+    if (t.kind === 'graph') return 'graph';
     if (t.kind === 'export') {
-      if (/\.glb$/i.test(t.name)) return ModelViewer;
-      if (/\.(wav|mp3|ogg|opus)$/i.test(t.name)) return AudioViewer;
-      return ExportViewer;
+      if (/\.glb$/i.test(t.name)) return 'model';
+      if (/\.(wav|mp3|ogg|opus)$/i.test(t.name)) return 'audio';
+      return 'export';
     }
     return null;
   }
@@ -158,8 +176,12 @@ class App {
     if (!target) return;
     if (slot === 'B') this.setCompare(true);
     const s = this.slots[slot];
-    const Cls = this.viewerClass(target);
-    if (!Cls) return;
+    const kind = this.viewerClass(target);
+    if (!kind) return;
+    const seq = (s.seq = (s.seq || 0) + 1);
+    let Cls;
+    try { Cls = await loadViewerClass(kind); } catch (e) { toast(`${target.name || target.kind}: could not load the viewer (${e.message})`, 'error'); return; }
+    if (seq !== s.seq) return; // a newer open() for this slot won
     if (!(s.viewer instanceof Cls)) {
       s.viewer?.destroy();
       s.host.innerHTML = '';
@@ -290,12 +312,7 @@ class App {
   }
 
   // ---------- chrome ----------
-  toast(text, kind = 'info') {
-    const t = el(`div.toast.${kind}`, { text });
-    $('toasts').append(t);
-    setTimeout(() => t.classList.add('out'), kind === 'error' ? 6000 : 3500);
-    setTimeout(() => t.remove(), kind === 'error' ? 6600 : 4100);
-  }
+  toast(text, kind = 'info') { toasts.push(text, kind); }
   setupTopbar() {
     const fs = $('followMode');
     fs.value = this.followMode;
@@ -311,7 +328,6 @@ class App {
     $('graphBtn').onclick = () => this.open({ kind: 'graph' });
     $('cleanupBtn').onclick = () => cleanupPanel(this);
     $('helpBtn').onclick = () => this.toggleHelp();
-    $('help').onclick = (e) => { if (e.target.id === 'help') this.toggleHelp(); };
     $('toggleBrowser').onclick = () => this.togglePane('browser');
     $('toggleSide').onclick = () => this.togglePane('side');
   }
@@ -322,10 +338,7 @@ class App {
         el('div.review-list', {}, ...(list.length ? list.map((r) => { const c = this.inspector.reviewCard(r); c.addEventListener('click', (e) => { if (e.target.closest('button,a')) dlg.remove(); }); return el('div', {}, el('div.mono.small.muted', { text: r.asset }), c); }) : [el('div.muted', { text: 'No review notes yet. Press M, then drag a box (or click a pin) on what needs fixing.' })]))));
     document.body.append(dlg);
   }
-  toggleHelp() {
-    const h = $('help');
-    h.hidden = !h.hidden;
-  }
+  toggleHelp() { dialogs.toggleHelp(); }
   togglePane(which) {
     const app = $('app');
     app.classList.toggle(`no-${which}`);
@@ -374,13 +387,14 @@ class App {
     window.addEventListener('keydown', (e) => {
       const tag = e.target.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) { if (e.key === 'Escape') e.target.blur(); return; }
-      if (document.querySelector('.modal:not(#help)')) { if (e.key === 'Escape') document.querySelector('.modal:not(#help)').remove(); return; }
+      // K2: a Svelte (Bits) dialog closes itself on Esc; only a legacy .modal is removed here.
+      if (dialogOpen()) { if (e.key === 'Escape' && !dialogs.blocking) document.querySelector('.modal:not(#help)')?.remove(); return; }
       const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       const v = this.slots.A.viewer;
       if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); v?.undo?.(e.shiftKey); return; }
       if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); v?.undo?.(true); return; }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (e.key === 'Escape') { if (this.reviewMode) this.setReviewMode(false); else if (!$('help').hidden) this.toggleHelp(); else if (this.comparing) this.setCompare(false); else if (this.current?.snap) this.open({ kind: this.current.kind, name: this.current.name }); return; }
+      if (e.key === 'Escape') { if (this.reviewMode) this.setReviewMode(false); else if (dialogs.helpOpen) this.toggleHelp(); else if (this.comparing) this.setCompare(false); else if (this.current?.snap) this.open({ kind: this.current.kind, name: this.current.name }); return; }
       if (e.key === ' ' && document.activeElement?.classList.contains('pixel-canvas')) return; // space-drag pans
       if (v?.keydown?.(e, e.key === ' ' ? ' ' : k)) { e.preventDefault(); return; }
       if (e.shiftKey && k === 'g') { this.open({ kind: 'graph' }); return; }

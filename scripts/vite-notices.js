@@ -39,9 +39,12 @@ export function noticesFor(moduleIds, readFile, listDir = () => []) {
     const pkg = JSON.parse(pj);
     const name = pkg.name || root.split('/node_modules/').pop();
     if (FORBIDDEN.includes(name)) throw new Error(`[notices] ${name} must not be bundled`);
-    const ids = licenceIds(pkg.license ?? pkg.licenses?.[0]);
-    if (!ids.length || !ids.some((x) => ALLOWED.includes(x))) throw new Error(`[notices] ${name}@${pkg.version}: licence "${ids.join(' ') || 'none'}" is not in the allow-list (${ALLOWED.join(', ')})`);
     const file = listDir(root).find((f) => /^(licen[cs]e|copying)(\.|$)/i.test(f));
+    // No licence field in package.json (svelte-toolbelt, pulled in by bits-ui): take the id from the
+    // first line of the shipped licence file ("MIT License", "ISC License").
+    let ids = licenceIds(pkg.license ?? pkg.licenses?.[0]);
+    if (!ids.length && file) { const m = /^\s*(MIT|ISC) License\b/.exec(readFile(root + '/' + file) || ''); if (m) ids = [m[1]]; }
+    if (!ids.length || !ids.some((x) => ALLOWED.includes(x))) throw new Error(`[notices] ${name}@${pkg.version}: licence "${ids.join(' ') || 'none'}" is not in the allow-list (${ALLOWED.join(', ')})`);
     const text = (file && readFile(root + '/' + file)) || `${ids.join(' OR ')} licence (no licence file shipped in the package).`;
     const key = `${name}@${pkg.version}`;
     if (!out.has(key)) out.set(key, { name, version: pkg.version, licence: ids.join(' OR '), text: text.trim() });

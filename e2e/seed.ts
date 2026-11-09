@@ -30,6 +30,10 @@ export const SEED: { tool: string; args: Record<string, unknown>; fails?: boolea
   { tool: 'art_rig', args: { action: 'animate', name: 'hero', preset: 'walk', view: 'front' } },
   { tool: 'art_rig', args: { action: 'animate', name: 'hero', preset: 'walk', view: 'back' } },
   { tool: 'art_model', args: { action: 'create', name: 'rifle', template: 'fp_rifle' } },
+  // a second model with materials-v2 maps standing on the ground (3D shading modes, plan 5.7b)
+  { tool: 'art_create_canvas', args: { name: 'crate_tex', width: 16, height: 16 } },
+  { tool: 'art_draw', args: { canvas: 'crate_tex', commands: [box(0, 0, 16, 16, '#7a5a3a'), box(2, 2, 12, 12, '#a07850')] } },
+  { tool: 'art_model', args: { action: 'create', name: 'crate_v2', parts: [{ type: 'box', w: 64, h: 48, d: 64, texture: 'crate_tex', material: 'painted_hull', bevel: 2 }] } },
   { tool: 'art_audio', args: { action: 'sfx', name: 'rifle_shot', recipe: 'click', seed: 1 } },
   { tool: 'art_export', args: { canvas: 'helmet_front', path: 'helmet_front.png' } },
   { tool: 'art_animation', args: { canvas: 'spark', action: 'export', format: 'spritesheet' } },

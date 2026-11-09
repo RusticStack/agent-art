@@ -70,7 +70,7 @@ export class CanvasRenderer implements GraphRenderer {
     this.selected = d.selected;
     if (this.hover && !this.positions.has(this.hover.id)) { this.hover = null; this.tip.hidden = true; }
     this.canvas.setAttribute('aria-label', `Asset graph: ${d.nodes.length} nodes, ${d.edges.length} edges`);
-    this.alpha = d.layout === 'force' ? 1 : 0;
+    this.alpha = (d.simulate ?? d.layout === 'force') ? 1 : 0;
     this.ticks = 0;
     this.invalidate();
     this.notifySettled();

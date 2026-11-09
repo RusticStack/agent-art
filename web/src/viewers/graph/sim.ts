@@ -17,8 +17,9 @@ export const COOLING = 0.985;
 /** Ticks per layout run before the simulation is stopped (a drag re-heats it). */
 export const MAX_TICKS = 300;
 
-export type GraphLayout = 'force' | 'layered';
-export const parseLayout = (v: unknown): GraphLayout => (v === 'layered' ? 'layered' : 'force');
+export type GraphLayout = 'force' | 'layered' | 'hierarchy';
+/** Stored layout choice; an unknown value falls back to 'force'. */
+export const parseLayout = (v: unknown): GraphLayout => (v === 'layered' || v === 'hierarchy' ? v : 'force');
 
 /** A graph node with its simulation state. `pinned` = dragged by the user (legacy `fixed`). */
 export interface SimNode extends GraphNode {
@@ -136,6 +137,20 @@ export function stepForce(ns: readonly SimNode[], edges: readonly VisEdge[], alp
     n.x += Math.max(-30, Math.min(30, n.vx)); n.y += Math.max(-30, Math.min(30, n.vy));
   }
   return alpha * COOLING;
+}
+
+/**
+ * Runs the force layout to completion off-screen (at most MAX_TICKS ticks, yielding to the event loop every
+ * `chunk` ticks). Resolves false when `alive()` turned false meanwhile (a newer run replaced this one).
+ */
+export async function runForce(ns: readonly SimNode[], edges: readonly VisEdge[], alive: () => boolean = () => true, chunk = 50, yieldFn: () => Promise<void> = () => new Promise((r) => setTimeout(r, 0))): Promise<boolean> {
+  let alpha = 1;
+  for (let t = 0; t < MAX_TICKS && alpha >= SETTLE_ALPHA; t++) {
+    if (t && t % chunk === 0) { await yieldFn(); if (!alive()) return false; }
+    alpha = stepForce(ns, edges, alpha);
+  }
+  for (const n of ns) n.vx = n.vy = 0;
+  return alive();
 }
 
 /** Columns by kind order, rows sorted by id. Mutates positions, zeroes velocities. */

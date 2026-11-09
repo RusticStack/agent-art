@@ -21,3 +21,16 @@ test('page loads live with the seeded assets and a canvas open', async ({ page, 
   await expect.poll(() => page.evaluate(() => location.hash)).not.toBe('');
   await expect(app.workspacePath()).toHaveText(readState().home);
 });
+
+test('a failed op shows an error toast with role=alert', async ({ page, app }) => {
+  await app.goto('spark');
+  await page.evaluate(() => {
+    const w = window as unknown as { agentArt: { api(op: string, args: object): Promise<unknown> } };
+    void w.agentArt.api('undo', { canvas: 'no_such_canvas_e2e' }).catch(() => {});
+  });
+  const alert = app.errorToasts().filter({ hasText: /^undo: / });
+  await expect(alert).toBeVisible();
+  await expect(app.toastRegion()).toHaveAttribute('aria-live', 'polite');
+  await alert.getByRole('button', { name: 'Dismiss' }).click();
+  await expect(alert).toHaveCount(0);
+});

@@ -30,6 +30,7 @@ const status = () => el.querySelector('.vstatus span')!.textContent;
 const retry = () => [...el.querySelectorAll<HTMLButtonElement>('.vstatus button')].find((b) => b.textContent === 'Retry')!;
 
 beforeEach(() => {
+  localStorage.clear();
   load.mockReset();
   vi.mocked(resetThree).mockReset();
   calls = fakeFetch({ '/api/model/rifle/info': { json: { materials: ['overlay:rifle_tex'] } } }).calls;
@@ -41,14 +42,15 @@ describe('ModelViewer without three / WebGL', () => {
     load.mockRejectedValue(new Error('offline'));
     await mount({ kind: 'model', name: 'rifle' });
     expect(el.querySelector('.viewer.model-viewer .vtoolbar')).not.toBeNull();
-    expect(el.querySelectorAll('.vtoolbar .group').length).toBe(4);
+    expect(el.querySelectorAll('.vtoolbar:not(.shading) .group').length).toBe(4);
+    expect(el.querySelector('.vtoolbar.shading [role=radiogroup]')!.querySelectorAll('[role=radio]').length).toBe(4);
     expect(el.querySelector('.model-stage .model-labels')).not.toBeNull();
     const sel = el.querySelectorAll('select');
     expect(sel[0].options.length).toBe(14);
     expect(sel[0].value).toBe('lit');
-    const labels = [...el.querySelectorAll('label.toggle')].map((l) => l.textContent!.trim());
+    const labels = [...el.querySelectorAll('.vtoolbar:not(.shading) label.toggle')].map((l) => l.textContent!.trim());
     expect(labels).toEqual(['Wireframe', 'Clusters', 'Normals', 'UV checker', 'Sockets', 'Pivots', 'Grid', 'Loop']);
-    const checked = [...el.querySelectorAll<HTMLInputElement>('label.toggle input')].map((i) => i.checked);
+    const checked = [...el.querySelectorAll<HTMLInputElement>('.vtoolbar:not(.shading) label.toggle input')].map((i) => i.checked);
     expect(checked).toEqual([false, false, false, false, true, false, true, true]);
     const a = el.querySelector<HTMLAnchorElement>('a.btn')!;
     expect(a.getAttribute('href')).toBe('/api/model/rifle/glb?download=1');

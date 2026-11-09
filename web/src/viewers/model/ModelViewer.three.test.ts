@@ -70,6 +70,9 @@ async function mount(target: Target = { kind: 'model', name: 'rifle' }): Promise
 }
 
 beforeEach(() => {
+  // the parity tests run in the legacy look (Solid › Studio): plain GLB, legacy lights
+  localStorage.clear();
+  localStorage.setItem('agent-art:modelView', JSON.stringify({ mode: 'solid', solidLight: 'studio' }));
   built = [];
   reviews.length = 0;
   vi.mocked(loadThree).mockResolvedValue(bundle);
@@ -93,7 +96,7 @@ describe('ModelViewer with three', () => {
     expect(r.setPixelRatio).toHaveBeenCalled();
     expect(r.domElement.getAttribute('aria-label')).toBe('3D view of rifle');
     expect(r.domElement.tabIndex).toBe(0);
-    expect(status()).toBe('rifle · 12 tris · 24 verts · 1 meshes · 1 materials · 3 nodes · 1 sockets · 1 clips · size 1.00×2.00×3.00 u · 2.0 KB · ⚠ thin wall');
+    expect(status()).toBe('rifle · 12 tris · 24 verts · 1 meshes · 1 materials · 3 nodes · 1 sockets · 1 clips · size 1.00×2.00×3.00 u · 2.0 KB · ⚠ thin wall · Solid › Studio');
     expect([...el.querySelectorAll('.model-labels .mlabel.socket')].map((l) => l.textContent)).toEqual(['muzzle']);
     const clipSel = el.querySelectorAll('select')[1];
     expect([...clipSel.options].map((o) => o.text)).toEqual(['rest pose', 'fire (0.50 s)']);

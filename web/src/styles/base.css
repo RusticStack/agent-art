@@ -16,11 +16,13 @@ kbd { background: var(--panel2); border: 1px solid var(--line2); border-bottom-w
 .btn, .tool, .tab, .chip, .act { background: var(--panel2); border: 1px solid var(--line2); border-radius: 6px; padding: 4px 9px; cursor: pointer; white-space: nowrap; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; line-height: 18px; }
 .btn:hover, .tool:hover, .tab:hover, .chip:hover { border-color: #4a5260; background: #262b33; }
 .btn:disabled { opacity: .45; cursor: default; }
-.btn.small { padding: 2px 7px; font-size: 12px; }
+.btn.small, .btn.sm { padding: 2px 7px; font-size: 12px; }
 .btn.icon { padding: 3px 8px; }
 .btn.primary { background: #3b2a08; border-color: var(--accent); color: #ffd28a; }
 .btn.on, .chip.on, .tab.on { background: #2b2410; border-color: var(--accent); color: #ffd28a; }
 .btn.ok { border-color: #1f7a43; color: #86efac; } .btn.warn { border-color: #8a5a10; color: #fcd34d; }
+.btn.danger { border-color: var(--red-line); color: var(--red-fg); }
+.btn.ghost { background: transparent; border-color: transparent; } .btn.ghost:hover { background: var(--panel3); border-color: var(--line3); }
 .tool { width: 30px; height: 28px; justify-content: center; padding: 0; font-size: 15px; }
 .tool.active { background: #2b2410; border-color: var(--accent); color: #ffd28a; }
 .act { background: transparent; border: 0; padding: 0 3px; color: var(--muted); font-size: 13px; }
@@ -44,3 +46,6 @@ span.icon { display: inline-flex; width: 16px; height: 16px; flex: none; align-i
 span.icon svg { width: 100%; height: 100%; }
 .tool span.icon { width: 16px; height: 16px; }
 .btn span.icon { width: 14px; height: 14px; }
+
+/* ---------- tooltip (Bits UI, portalled) ---------- */
+.tooltip { z-index: var(--z-tooltip); display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) var(--s-4); background: #0b0c0f; border: 1px solid var(--line2); border-radius: var(--r-3); font-size: var(--fs-3); color: var(--text); box-shadow: var(--shadow-1); pointer-events: none; }

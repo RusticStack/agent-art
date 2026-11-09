@@ -131,7 +131,7 @@ button.ov-tile { text-align: left; }
 
 /* graph: relation chips, keyboard node list */
 .rel-chip { background: transparent; font: inherit; font-size: 11px; cursor: pointer; }
-.rel-chip[aria-pressed="false"] { opacity: .5; text-decoration: line-through; }
+.rel-chip[aria-pressed="false"] { color: var(--muted); text-decoration: line-through; }
 .rel-chip[aria-pressed="true"] { color: var(--text); }
 .graph-list { max-height: 30vh; overflow: auto; margin: 0; padding: 4px 0; list-style: none; border-bottom: 1px solid var(--line); background: var(--bg2); font-size: 12px; }
 .graph-list li { padding: 2px 10px; cursor: pointer; }
@@ -142,3 +142,21 @@ button.ov-tile { text-align: left; }
 .vstatus .btn.small { flex: none; }
 .stack-row button.sname { background: none; border: 0; padding: 0; text-align: left; cursor: pointer; min-width: 0; color: inherit; font: inherit; }
 .stack-row .act { padding: 0; justify-content: center; }
+
+/* model shading */
+.vtoolbar.shading { min-height: 34px; padding-top: 3px; padding-bottom: 3px; }
+.shading-modes { gap: 0; }
+.shading-modes .btn { border-radius: 0; margin-left: -1px; }
+.shading-modes .btn:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+.shading-modes .btn:last-child { border-radius: 0 6px 6px 0; }
+.shading-modes .btn[aria-checked="true"] { background: #2b2410; border-color: var(--accent); color: #ffd28a; position: relative; }
+.shading-modes.dimmed { opacity: .45; }
+.vtoolbar.shading input[type=range] { width: 90px; }
+.vtoolbar.shading .sun-time { min-width: 38px; color: var(--muted); }
+.vtoolbar.shading .btn[aria-pressed="true"] { background: #2b2410; border-color: var(--accent); color: #ffd28a; }
+.shading-pie { position: absolute; width: 0; height: 0; z-index: 5; }
+.shading-pie .pie-item { position: absolute; left: 0; top: 0; background: var(--panel2); border: 1px solid var(--line2); border-radius: 14px; padding: 5px 12px; cursor: pointer; white-space: nowrap; color: var(--text); font: inherit; box-shadow: 0 4px 14px rgba(0,0,0,.45); }
+.shading-pie .pie-item:hover, .shading-pie .pie-item.focus, .shading-pie .pie-item:focus-visible { border-color: var(--accent); color: #ffd28a; outline: none; }
+.shading-pie .pie-item[aria-checked="true"] { background: #2b2410; }
+.shading-pie .pie-key { color: var(--muted); margin-right: 2px; }
+.shading-pie::before { content: ''; position: absolute; left: -6px; top: -6px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--accent); opacity: .7; }

@@ -19,11 +19,12 @@ export const BUDGETS = {
   initialJs: 116, // plan 7.1 (the legacy bundle was 51 kB; the migration grows it towards the final shell)
   lazyViewer: 15,          // any single lazy viewer chunk
   lazyViewersTotal: 55,
-  three: FINAL ? 220 : 195,
+  three: 220, // plan 7.1 (5.7b addons + ViewHelper)
   graphCards: 75,
   graphLayout: 30,
   palette: 14,
   picker: 5,
+  dialogs: 25, // not in plan 7.1 ("the dialogs' heavy parts are lazy"): a guard for the lazy DialogHost chunk (Bits Dialog)
   cssInitial: FINAL ? 14 : 8,
   cssTotal: 20,
   distTotalRaw: 1.8 * 1024, // kB raw
@@ -106,7 +107,7 @@ function main() {
 
   const sizeOf = (f) => { const b = fs.readFileSync(path.join(DIST, f)); return { raw: b.length, gz: gz(b) }; };
   const rows = [];
-  let initialGz = 0, cssInit = 0, cssTotal = 0, lazyTotal = 0, distRaw = 0;
+  let initialGz = 0, cssInit = 0, cssTotal = 0, lazyTotal = 0, distRaw = 0, graphCardsGz = 0;
   const js = files.filter((f) => f.endsWith('.js'));
   const css = files.filter((f) => f.endsWith('.css'));
   for (const f of files) distRaw += sizeOf(f).raw;
@@ -117,17 +118,22 @@ function main() {
     const code = fs.readFileSync(path.join(DIST, f), 'utf8');
     let kind = isInitial ? 'initial' : 'lazy';
     if (/^three-/.test(base)) kind = 'three';
-    else if (/^graph-cards-/.test(base)) kind = 'graph-cards';
+    // the Cards renderer: the vendor chunk (Svelte Flow + d3) plus our graph/flow/* chunks, one budget together
+    else if (/^graph-cards-/.test(base) || (!isInitial && /^(FlowGraph|mountFlow)-/.test(base))) kind = 'graph-cards';
     else if (/^graph-layout-/.test(base)) kind = 'graph-layout';
     else if (!isInitial && /^CommandPalette-|^palette-/.test(base)) kind = 'palette';
     else if (!isInitial && code.includes('saturation-pointer')) kind = 'picker';
+    else if (!isInitial && /^DialogHost-/.test(base)) kind = 'dialogs';
     rows.push([f, kind, s.raw, s.gz]);
     if (isInitial) initialGz += s.gz;
     if (kind === 'three' && isInitial) fail(`the three chunk ${f} is in the initial set`);
     if (kind === 'three' && s.gz > BUDGETS.three * KB) fail(`three chunk ${kb(s.gz)} kB > ${BUDGETS.three} kB`);
-    if (kind === 'graph-cards' && s.gz > BUDGETS.graphCards * KB) fail(`graph-cards chunk ${kb(s.gz)} kB > ${BUDGETS.graphCards} kB (stop and report: do not raise this budget)`);
+    if (kind === 'graph-cards') graphCardsGz += s.gz;
+    if (kind === 'graph-cards' && isInitial) fail(`the graph-cards chunk ${f} is in the initial set`);
+    if (kind === 'graph-layout' && isInitial) fail(`the graph-layout chunk ${f} is in the initial set`);
     if (kind === 'graph-layout' && s.gz > BUDGETS.graphLayout * KB) fail(`graph-layout chunk ${kb(s.gz)} kB > ${BUDGETS.graphLayout} kB`);
     if (kind === 'palette' && s.gz > BUDGETS.palette * KB) fail(`palette chunk ${kb(s.gz)} kB > ${BUDGETS.palette} kB`);
+    if (kind === 'dialogs' && s.gz > BUDGETS.dialogs * KB) fail(`dialogs chunk ${kb(s.gz)} kB > ${BUDGETS.dialogs} kB`);
     if (kind === 'picker' && s.gz > BUDGETS.picker * KB) fail(`colour picker chunk ${kb(s.gz)} kB > ${BUDGETS.picker} kB`);
     if (kind === 'lazy') {
       lazyTotal += s.gz;
@@ -144,6 +150,7 @@ function main() {
     cssTotal += s.gz;
     if (cssInitial.includes(f)) cssInit += s.gz;
   }
+  if (graphCardsGz > BUDGETS.graphCards * KB) fail(`graph-cards chunks ${kb(graphCardsGz)} kB > ${BUDGETS.graphCards} kB (stop and report: do not raise this budget)`);
   if (initialGz > BUDGETS.initialJs * KB) fail(`initial JS ${kb(initialGz)} kB > ${BUDGETS.initialJs} kB`);
   if (lazyTotal > BUDGETS.lazyViewersTotal * KB) fail(`lazy viewer chunks together ${kb(lazyTotal)} kB > ${BUDGETS.lazyViewersTotal} kB`);
   if (cssInit > BUDGETS.cssInitial * KB) fail(`initial CSS ${kb(cssInit)} kB > ${BUDGETS.cssInitial} kB`);
@@ -155,7 +162,7 @@ function main() {
   rows.sort((a, b) => a[1].localeCompare(b[1]) || b[3] - a[3]);
   console.log('file'.padEnd(52), 'kind'.padEnd(13), 'raw kB'.padStart(8), 'gzip kB'.padStart(8));
   for (const [f, k, raw, g] of rows) console.log(f.padEnd(52), k.padEnd(13), kb(raw).padStart(8), kb(g).padStart(8));
-  console.log(`initial JS ${kb(initialGz)} / ${BUDGETS.initialJs} kB · lazy viewers ${kb(lazyTotal)} / ${BUDGETS.lazyViewersTotal} kB · CSS initial ${kb(cssInit)} / ${BUDGETS.cssInitial} kB · CSS total ${kb(cssTotal)} / ${BUDGETS.cssTotal} kB · dist ${kb(distRaw)} / ${BUDGETS.distTotalRaw} kB raw · icons ${icons} / ${BUDGETS.icons}`);
+  console.log(`initial JS ${kb(initialGz)} / ${BUDGETS.initialJs} kB · lazy viewers ${kb(lazyTotal)} / ${BUDGETS.lazyViewersTotal} kB · graph-cards ${kb(graphCardsGz)} / ${BUDGETS.graphCards} kB · CSS initial ${kb(cssInit)} / ${BUDGETS.cssInitial} kB · CSS total ${kb(cssTotal)} / ${BUDGETS.cssTotal} kB · dist ${kb(distRaw)} / ${BUDGETS.distTotalRaw} kB raw · icons ${icons} / ${BUDGETS.icons}`);
 
   if (process.argv.includes('--pack')) checkPack();
 

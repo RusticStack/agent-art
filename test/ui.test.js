@@ -267,6 +267,9 @@ test('ui: build notices plugin collects one notice per bundled package and enfor
     '/r/node_modules/@xyflow/svelte/node_modules/d3-zoom/LICENSE': 'ISC text',
     '/r/node_modules/gpl/package.json': JSON.stringify({ name: 'gpl', version: '1.0.0', license: 'GPL-3.0' }),
     '/r/node_modules/@internationalized/date/package.json': JSON.stringify({ name: '@internationalized/date', version: '3.0.0', license: 'Apache-2.0' }),
+    '/r/node_modules/toolbelt/package.json': JSON.stringify({ name: 'toolbelt', version: '0.10.7' }),
+    '/r/node_modules/toolbelt/LICENSE': 'MIT License\n\nCopyright (c) 2024',
+    '/r/node_modules/nolicence/package.json': JSON.stringify({ name: 'nolicence', version: '1.0.0' }),
   };
   const read = (p) => files[p] ?? null;
   const list = (dir) => Object.keys(files).filter((f) => f.startsWith(dir + '/') && !f.slice(dir.length + 1).includes('/')).map((f) => f.slice(dir.length + 1));
@@ -281,4 +284,6 @@ test('ui: build notices plugin collects one notice per bundled package and enfor
   assert.match(formatNotices(n), /svelte 5\.0\.0\nLicence: MIT/);
   assert.throws(() => noticesFor(['/r/node_modules/gpl/index.js'], read, list), /GPL-3\.0.*not in the allow-list/);
   assert.throws(() => noticesFor(['/r/node_modules/@internationalized/date/x.js'], read, list), /must not be bundled/);
+  assert.equal(noticesFor(['/r/node_modules/toolbelt/dist/index.js'], read, list)[0].licence, 'MIT');
+  assert.throws(() => noticesFor(['/r/node_modules/nolicence/index.js'], read, list), /licence "none" is not in the allow-list/);
 });

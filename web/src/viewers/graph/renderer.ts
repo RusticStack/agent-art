@@ -1,6 +1,6 @@
 // The renderer contract between the graph controller (GraphViewer) and whatever draws the graph.
-// Step 10 ships the canvas renderer (CanvasRenderer.ts); step 10b adds a Cards renderer behind the
-// same interface (plan 5.9b). Positions live on the SimNode objects, so every renderer and the
+// CanvasRenderer.ts draws on a 2D canvas (fast, large graphs); flow/mountFlow.ts mounts the Cards
+// renderer (Svelte Flow, lazy chunk) behind the same interface (plan 5.9b). Positions live on the SimNode objects, so every renderer and the
 // controller share them and a reload keeps them.
 import type { GraphLayout, SimNode, VisEdge } from './sim';
 
@@ -15,11 +15,17 @@ export interface GraphData {
   selected: string | null;
   /** Bumps on every setData (renderers may cache per version). */
   version: number;
-  /** 'force' starts a live simulation run; any other layout has already placed the nodes. */
+  /** 'force' starts a simulation run; any other layout has already placed the nodes. */
   layout: GraphLayout;
+  /** false = keep the current positions even in force mode (a renderer switch). Default: layout === 'force'. */
+  simulate?: boolean;
   /** Collapsed group ids (drawn with a "+"). */
   collapsed: ReadonlySet<string>;
+  /** Members folded into each collapsed group ("+N" on a card). */
+  folded?: ReadonlyMap<string, number>;
 }
+
+export type NodeAction = 'compare' | 'pin' | 'hide';
 
 export interface GraphRenderer {
   setData(d: GraphData): void;
@@ -33,6 +39,8 @@ export interface GraphRenderer {
   readonly settled: boolean;
   /** Keyboard focus target for the drawing surface (canvas), if any. */
   readonly focusEl: HTMLElement | null;
+  /** Current view transform (screen = world * k + (x, y), in the renderer's own world units). */
+  readonly view: { x: number; y: number; k: number };
 }
 
 export interface GraphRendererHost {
@@ -45,4 +53,8 @@ export interface GraphRendererHost {
   onSettled(settled: boolean): void;
   /** Thumbnail URL for a node, or null. */
   thumb(node: VisNode): string | null;
+  /** Hover toolbar of a card: open in compare, pin, hide. */
+  onAction(id: string, action: NodeAction): void;
+  isHidden(id: string): boolean;
+  isPinned(id: string): boolean;
 }

@@ -1,8 +1,10 @@
 // Asset graph viewer (controller): loads /api/graph, filters (relation, tag, text, sub-assets), collapses
 // groups, keeps the selection, persists the toolbar choices, reloads on server events, and hands the
-// visible graph to a renderer (CanvasRenderer in step 10; a Cards renderer joins in step 10b).
-// Click selects (the inspector shows the node), double-click opens. A keyboard list of the visible
-// nodes ("List") makes selection and open work without a pointer.
+// visible graph to a renderer: Cards (Svelte Flow, lazy chunk graph-cards) for small graphs, Canvas for
+// large ones, or the one chosen in the "View" select (plan 5.9b). Layouts: Force, Layered by kind, and
+// Hierarchy (dagre, lazy chunk graph-layout). Click selects (the inspector shows the node), double-click
+// opens. With the canvas renderer a keyboard list of the visible nodes ("List") makes selection and open
+// work without a pointer; cards are focusable themselves.
 import type { AnyEvent, GraphDoc, GraphEdge } from '@/lib/api/types';
 import { api } from '@/lib/api/client';
 import { isAbort } from '@/lib/api/http';
@@ -10,18 +12,29 @@ import { thumbUrl } from '@/lib/api/urls';
 import { h } from '@/lib/util/dom';
 import { KIND_LABEL } from '@/lib/util/kinds';
 import { store } from '@/lib/util/storage';
+import { targetForId } from '@/lib/util/targets';
 import { BaseViewer } from '../base';
 import { button, fillSelect, group, label, select, spacer, toggle } from '../controls';
 import type { Target } from '../types';
 import { CanvasRenderer } from './CanvasRenderer';
-import type { GraphRendererHost, VisNode } from './renderer';
+import type { GraphRenderer, GraphRendererHost, NodeAction, VisNode } from './renderer';
 import {
-  applyFilter, buildGraph, countsText, findNode, layeredLayout, nodeLabel, parseLayout, relColor, reloadsOn,
+  applyFilter, buildGraph, countsText, findNode, layeredLayout, makeRep, nodeLabel, parseLayout, relColor, reloadsOn,
   type GraphLayout, type SimNode, type VisEdge,
 } from './sim';
+import {
+  CARDS_REFUSED_MSG, chooseRenderer, foldedCounts, fromCards, parseRendererPref, rendererSuffix,
+  type RendererChoice, type RendererKind, type RendererPref,
+} from './cards';
+import { CARD_BOX, DOT_BOX, HIER_LIMIT_MSG, hierarchyFits, hierarchyLayout } from './hierarchy';
 
 /** Persisted keys (prefixed "agent-art:" by store). */
-export const KEYS = { collapsed: 'graphCollapsed', hiddenRels: 'graphHiddenRels', sub: 'graphSub', layout: 'graphLayout' } as const;
+export const KEYS = { collapsed: 'graphCollapsed', hiddenRels: 'graphHiddenRels', sub: 'graphSub', layout: 'graphLayout', renderer: 'graphRenderer' } as const;
+/** Lets the browser paint once (the "laying out…" text) before a long synchronous step. */
+const nextFrame = (): Promise<void> => new Promise((r) => {
+  const t = setTimeout(r, 50);
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => { clearTimeout(t); r(); });
+});
 const strList = (v: unknown, d: string[]): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : d);
 let listSeq = 0;
 
@@ -35,6 +48,7 @@ export class GraphViewer extends BaseViewer {
   private hiddenRels = new Set(strList(store.get<unknown>(KEYS.hiddenRels, ['layer_of']), ['layer_of']));
   private showSub = store.get<unknown>(KEYS.sub, false) === true;
   private layout: GraphLayout = parseLayout(store.get<unknown>(KEYS.layout, 'force'));
+  private pref: RendererPref = parseRendererPref(store.get<unknown>(KEYS.renderer, 'auto'));
   private selected: string | null = null;
   private pendingFocus: string | null = null;
   private version = 0;
@@ -42,11 +56,20 @@ export class GraphViewer extends BaseViewer {
   private listOpen = false;
   private listActive = -1;
   private readonly listId = `graph-list-${++listSeq}`;
+  // renderer
+  private renderer: GraphRenderer | null = null;
+  private rkind: RendererKind | null = null;
+  private cardsLoading: Promise<void> | null = null;
+  private cardsBroken = false;
+  private layoutSeq = 0;
+  private choice: RendererChoice = { kind: 'canvas', large: false, refused: false };
+  private layoutNote = false;
+  private rhost!: GraphRendererHost;
   // DOM
-  private renderer!: CanvasRenderer;
   private search!: HTMLInputElement;
   private tagSel!: HTMLSelectElement;
   private layoutSel!: HTMLSelectElement;
+  private viewSel!: HTMLSelectElement;
   private listBtn!: HTMLButtonElement;
   private list!: HTMLUListElement;
   private relBox!: HTMLElement;
@@ -63,8 +86,20 @@ export class GraphViewer extends BaseViewer {
     this.tagSel = select({ title: 'Show only nodes with this tag', onChange: () => this.applyFilter(false) });
     fillSelect(this.tagSel, [], { first: { value: '', label: 'any' } });
     const sub = toggle({ label: 'Sub-assets', title: 'Layers, animation tags, rig and model parts', checked: this.showSub, onChange: (on) => { this.showSub = on; store.set(KEYS.sub, on); this.applyFilter(false); } });
-    this.layoutSel = select({ title: 'Layout', onChange: (v) => { this.layout = parseLayout(v); store.set(KEYS.layout, this.layout); this.relayout(false); } });
-    fillSelect(this.layoutSel, [{ value: 'force', label: 'Force' }, { value: 'layered', label: 'Layered by kind' }], { keep: this.layout });
+    this.layoutSel = select({ title: 'Layout', onChange: (v) => {
+      this.layout = parseLayout(v);
+      store.set(KEYS.layout, this.layout);
+      for (const n of this.nodes.values()) n.pinned = false; // choosing a layout again clears pins
+      this.relayout(false);
+    } });
+    fillSelect(this.layoutSel, [{ value: 'force', label: 'Force' }, { value: 'layered', label: 'Layered by kind' }, { value: 'hierarchy', label: 'Hierarchy' }], { keep: this.layout });
+    this.viewSel = select({ title: 'View: cards for small graphs (Auto), or always cards / canvas', onChange: (v) => {
+      this.pref = parseRendererPref(v);
+      store.set(KEYS.renderer, this.pref);
+      this.relayout(false, true);
+    } });
+    this.viewSel.setAttribute('aria-label', 'View');
+    fillSelect(this.viewSel, [{ value: 'auto', label: 'Auto' }, { value: 'cards', label: 'Cards' }, { value: 'canvas', label: 'Canvas' }], { keep: this.pref });
     this.listBtn = button({ text: 'List', title: 'List the visible nodes (keyboard selection)', onClick: () => this.toggleList() });
     this.listBtn.setAttribute('aria-expanded', 'false');
     this.listBtn.setAttribute('aria-controls', this.listId);
@@ -73,7 +108,7 @@ export class GraphViewer extends BaseViewer {
       this.search,
       group(label('Tag'), this.tagSel),
       sub.el,
-      group(this.layoutSel, button({ text: 'Fit', title: 'Fit (0)', onClick: () => this.fit() }), this.listBtn),
+      group(this.layoutSel, label('View'), this.viewSel, button({ text: 'Fit', title: 'Fit (0)', onClick: () => this.fit() }), this.listBtn),
       spacer(), this.counts));
     this.relBox = h('div', { class: 'rel-filter', role: 'group', 'aria-label': 'Relations' });
     root.append(this.relBox);
@@ -84,19 +119,68 @@ export class GraphViewer extends BaseViewer {
     this.statusEl = h('div', { class: 'vstatus mono', hidden: true });
     root.append(this.statusEl);
 
-    const rhost: GraphRendererHost = {
+    this.rhost = {
       onSelect: (id) => this.select(id),
       onOpen: (id) => this.host.openNode(id),
       onToggleGroup: (id) => this.toggleGroup(id),
-      onMoved: () => {},
+      onMoved: (id, x, y) => { const n = this.nodes.get(id); if (n) { n.x = x; n.y = y; n.vx = n.vy = 0; n.pinned = true; } },
       onSettled: (s) => { this.stage.dataset.settled = String(s); },
       thumb: (n: VisNode) => (n.missing ? null : thumbUrl(n.kind, n.name, n.version || '0')),
+      onAction: (id, a) => this.nodeAction(id, a),
+      isHidden: (id) => this.host.isHidden(id),
+      isPinned: (id) => this.host.isPinned?.(id) ?? false,
     };
-    this.renderer = new CanvasRenderer(this.stage, rhost);
-    this.onResize(this.stage, () => this.renderer.resize());
-    this.onDprChange(() => this.renderer.resize());
-    this.addCleanup(() => this.renderer.destroy());
+    this.onResize(this.stage, () => this.renderer?.resize());
+    this.onDprChange(() => this.renderer?.resize());
+    this.addCleanup(() => { this.renderer?.destroy(); this.renderer = null; });
     return root;
+  }
+
+  // ---- renderer choice ----
+  /** Renderer for the current filtered graph; an explicit Cards choice above the limit is refused. */
+  private choose(): RendererChoice {
+    const c = chooseRenderer(this.pref, this.vis.length, this.edges.length, this.cardsBroken);
+    if (c.refused) {
+      this.host.toast(CARDS_REFUSED_MSG, 'error');
+      this.pref = 'canvas';
+      store.set(KEYS.renderer, this.pref);
+      this.viewSel.value = 'canvas';
+    }
+    this.choice = c;
+    return c;
+  }
+  private useRenderer(r: GraphRenderer, kind: RendererKind): void {
+    const old = this.renderer;
+    this.renderer = r;
+    this.rkind = kind;
+    old?.destroy();
+    if (kind === 'cards' && this.listOpen) this.toggleList();
+    this.listBtn.hidden = kind === 'cards';
+  }
+  /** Loads the Cards chunk once and swaps it in; on failure toasts once and stays on Canvas. */
+  private loadCards(): Promise<void> {
+    if (!this.cardsLoading) {
+      this.cardsLoading = import('./flow/mountFlow')
+        .then((m) => m.mountFlow(this.stage, this.rhost))
+        .then((r) => { if (this.dead) r.destroy(); else this.useRenderer(r, 'cards'); })
+        .catch((e: unknown) => {
+          this.cardsBroken = true;
+          if (!this.dead) this.host.toast(`Cards view failed to load (${e instanceof Error ? e.message : String(e)}); using Canvas.`, 'error');
+        })
+        .finally(() => { this.cardsLoading = null; });
+    }
+    return this.cardsLoading;
+  }
+
+  private showCounts(extra = ''): void {
+    this.counts.textContent = countsText(this.vis.length, this.edges.length, this.collapsed.size) + (extra || rendererSuffix(this.choice));
+  }
+  /** Layout note in the status line (kept apart from load errors). */
+  private note(msg: string | null): void {
+    if (!msg && !this.layoutNote) return;
+    this.layoutNote = !!msg;
+    this.statusEl.hidden = !msg;
+    this.statusEl.textContent = msg ?? '';
   }
 
   // ---- loading ----
@@ -129,6 +213,7 @@ export class GraphViewer extends BaseViewer {
     this.applyFilter(first);
   }
   private showError(msg: string | null): void {
+    this.layoutNote = false;
     this.statusEl.hidden = !msg;
     this.statusEl.textContent = msg ?? '';
   }
@@ -156,28 +241,91 @@ export class GraphViewer extends BaseViewer {
     const r = applyFilter(this.nodes, this.allEdges, { tag: this.tagSel.value, showSub: this.showSub, hiddenRels: this.hiddenRels, collapsed: this.collapsed });
     this.vis = r.vis;
     this.edges = r.edges;
-    this.counts.textContent = countsText(this.vis.length, this.edges.length, this.collapsed.size);
     this.relayout(first);
     if (this.listOpen) this.renderList();
   }
 
-  private relayout(fit: boolean): void {
-    if (this.layout === 'layered') layeredLayout(this.vis);
-    this.version++;
-    this.renderer.setData({ nodes: this.vis, edges: this.edges, positions: this.nodes, selected: this.selected, version: this.version, layout: this.layout, collapsed: this.collapsed });
-    // first load auto-fits (after the force layout had time to spread); a focus target is centred after
-    if (fit) this.later(this.layout === 'force' ? 700 : 0, () => { this.renderer.fit(); if (this.pendingFocus) this.renderer.center(this.pendingFocus, 0); this.pendingFocus = null; }, 'fit');
+  /**
+   * Picks the renderer (switching when needed), runs the static layouts and hands the data over.
+   * keep = a renderer switch only: positions are kept as they are (no layout, no simulation run).
+   */
+  private relayout(fit: boolean, keep = false): void {
+    const seq = ++this.layoutSeq;
+    const c = this.choose();
+    this.showCounts();
+    if (!this.renderer || this.rkind !== c.kind) {
+      fit = true; // a new renderer starts with its own view
+      if (c.kind === 'cards') {
+        void this.loadCards().then(() => { if (seq === this.layoutSeq && !this.dead) this.relayout(fit, keep); });
+        return;
+      }
+      this.useRenderer(new CanvasRenderer(this.stage, this.rhost), 'canvas');
+    }
+    if (keep) { this.push(this.layout, fit, false); return; }
+    let layout = this.layout;
+    if (layout === 'hierarchy') {
+      if (hierarchyFits(this.vis.length, this.edges.length)) { this.note(null); void this.runHierarchy(seq, fit); return; }
+      this.note(HIER_LIMIT_MSG);
+      layout = 'layered';
+    } else this.note(null);
+    if (layout === 'layered') layeredLayout(this.vis);
+    this.push(layout, fit);
   }
 
-  fit(): void { this.renderer.fit(); }
+  /** Hierarchy (dagre, lazy): "laying out…" is painted first; pins are ignored (a full re-layout). */
+  private async runHierarchy(seq: number, fit: boolean): Promise<void> {
+    this.showCounts(' · laying out…');
+    await nextFrame();
+    if (seq !== this.layoutSeq || this.dead) return;
+    const cards = this.rkind === 'cards';
+    const box = cards ? CARD_BOX : DOT_BOX;
+    let pos: Map<string, { x: number; y: number }> | null;
+    try {
+      pos = await hierarchyLayout(this.vis.map((n) => ({ id: n.id, kind: n.kind, w: box.w, h: box.h })), this.edges);
+    } catch (e) {
+      if (seq !== this.layoutSeq || this.dead) return;
+      this.host.toast(`Hierarchy layout failed (${e instanceof Error ? e.message : String(e)}); using Layered by kind.`, 'error');
+      pos = null;
+    }
+    if (seq !== this.layoutSeq || this.dead) return;
+    this.showCounts();
+    if (!pos) { layeredLayout(this.vis); this.push('layered', fit); return; }
+    for (const n of this.vis) {
+      const p = pos.get(n.id);
+      if (!p) continue;
+      const q = cards ? fromCards(p) : p;
+      n.x = q.x; n.y = q.y; n.vx = n.vy = 0;
+    }
+    this.push('hierarchy', fit);
+  }
+
+  private push(layout: GraphLayout, fit: boolean, simulate?: boolean): void {
+    const r = this.renderer;
+    if (!r) return;
+    this.version++;
+    const folded = this.collapsed.size ? foldedCounts(this.nodes.keys(), makeRep(this.allEdges, this.collapsed), this.collapsed) : undefined;
+    r.setData({ nodes: this.vis, edges: this.edges, positions: this.nodes, selected: this.selected, version: this.version, layout, simulate, collapsed: this.collapsed, folded });
+    // first load auto-fits (after the live force layout had time to spread); a focus target is centred after
+    const live = layout === 'force' && simulate !== false && this.rkind === 'canvas';
+    if (fit) this.later(live ? 700 : 0, () => { this.renderer?.fit(); if (this.pendingFocus) this.renderer?.center(this.pendingFocus, 0); this.pendingFocus = null; }, 'fit');
+  }
+
+  fit(): void { this.renderer?.fit(); }
+
+  /** Hover toolbar of a card. */
+  private nodeAction(id: string, a: NodeAction): void {
+    if (a === 'compare') this.host.open(targetForId(id, this.host.assets()), { slot: this.host.slot === 'B' ? 'A' : 'B' });
+    else if (a === 'pin') this.host.togglePinned?.(id);
+    else this.host.toggleHidden?.(id);
+  }
 
   // ---- selection ----
   /** Select a node (the inspector shows it; never opens). center = put it in the middle of the stage. */
   select(id: string | null, center = false, minZoom = 0): void {
     this.selected = id;
-    this.renderer.setSelected(id);
+    this.renderer?.setSelected(id);
     if (id) this.host.inspectNode(id);
-    if (center && id) this.renderer.center(id, minZoom);
+    if (center && id) this.renderer?.center(id, minZoom);
     if (this.listOpen) this.syncListSelection();
   }
   private toggleGroup(id: string): void {
@@ -248,9 +396,14 @@ export class GraphViewer extends BaseViewer {
     return false;
   }
 
-  debugInfo(): { renderer: 'canvas'; nodes: number; edges: number; layout: GraphLayout; settled: boolean; selected: string | null; view: { x: number; y: number; k: number }; positions: Record<string, [number, number]> } {
+  /** Test / support hook (window.agentArt.debug.viewer(slot)): renderer = the mounted one; positions in controller coordinates. */
+  debugInfo(): { renderer: RendererKind; pref: RendererPref; large: boolean; nodes: number; edges: number; layout: GraphLayout; settled: boolean; selected: string | null; view: { x: number; y: number; k: number }; positions: Record<string, [number, number]> } {
     const positions: Record<string, [number, number]> = {};
     for (const n of this.vis) positions[n.id] = [Math.round(n.x * 10) / 10, Math.round(n.y * 10) / 10];
-    return { renderer: 'canvas', nodes: this.vis.length, edges: this.edges.length, layout: this.layout, settled: this.renderer.settled, selected: this.selected, view: { ...this.renderer.view }, positions };
+    const r = this.renderer;
+    return {
+      renderer: this.rkind ?? 'canvas', pref: this.pref, large: this.choice.large, nodes: this.vis.length, edges: this.edges.length, layout: this.layout,
+      settled: r?.settled ?? false, selected: this.selected, view: r ? { ...r.view } : { x: 0, y: 0, k: 1 }, positions,
+    };
   }
 }

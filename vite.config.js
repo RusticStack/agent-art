@@ -56,10 +56,11 @@ export default defineConfig({
         // three.js core + the addons the 3D viewer uses: one lazy chunk, fetched when it first opens
         codeSplitting: {
           groups: [
-            { name: 'three', test: /[\\/]node_modules[\\/]three[\\/]/ },
+            // (plus our three-side model code: shading rig, clusters, disposal, channel shaders, Z pie; it only runs once three is loaded, see web/src/viewers/model/shadingRig.ts)
+            { name: 'three', test: /[\\/]node_modules[\\/]three[\\/]|[\\/]viewers[\\/]model[\\/](shadingRig|clusters|dispose|shaders|pie)\.ts$/, includeDependenciesRecursively: false },
             // lazy graph libraries (Svelte Flow + its d3 parts; dagre): stable names for the budget script
-            { name: 'graph-cards', test: /[\\/]node_modules[\\/](@xyflow|@svelte-put|d3-[a-z]+)[\\/]/ },
-            { name: 'graph-layout', test: /[\\/]node_modules[\\/]@dagrejs[\\/]/ },
+            { name: 'graph-cards', test: /[\\/]node_modules[\\/](@xyflow|@svelte-put|d3-[a-z]+)[\\/]/, includeDependenciesRecursively: false },
+            { name: 'graph-layout', test: /[\\/]node_modules[\\/]@dagrejs[\\/]/, includeDependenciesRecursively: false },
           ],
         },
       },
@@ -84,5 +85,6 @@ export default defineConfig({
     root: here('./web'),
     include: ['**/*.test.ts'],
     environment: 'node',
+    setupFiles: ['./src/test/setup.ts'],
   },
 });

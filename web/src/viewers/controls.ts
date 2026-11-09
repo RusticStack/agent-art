@@ -24,7 +24,7 @@ export function toggle(o: { label: string; title?: string; checked?: boolean; on
 }
 
 export function select(o: { title?: string; className?: string; onChange(value: string): void }): HTMLSelectElement {
-  const s = h('select', { title: o.title, class: o.className, on: { change: () => o.onChange(s.value) } });
+  const s = h('select', { title: o.title, 'aria-label': o.title, class: o.className, on: { change: () => o.onChange(s.value) } });
   return s;
 }
 
@@ -45,7 +45,7 @@ export function fillSelect(sel: HTMLSelectElement, items: Option[], o: { keep?: 
 }
 
 export function range(o: { min: number; max: number; step?: number; value: number; title?: string; className?: string; onInput(value: number): void }): HTMLInputElement {
-  const r = h('input', { type: 'range', min: String(o.min), max: String(o.max), step: o.step !== undefined ? String(o.step) : undefined, title: o.title, class: o.className, on: { input: () => o.onInput(Number(r.value)) } });
+  const r = h('input', { type: 'range', min: String(o.min), max: String(o.max), step: o.step !== undefined ? String(o.step) : undefined, title: o.title, 'aria-label': o.title, class: o.className, on: { input: () => o.onInput(Number(r.value)) } });
   r.value = String(o.value);
   return r;
 }

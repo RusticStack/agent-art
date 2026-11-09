@@ -6,6 +6,39 @@ import type { GraphDoc } from '@/lib/api/types';
 import type { ViewerEnv, ViewerHostApi } from '../types';
 import { GraphViewer } from './GraphViewer';
 import { CanvasRenderer, backingScale } from './CanvasRenderer';
+import type { GraphData, GraphRenderer, GraphRendererHost } from './renderer';
+import { CARDS_MAX_NODES, CARDS_REFUSED_MSG } from './cards';
+import { HIER_LIMIT_MSG } from './hierarchy';
+
+// The Cards renderer needs a real browser (Svelte Flow measures the DOM): the controller is tested
+// against a stand-in that records what it is given; the real one is covered by e2e/graph.spec.ts.
+const flow = vi.hoisted(() => {
+  class FakeFlow {
+    data: GraphData | null = null;
+    selected: string | null = null;
+    fits = 0;
+    destroyed = false;
+    readonly el = document.createElement('div');
+    constructor(stage: HTMLElement, readonly host: GraphRendererHost) { this.el.className = 'fake-flow'; stage.append(this.el); }
+    setData(d: GraphData) { this.data = d; this.selected = d.selected; this.host.onSettled(true); }
+    setSelected(id: string | null) { this.selected = id; }
+    fit() { this.fits++; }
+    center() {}
+    resize() {}
+    destroy() { this.destroyed = true; this.el.remove(); }
+    get settled() { return !!this.data; }
+    get focusEl() { return null; }
+    get view() { return { x: 0, y: 0, k: 1 }; }
+  }
+  return { FakeFlow, fail: false, last: null as InstanceType<typeof FakeFlow> | null };
+});
+vi.mock('./flow/mountFlow', () => ({
+  mountFlow: async (el: HTMLElement, host: GraphRendererHost): Promise<GraphRenderer> => {
+    if (flow.fail) throw new Error('chunk failed');
+    flow.last = new flow.FakeFlow(el, host);
+    return flow.last;
+  },
+}));
 
 const DOC: GraphDoc = {
   nodes: [
@@ -27,22 +60,23 @@ const DOC: GraphDoc = {
 const ENV: ViewerEnv = { tool: 'pencil', color: { hex: '#000000', hex8: '#000000ff' }, reviewMode: false, following: false, reviewsRev: 0, assetsRev: 0, compareLink: false, compareOverlay: 'off', peerRev: 0 };
 
 function makeHost() {
-  const h = { inspectNode: vi.fn(), openNode: vi.fn() };
+  const h = { inspectNode: vi.fn(), openNode: vi.fn(), toast: vi.fn(), open: vi.fn(), togglePinned: vi.fn(), toggleHidden: vi.fn(), isHidden: vi.fn(() => false), isPinned: vi.fn(() => false), assets: vi.fn(() => null) };
   const host = { slot: 'A', readOnly: false, ...h } as unknown as ViewerHostApi;
   return { host, ...h };
 }
 async function mount(focus?: string) {
   const el = document.createElement('div');
   document.body.append(el);
-  const { host, inspectNode, openNode } = makeHost();
-  const v = new GraphViewer(host);
+  const hh = makeHost();
+  const v = new GraphViewer(hh.host);
   await v.mount(el, { target: { kind: 'graph', ...(focus ? { focus } : {}) }, env: ENV });
-  return { v, el, inspectNode, openNode };
+  return { v, el, ...hh };
 }
 
 describe('GraphViewer', () => {
   beforeEach(() => {
     localStorage.clear();
+    localStorage.setItem('agent-art:graphRenderer', '"canvas"'); // the Cards renderer needs a real browser (e2e)
     installCanvasStub();
     HTMLCanvasElement.prototype.setPointerCapture = () => {};
     fakeFetch({ '/api/graph': { json: DOC } });
@@ -172,5 +206,153 @@ describe('GraphViewer', () => {
     expect(backingScale(800, 600, 2)).toBe(2);
     expect(backingScale(5000, 1000, 2)).toBeCloseTo(8192 / 5000);
     expect(backingScale(5000, 5000, 2)).toBeCloseTo(Math.sqrt(32_000_000 / 25_000_000));
+  });
+});
+
+/** A graph with n loose canvases (plus the DOC ones). */
+const bigDoc = (n: number): GraphDoc => ({ ...DOC, nodes: [...DOC.nodes, ...Array.from({ length: n }, (_, i) => ({ id: `canvas:extra_${i}`, kind: 'canvas' }))] });
+const viewSel = (el: HTMLElement) => el.querySelector<HTMLSelectElement>('select[aria-label="View"]')!;
+const change = (sel: HTMLSelectElement, value: string) => { sel.value = value; sel.dispatchEvent(new Event('change')); };
+
+describe('GraphViewer: renderer choice (Auto / Cards / Canvas) and Hierarchy', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    installCanvasStub();
+    HTMLCanvasElement.prototype.setPointerCapture = () => {};
+    fakeFetch({ '/api/graph': { json: DOC } });
+    flow.fail = false;
+    flow.last = null;
+  });
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.replaceChildren(); });
+
+  it('Auto opens a small graph in Cards: counts say so, no canvas, no List button', async () => {
+    const { v, el } = await mount();
+    await vi.waitFor(() => expect(v.debugInfo().renderer).toBe('cards'));
+    expect(viewSel(el).value).toBe('auto');
+    expect(el.querySelector('.vtoolbar')!.textContent).toMatch(/4 nodes · 4 edges · cards/);
+    expect(el.querySelector('canvas.graph-canvas')).toBeNull();
+    expect(el.querySelector('.graph-stage .fake-flow')).not.toBeNull();
+    expect([...el.querySelectorAll('button')].find((b) => b.textContent === 'List')!.hidden).toBe(true);
+    expect(flow.last!.data!.nodes).toHaveLength(4);
+    expect(el.querySelector<HTMLElement>('.graph-stage')!.dataset.settled).toBe('true');
+    expect(v.debugInfo()).toMatchObject({ pref: 'auto', large: false, settled: true });
+    v.destroy();
+    expect(flow.last!.destroyed).toBe(true);
+  });
+
+  it('switching View keeps positions and the selection; the choice persists', async () => {
+    const { v, el } = await mount();
+    await vi.waitFor(() => expect(v.debugInfo().renderer).toBe('cards'));
+    v.select('canvas:helmet_side');
+    const before = v.debugInfo().positions;
+    change(viewSel(el), 'canvas');
+    expect(localStorage.getItem('agent-art:graphRenderer')).toBe('"canvas"');
+    expect(v.debugInfo().renderer).toBe('canvas');
+    expect(el.querySelector('canvas.graph-canvas')).not.toBeNull();
+    expect(el.querySelector('.fake-flow')).toBeNull();
+    expect(v.debugInfo().positions).toEqual(before);
+    expect(v.debugInfo().selected).toBe('canvas:helmet_side');
+    expect(v.debugInfo().settled).toBe(true); // no new simulation run on a switch
+    change(viewSel(el), 'cards');
+    await vi.waitFor(() => expect(v.debugInfo().renderer).toBe('cards'));
+    expect(v.debugInfo().positions).toEqual(before);
+    expect(flow.last!.data!.selected).toBe('canvas:helmet_side');
+    expect(flow.last!.data!.simulate).toBe(false);
+    expect(el.querySelector('.vtoolbar')!.textContent).toMatch(/· cards/);
+    v.destroy();
+  });
+
+  it('Auto falls back to Canvas for a large graph and says so', async () => {
+    fakeFetch({ '/api/graph': { json: bigDoc(401) } });
+    const { v, el } = await mount();
+    expect(v.debugInfo()).toMatchObject({ renderer: 'canvas', large: true, nodes: 405 });
+    expect(el.querySelector('.vtoolbar')!.textContent).toMatch(/405 nodes · 4 edges · canvas \(large graph\)/);
+    expect(flow.last).toBeNull();
+    v.destroy();
+  });
+
+  it('Cards above the limit is refused with a toast and the select returns to Canvas', async () => {
+    localStorage.setItem('agent-art:graphRenderer', '"cards"');
+    fakeFetch({ '/api/graph': { json: bigDoc(CARDS_MAX_NODES) } });
+    const { v, el, toast } = await mount();
+    expect(toast).toHaveBeenCalledWith(CARDS_REFUSED_MSG, 'error');
+    expect(viewSel(el).value).toBe('canvas');
+    expect(v.debugInfo().renderer).toBe('canvas');
+    expect(flow.last).toBeNull();
+    v.destroy();
+  });
+
+  it('a failed cards chunk toasts once and uses Canvas', async () => {
+    flow.fail = true;
+    const { v, el, toast } = await mount();
+    await vi.waitFor(() => expect(el.querySelector('canvas.graph-canvas')).not.toBeNull());
+    expect(v.debugInfo().renderer).toBe('canvas');
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(toast.mock.calls[0][0]).toMatch(/Cards view failed to load/);
+    expect(el.querySelector('canvas.graph-canvas')).not.toBeNull();
+    el.querySelector<HTMLButtonElement>('.rel-chip[data-rel="variant_of"]')!.click();
+    expect(toast).toHaveBeenCalledTimes(1);
+    v.destroy();
+  });
+
+  it('card actions: compare opens in the other slot, pin / hide go to the host, a drag end pins', async () => {
+    const { v, open, togglePinned, toggleHidden } = await mount();
+    await vi.waitFor(() => expect(flow.last).not.toBeNull());
+    const host = flow.last!.host;
+    host.onAction('canvas:helmet_front', 'compare');
+    expect(open).toHaveBeenCalledWith({ kind: 'canvas', name: 'helmet_front' }, { slot: 'B' });
+    host.onAction('canvas:helmet_front', 'pin');
+    expect(togglePinned).toHaveBeenCalledWith('canvas:helmet_front');
+    host.onAction('canvas:helmet_front', 'hide');
+    expect(toggleHidden).toHaveBeenCalledWith('canvas:helmet_front');
+    host.onMoved('canvas:pauldron', 12.5, -40);
+    expect(v.debugInfo().positions['canvas:pauldron']).toEqual([12.5, -40]);
+    const collapsed = flow.last!.data!.collapsed;
+    expect(collapsed.size).toBe(0);
+    host.onToggleGroup('group:Severance armour');
+    expect(flow.last!.data!.folded?.get('group:Severance armour')).toBe(3);
+    v.destroy();
+  });
+
+  it('Hierarchy (canvas): containers left of their parts; the choice persists', async () => {
+    localStorage.setItem('agent-art:graphRenderer', '"canvas"');
+    const { v, el } = await mount();
+    change(el.querySelectorAll<HTMLSelectElement>('select')[1], 'hierarchy');
+    expect(localStorage.getItem('agent-art:graphLayout')).toBe('"hierarchy"');
+    expect(el.querySelector('.vtoolbar')!.textContent).toMatch(/laying out…/);
+    await vi.waitFor(() => expect(el.querySelector('.vtoolbar')!.textContent).not.toMatch(/laying out/));
+    const p = v.debugInfo().positions;
+    expect(p['group:Severance armour'][0]).toBeLessThan(p['canvas:helmet_front'][0]);
+    expect(p['group:Severance armour'][0]).toBeLessThan(p['canvas:pauldron'][0]);
+    expect(p['canvas:helmet_side'][0]).toBeLessThan(p['canvas:helmet_front'][0]); // variant_of keeps its direction
+    expect(v.debugInfo()).toMatchObject({ layout: 'hierarchy', settled: true });
+    v.destroy();
+  });
+
+  it('Hierarchy in Cards lays out in card space and hands controller coordinates back', async () => {
+    localStorage.setItem('agent-art:graphLayout', '"hierarchy"');
+    const { v } = await mount();
+    await vi.waitFor(() => expect(flow.last?.data?.layout).toBe('hierarchy'));
+    const p = v.debugInfo().positions;
+    // card boxes are 156 wide, ranks 64 apart; divided by the 2.2 card scale on the way back
+    expect(p['canvas:pauldron'][0] - p['group:Severance armour'][0]).toBeCloseTo((156 + 64) / 2.2, 0);
+    v.destroy();
+  });
+
+  it('Hierarchy over the limit falls back to Layered by kind for this run, keeping the stored choice', async () => {
+    localStorage.setItem('agent-art:graphRenderer', '"canvas"');
+    localStorage.setItem('agent-art:graphLayout', '"hierarchy"');
+    fakeFetch({ '/api/graph': { json: bigDoc(1500) } });
+    const { v, el } = await mount();
+    const st = el.querySelector<HTMLElement>('.vstatus')!;
+    expect(st.hidden).toBe(false);
+    expect(st.textContent).toBe(HIER_LIMIT_MSG);
+    expect(v.debugInfo().layout).toBe('hierarchy');
+    expect(localStorage.getItem('agent-art:graphLayout')).toBe('"hierarchy"');
+    const p = v.debugInfo().positions;
+    expect(p['group:Severance armour'][0]).toBeLessThan(p['canvas:helmet_front'][0]); // layered columns
+    change(el.querySelectorAll<HTMLSelectElement>('select')[1], 'force');
+    expect(st.hidden).toBe(true);
+    v.destroy();
   });
 });

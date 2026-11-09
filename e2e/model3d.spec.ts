@@ -28,6 +28,8 @@ test('3D viewer: lazy three chunk, renders, wireframe, channel, clip plays, no c
   await app.goto('spark');
   expect(threeLoads).toHaveLength(0);
   openedAt = Date.now();
+  // the default shading mode (Material preview) already loads profile=three
+  const profile = page.waitForRequest((r) => r.url().includes('profile=three'));
   await app.openAsset('rifle', 'model');
   await expect(app.viewerStatus()).toContainText(/\d+ tris/, { timeout: 20_000 });
   await expect(app.modelFallback()).toHaveCount(0);
@@ -41,7 +43,6 @@ test('3D viewer: lazy three chunk, renders, wireframe, channel, clip plays, no c
   await app.press('w');
   await expect(app.modelToggle('Wireframe')).not.toBeChecked();
 
-  const profile = page.waitForRequest((r) => r.url().includes('profile=three'));
   await app.modelChannel().selectOption('normal');
   await profile;
   await expect(app.viewerStatus()).toContainText('channel Normal');

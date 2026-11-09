@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { GraphDoc, GraphEdge } from '@/lib/api/types';
 import {
   MAX_TICKS, SETTLE_ALPHA, applyFilter, buildGraph, centerOn, countsText, edgeLabel, findNode, fitView, hitTest, layeredLayout, makeRep,
-  parseLayout, radius, reloadsOn, seedPos, stepForce, tipText, zoomAt, type FilterOpts, type SimNode,
+  parseLayout, radius, reloadsOn, runForce, seedPos, stepForce, tipText, zoomAt, type FilterOpts, type SimNode,
 } from './sim';
 
 const doc = (ids: string[], edges: [string, string, string][] = [], extra: Partial<Record<string, Partial<GraphDoc['nodes'][number]>>> = {}): GraphDoc => ({
@@ -127,6 +127,30 @@ describe('graph sim', () => {
     expect(n).toBeGreaterThan(MAX_TICKS - 10);
   });
 
+  it('runForce: off-screen run to completion (tick cap, yields every 50 ticks, pinned stay, a newer run cancels)', async () => {
+    const mk = () => buildGraph(doc(['canvas:a', 'canvas:b', 'canvas:c'], [['canvas:a', 'variant_of', 'canvas:b'], ['canvas:b', 'variant_of', 'canvas:c']]));
+    const g = mk();
+    const vis = [...g.nodes.values()];
+    const r = applyFilter(g.nodes, g.edges, opts());
+    g.nodes.get('canvas:a')!.pinned = true;
+    const a0 = [g.nodes.get('canvas:a')!.x, g.nodes.get('canvas:a')!.y];
+    let yields = 0;
+    expect(await runForce(vis, r.edges, () => true, 50, async () => { yields++; })).toBe(true);
+    expect(yields).toBe(Math.ceil(MAX_TICKS / 50) - 1);
+    expect([g.nodes.get('canvas:a')!.x, g.nodes.get('canvas:a')!.y]).toEqual(a0);
+    // same start, same result as stepping by hand up to the cap
+    const h = mk();
+    const hv = [...h.nodes.values()];
+    h.nodes.get('canvas:a')!.pinned = true;
+    const hr = applyFilter(h.nodes, h.edges, opts());
+    let alpha = 1;
+    for (let t = 0; t < MAX_TICKS && alpha >= SETTLE_ALPHA; t++) alpha = stepForce(hv, hr.edges, alpha);
+    expect(hv.map((n) => [n.x, n.y])).toEqual(vis.map((n) => [n.x, n.y]));
+    expect(vis.every((n) => n.vx === 0 && n.vy === 0)).toBe(true);
+    let alive = true;
+    expect(await runForce(vis, r.edges, () => alive, 50, async () => { alive = false; })).toBe(false);
+  });
+
   it('force step is deterministic for coincident nodes', () => {
     const mk = () => { const g = buildGraph(doc(['canvas:a', 'canvas:b'])); for (const n of g.nodes.values()) { n.x = 0; n.y = 0; } return [...g.nodes.values()]; };
     const v1 = mk(), v2 = mk();
@@ -153,7 +177,8 @@ describe('graph sim', () => {
     expect(findNode(vis, 'shoulder')?.id).toBe('canvas:pauldron');
     expect(findNode(vis, '  ')).toBeNull();
     expect(parseLayout('layered')).toBe('layered');
-    expect(parseLayout('hierarchy')).toBe('force');
+    expect(parseLayout('hierarchy')).toBe('hierarchy');
+    expect(parseLayout('radial')).toBe('force');
   });
 
   it('reload events: structural changes only', () => {
