@@ -464,19 +464,52 @@ art_canvas/art_model/art_audio/art_project delete also move the files to the tra
  * reads it, and most tasks need one part of it.
  */
 export const TOPIC_SECTIONS = {
-  '3d': [['parts', '- floor {'], ['textures', 'TEXTURES:'], ['recipes', 'RECIPES:'], ['hard-surface', 'HARD-SURFACE DETAIL'],
-    ['render-cost', 'RENDER COST'], ['mesh', 'MESH PROCESSING'], ['hard-surface-recipes', 'HARD-SURFACE RECIPES'],
-    ['ships', 'SHIPS + STRUCTURES'], ['assemblies', '- Assemblies'], ['ship-kits', '- Templates: create'],
-    ['rigs', 'RIGS & CLIPS'], ['sprites', 'PRE-RENDERED SPRITES'], ['skinning', 'SKINNING']],
-  rig: [['basics', '0. Quick start'], ['hd', 'HIGH-DETAIL CHARACTERS'], ['weapons', 'HELD WEAPONS'], ['depth', 'DEPTH, DRAW ORDER']],
-  melee: [['clips', '1. melee {'], ['takedowns', 'PER-SKELETON TAKEDOWNS'], ['manifest', 'MANIFEST'], ['runtime', 'THREE.JS RUNTIME']],
-  music: [['genres', 'GENRE RECIPES'], ['example', 'WORKED:']],
-  fx: [['types', '- types / variants:'], ['metadata', '- metadata per effect'], ['runtime', 'three.js:']],
-  damage: [['states', 'STATES:'], ['fracture', 'FRACTURE:'], ['export', 'EXPORT:'], ['sprites', 'SPRITES:']],
-  audio: [['fps-scifi', 'FPS / SCI-FI SFX'], ['sfx-options', 'SFX OPTIONS'], ['instruments', 'INSTRUMENTS:'], ['samples-export', 'SAMPLES:']],
-  fp: [['hand-drawn', 'HAND-DRAWN']],
-  materials: [['editor', 'EDITOR:'], ['export', 'EXPORT (art_model export)']],
-  library: [['weapons', 'RUNTIME WEAPON LAYERS']],
+  '3d': [
+    ['parts', '- floor {', 'every part type and its args: floor wall arch stairs roof box wedge inset cylinder shape loft extrude lathe tube greeble hull truss rock decal neon sign fog_card marker light ...'],
+    ['textures', 'TEXTURES:', 'texture / faces / region options, world UVs, ruins (broken, holes), overlays (grime, moss), CTM connected textures, layouts / dioramas'],
+    ['recipes', 'RECIPES:', 'worked examples: gothic arch kit, floor + walls, HD-2D prop, lathed urn, chain, marble CTM, spaceship hull, engine ring, moss'],
+    ['hard-surface', 'HARD-SURFACE DETAIL', 'PBR materials, height + normal maps, greebles, tubes / sweeps, trim sheets, boolean / merge / morphs, shadows'],
+    ['render-cost', 'RENDER COST', 'export options: bake_ao, lods, impostor, collision, occluder, stats, cull rooms'],
+    ['mesh', 'MESH PROCESSING', 'boolean, remesh (voxel / quad), decimate, cluster_lod, visibility'],
+    ['hard-surface-recipes', 'HARD-SURFACE RECIPES', 'worked examples: hull greebling, corridor module, pipe run, city block with LODs + impostor'],
+    ['ships', 'SHIPS + STRUCTURES', 'hull {plan, profile, sections, panel_lines, plates}, on_hull placement'],
+    ['assemblies', '- Assemblies', 'assembly parts: canopy engine thruster wing landing_gear turret, corridor room door airlock bridge, tank crane silo, market_stall crate barrel terminal ...'],
+    ['ship-kits', '- Templates: create', 'ship templates (fighter dropship hauler capital_ring gunship), kit textures, livery, generate interiors, walkable ships + walk_check, budgets, mood previews'],
+    ['rigs', 'RIGS & CLIPS', 'rigid-part rigs: named parts, sockets, pose, animate clips, fp_arms / fp_rifle / fp_pistol templates, first-person weapon example'],
+    ['sprites', 'PRE-RENDERED SPRITES', 'render a model to pixel sprites (angles, sweeps, socket anchors), arms holding a gun (hold), pre-rendered FP weapon example'],
+    ['skinning', 'SKINNING', 'skeletal skinning: skeleton, skin weights, bone pose / animate, retarget, glTF skin export (roblox profile)']],
+  rig: [
+    ['basics', '0. Quick start', 'templates, custom rigs, drawing the part cells, pose, animate, per-frame anchors, preview'],
+    ['hd', 'HIGH-DETAIL CHARACTERS', 'humanoid_hd: per-view poses, IK, foot planting, secondary motion, sampling, equipment variants, compact replies'],
+    ['weapons', 'HELD WEAPONS', 'held guns: grip points, carry states, draw order, check'],
+    ['depth', 'DEPTH, DRAW ORDER', 'depth:true arm order, z keys, zcheck, linked cells, stable angles']],
+  melee: [
+    ['clips', '1. melee {', 'the melee clip set on a skeleton (weapon, shield), melee_check'],
+    ['takedowns', 'PER-SKELETON TAKEDOWNS', 'per-skeleton takedowns, batch, melee_sheet (weapon views), paired actors, first-person melee'],
+    ['manifest', 'MANIFEST', 'manifest fields: phases, events, hit volumes, root motion, sockets, paired, disarm transfer'],
+    ['runtime', 'THREE.JS RUNTIME', 'playing it in three.js and Roblox']],
+  music: [
+    ['genres', 'GENRE RECIPES', 'per-genre BPM, drums and instruments (techno, house, dnb, metal styles, ambient, cathedral, chiptune, synthwave, trap)'],
+    ['example', 'WORKED:', 'a complete song in text notation (gothic cathedral doom)']],
+  fx: [
+    ['types', '- types / variants:', 'every type and variant: muzzle views + fp aims, tracers, casings, impact surfaces, decals, explosions, smoke, fire, loops'],
+    ['metadata', '- metadata per effect', 'engine metadata (blend, fps, pivot, emitters, light curve, fp shake, sound), batch, preview, list'],
+    ['runtime', 'three.js:', 'three.js playback code and the Roblox ParticleEmitter setup']],
+  damage: [
+    ['states', 'STATES:', 'damage states and their features (dents, panels, bend, glass, screens, breach, decals), kinds, fx sockets, previews'],
+    ['fracture', 'FRACTURE:', 'fracture into pieces and debris'],
+    ['export', 'EXPORT:', 'what export writes: .damage.glb, LODs, rigs and skins per state, masks, files mode, roblox profile, manifest, materials'],
+    ['sprites', 'SPRITES:', 'art_draw damage on 2D sprites']],
+  audio: [
+    ['fps-scifi', 'FPS / SCI-FI SFX', 'firearm, weapon-handling, sci-fi and steam recipes and their options'],
+    ['sfx-options', 'SFX OPTIONS', 'fx chains, seamless loops, extra layer kinds (glide, ...), info on a recipe'],
+    ['instruments', 'INSTRUMENTS:', 'instrument presets and custom patches'],
+    ['samples-export', 'SAMPLES:', 'importing samples, export formats (wav / mp3 / ogg / opus), sample rate']],
+  fp: [['hand-drawn', 'HAND-DRAWN', 'hand-drawn 2D sources: gun / mag / attachment / arm templates, anchors, sweep2d, trace, hands against the gun']],
+  materials: [
+    ['editor', 'EDITOR:', 'the material editor, displacement, lights'],
+    ['export', 'EXPORT (art_model export)', 'export profiles, ORM packing, lightmaps, probes, bent normals, vertex colours, recipes']],
+  library: [['weapons', 'RUNTIME WEAPON LAYERS', 'runtime weapon layers (handling classes, weapon, conform, weapon_sheet, batch weapon:"runtime", composite, weapon_check) and gltf export']],
 };
 
 /** {core, sections:[{id, text}]} of a topic (sections empty when it has none). */
@@ -485,15 +518,15 @@ export function topicParts(topic) {
   const spec = TOPIC_SECTIONS[topic];
   if (!spec) return { core: text, sections: [] };
   const lines = text.split('\n');
-  const starts = spec.map(([id, pre]) => {
+  const starts = spec.map(([id, pre, about]) => {
     const i = lines.findIndex((l) => l.startsWith(pre));
     if (i < 0) throw new Error(`topic ${topic}: section "${id}" heading "${pre}" not found`);
-    return [id, i];
+    return [id, i, about];
   });
   for (let k = 1; k < starts.length; k++) if (starts[k][1] <= starts[k - 1][1]) throw new Error(`topic ${topic}: section "${starts[k][0]}" is out of order`);
   return {
     core: lines.slice(0, starts[0][1]).join('\n'),
-    sections: starts.map(([id, i], k) => ({ id, text: lines.slice(i, k + 1 < starts.length ? starts[k + 1][1] : lines.length).join('\n') })),
+    sections: starts.map(([id, i, about], k) => ({ id, about, text: lines.slice(i, k + 1 < starts.length ? starts[k + 1][1] : lines.length).join('\n') })),
   };
 }
 
@@ -519,6 +552,6 @@ export function helpText(a = {}) {
     if (bad.length) throw new Error(`Unknown section ${bad.join(', ')} of topic "${t}". Sections: ${sections.map((s) => s.id).join(', ')}`);
     return sections.filter((s) => want.includes(s.id)).map((s) => s.text).join('\n');
   }
-  const index = sections.map((s) => `- ${s.id} (~${Math.max(50, approxTokens(s.text))} tok): ${s.text.split('\n')[0].replace(/^- /, '').slice(0, 90)}`);
+  const index = sections.map((s) => `- ${s.id} (~${Math.max(50, approxTokens(s.text))} tok): ${s.about}`);
   return `${core}\nMORE (art_help {topic:"${t}", section:"<id>"}; several: "a,b"; everything: full:true):\n${index.join('\n')}`;
 }

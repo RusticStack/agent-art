@@ -47,6 +47,26 @@ export function packFormatFor(version) {
   return best;
 }
 
+// Path arguments agents pass from Git Bash / MSYS shells on Windows ("/c/Users/x") mean "C:/Users/x";
+// Node would read them as "\c\Users\x" on the current drive and write somewhere unexpected.
+const PATH_KEYS = ['path', 'out', 'pack', 'dir', 'root', 'manifest', 'file', 'commands_file'];
+/** "/c/x" -> "C:/x" on Windows when drive C: exists; anything else unchanged. */
+export function msysPath(p, platform = process.platform, driveExists = (d) => fs.existsSync(`${d}:/`)) {
+  if (platform !== 'win32' || typeof p !== 'string') return p;
+  const m = /^\/([a-zA-Z])(\/.*)?$/.exec(p);
+  if (!m || !driveExists(m[1].toUpperCase())) return p;
+  return `${m[1].toUpperCase()}:${m[2] || '/'}`;
+}
+function msysArgs(args) {
+  if (process.platform !== 'win32' || !args || typeof args !== 'object') return args;
+  let out = args;
+  for (const k of PATH_KEYS) {
+    const v = msysPath(args[k]);
+    if (v !== args[k]) { if (out === args) out = { ...args }; out[k] = v; }
+  }
+  return out;
+}
+
 export class Engine extends EventEmitter {
   constructor({ home, cwd }) {
     super();
@@ -199,6 +219,7 @@ export class Engine extends EventEmitter {
   run(op, args = {}, source = 'agent', ctx = null) {
     const fn = OPS[op];
     if (!fn) throw new Error(`Unknown op "${op}". Valid: ${Object.keys(OPS).join(', ')}`);
+    args = msysArgs(args);
     return this.activity.record(op, args, source, ctx, () => fn.call(this, args, source));
   }
   /** Run a read-only op without recording it in the activity timeline (UI reads). */
