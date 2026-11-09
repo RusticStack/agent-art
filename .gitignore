@@ -2,3 +2,5 @@ node_modules/
 workspace/
 render.png
 *.log
+.env
+.env.*

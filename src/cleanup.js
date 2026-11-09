@@ -49,7 +49,7 @@ function reloadCanvas(e, name, source) {
   e.emit('event', ev);
 }
 const modelFile = (e, name) => path.join(e.home, 'models', `${name}.json`);
-const audioFiles = (e, name) => { const s = audioStore(e); return [path.join(s.d.root, `${name}.json`), path.join(s.d.cache, `${name}.wav`), path.join(s.d.cache, `${name}.meta.json`)]; };
+const audioFiles = (e, name) => { const s = audioStore(e); return [path.join(s.d.root, `${name}.json`), path.join(s.d.cache, `${name}.wav`), path.join(s.d.cache, `${name}.meta.json`), path.join(s.d.root, 'voices', `${name}.wav`)]; }; // + an ElevenLabs voice take
 
 registerAssetType('canvas', {
   builtin: true, sub: ['layer', 'anim', 'frame'],

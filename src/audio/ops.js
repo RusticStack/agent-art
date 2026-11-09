@@ -22,6 +22,7 @@ function sampleRate(v) {
   return n;
 }
 import { GENRE_NAMES } from './genres.js';
+import { findApiKey, missingKeyError, synthesize, listVoices, DEFAULT_MODEL } from './elevenlabs.js';
 
 const NAME_RE = /^[A-Za-z0-9_\-.]{1,64}$/;
 const dirs = (e) => {
@@ -178,7 +179,7 @@ export const AUDIO_OPS = {
       const def = getDef(this, n);
       // the asset (definition + render cache) goes to the trash (art_cleanup restore), unless cleanup.trash_deletes is false
       if (!this.cleanup?.trashFiles('audio', def.name, source, 'art_audio delete')) {
-        for (const f of [path.join(s.d.root, `${def.name}.json`), path.join(s.d.cache, `${def.name}.wav`), path.join(s.d.cache, `${def.name}.meta.json`)]) fs.rmSync(f, { force: true });
+        for (const f of [path.join(s.d.root, `${def.name}.json`), path.join(s.d.cache, `${def.name}.wav`), path.join(s.d.cache, `${def.name}.meta.json`), path.join(s.d.root, 'voices', `${def.name}.wav`)]) fs.rmSync(f, { force: true });
         s.defs.delete(def.name); s.mem.delete(def.name);
         this.emit('event', { type: 'audio', name: def.name, deleted: true, source, ts: Date.now() });
       }
@@ -332,6 +333,42 @@ export const AUDIO_OPS = {
     const au = getAudio(this, name, { force: true });
     def.stats = quickStats(au, def); saveDef(this, def, source);
     return { name, ...def.stats, use: `sampler zones: {sample:"${name}", root:"${a.root || 'c4'}"}; or art_audio compare {name:<yours>, reference:"${name}"}` };
+  },
+
+  /** Voice acting via ElevenLabs text-to-speech: the line becomes a sample asset (key from env / .env only). */
+  audio_voice(a, source) {
+    if (!a.name) throw new Error('voice needs "name" (the asset to create), "text" and "voice" (a voice name or id; action "voices" lists them)');
+    if (!NAME_RE.test(a.name)) throw new Error('"name" must be 1-64 chars of letters, digits, _ - .');
+    const s = store(this), cwd = this.cwd || process.cwd();
+    const settings = { stability: a.stability, similarity: a.similarity, style: a.style, speed: a.speed, speaker_boost: a.speaker_boost };
+    for (const [k, v] of Object.entries(settings)) if (v != null && (typeof v !== 'number' && typeof v !== 'boolean')) throw new Error(`${k} must be a number`);
+    const sampleRate = Number(a.sample_rate ?? 24000);
+    const req = { text: a.text, voice: a.voice, model: a.model || DEFAULT_MODEL, sample_rate: sampleRate, settings, seed: a.seed, language: a.language, previous_text: a.previous_text, next_text: a.next_text };
+    const reqHash = crypto.createHash('sha1').update(JSON.stringify(req)).digest('hex').slice(0, 16);
+    const old = s.defs.get(a.name);
+    if (!a.force && old?.voice?.request_hash === reqHash && old.source && fs.existsSync(old.source)) {
+      return { name: a.name, reused: true, ...old.stats, voice: old.voice.voice_name || old.voice.voice_id, note: 'same text, voice and settings: reused the saved take (no ElevenLabs credits used); force:true makes a new take' };
+    }
+    const found = findApiKey({ cwd, home: this.home });
+    if (!found) throw missingKeyError({ cwd, home: this.home });
+    const dir = path.join(s.d.root, 'voices');
+    const out = path.join(dir, `${a.name}.wav`), tmp = path.join(dir, `${a.name}.part.wav`);
+    const r = synthesize(found.key, { ...req, sampleRate, out: tmp });
+    fs.renameSync(tmp, out);
+    const def = { name: a.name, kind: 'sample', source: out, intent: a.intent ?? old?.intent, voice: { provider: 'elevenlabs', text: a.text, voice_id: r.voice_id, voice_name: r.voice_name || a.voice, model: r.model, format: r.format, settings: Object.fromEntries(Object.entries(settings).filter(([, v]) => v != null)), seed: a.seed, language: a.language, request_hash: reqHash } };
+    saveDef(this, def, source);
+    const au = getAudio(this, a.name, { force: true });
+    def.stats = quickStats(au, def); saveDef(this, def, source);
+    return { name: a.name, ...def.stats, voice: def.voice.voice_name, voice_id: r.voice_id, model: r.model, format: r.format, key_from: found.from.startsWith('environment') ? 'environment' : '.env', use: `art_audio export {name:"${a.name}"}; analyze / critique it like any sound; sampler zones in a song: {sample:"${a.name}"}` };
+  },
+
+  /** ElevenLabs voices visible to the API key (search by name / label). */
+  audio_voices(a = {}) {
+    const cwd = this.cwd || process.cwd();
+    const found = findApiKey({ cwd, home: this.home });
+    if (!found) throw missingKeyError({ cwd, home: this.home });
+    const voices = listVoices(found.key, { search: a.search, category: a.category, limit: a.limit || 50 });
+    return { count: voices.length, voices: voices.map((v) => ({ name: v.name, voice_id: v.voice_id, category: v.category, ...(Object.keys(v.labels).length ? { labels: Object.values(v.labels).filter(Boolean).join(', ') } : {}) })), use: 'art_audio {action:"voice", name, text, voice:"<name or voice_id>"}' };
   },
 
   /** Export WAV (16/24/32f) or mp3/ogg/opus via ffmpeg; loop smpl chunk + JSON sidecar (re-render recipe). */

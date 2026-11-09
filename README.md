@@ -155,7 +155,7 @@ More: [docs/planets/README.md](docs/planets/README.md).
 
 ### Sound effects and music: `art_audio`
 
-Agents cannot hear, so `art_audio` turns audio into things they can read: an analysis image (waveform, beat grid, spectrogram, loudness, band balance, stem masking) and a listener report in plain words (felt tempo, drum feel, key and chords, timbre, what is buried or repetitive, fit to a genre and the stated intent). It makes SFX from seeded recipes (gore, combat, firearms, sci-fi, UI, monsters, footsteps) with variants (gunshots are real CC0 field recordings: AR-15, AK-47, 9mm pistol, .38 revolver, .30-06, 7.62x54R, 12 gauge, SMGs; the `sample` layer plays them or your own WAVs), music from a compact text notation with generators and instrument presets, and mixes and masters to a LUFS target. Export is WAV with loop points, mp3 / ogg / opus through ffmpeg, stems and adaptive layers; renders run at 44.1 kHz, and `sample_rate:48000` delivers 48 kHz with sample-exact loop points.
+Agents cannot hear, so `art_audio` turns audio into things they can read: an analysis image (waveform, beat grid, spectrogram, loudness, band balance, stem masking) and a listener report in plain words (felt tempo, drum feel, key and chords, timbre, what is buried or repetitive, fit to a genre and the stated intent). It makes SFX from seeded recipes (gore, combat, firearms, sci-fi, UI, monsters, footsteps) with variants (gunshots are real CC0 field recordings: AR-15, AK-47, 9mm pistol, .38 revolver, .30-06, 7.62x54R, 12 gauge, SMGs; the `sample` layer plays them or your own WAVs), music from a compact text notation with generators and instrument presets, and mixes and masters to a LUFS target. With an [ElevenLabs](https://elevenlabs.io) API key it also records voice lines (`art_audio voice`) as sample assets you can analyze, process and export. Export is WAV with loop points, mp3 / ogg / opus through ffmpeg, stems and adaptive layers; renders run at 44.1 kHz, and `sample_rate:48000` delivers 48 kHz with sample-exact loop points.
 
 ![Audio player with waveform, spectrum and the analysis report](docs/ui/09-audio-player.png)
 
@@ -198,7 +198,7 @@ Optional: real vanilla texture names and sizes per Minecraft Java version (refer
 | `art_fp` | First-person viewmodels: arms per handling class, gun / magazine / attachment / item sweeps, composite and check; hand-drawn 2D sources | `kit` `sweep` `batch` `composite` `check` `paint` `template` `anchors` `sweep2d` `trace` |
 | `art_fx` | Combat effect flipbooks with engine metadata | `make` `batch` `preview` `list` `export` |
 | `art_planet` | Planets, star systems, landing-zone terrain, rocks, asteroids, skyboxes, space FX | `planet` `system` `terrain` `rocks` `asteroids` `skybox` `fx` `info` |
-| `art_audio` | Sound effects, music, mixing and mastering; analysis images, listener reports and critiques; WAV / mp3 / ogg / opus export | `sfx` `instrument` `generate` `song` `render` `analyze` `critique` `compare` `import` `export` `list` `info` `delete` |
+| `art_audio` | Sound effects, music, mixing and mastering; analysis images, listener reports and critiques; ElevenLabs voice acting; WAV / mp3 / ogg / opus export | `sfx` `instrument` `generate` `song` `render` `analyze` `critique` `compare` `import` `voice` `voices` `export` `list` `info` `delete` |
 | `art_graph` | Asset graph: relations, tags, notes and nested groups; compact `summary` / `query` | `summary` `query` `find` `path` `link` `unlink` `tag` `note` `group` |
 | `art_review` | Review notes the user leaves in the web UI: list, see the marked region, resolve, ask | `list` `get` `update` `add` |
 | `art_cleanup` | Retire superseded assets: dry-run plan, soft delete to a trash, restore, disk usage; `config` reads the cleanup settings (only the user can change them) | `plan` `apply` `replace` `trash` `restore` `empty` `usage` `config` |
@@ -329,10 +329,22 @@ It is off by default, logs only argument shapes unless you ask for `full`, and n
 | ffmpeg for mp3 / ogg / opus export | | `AGENT_ART_FFMPEG` | `ffmpeg` on `PATH` |
 | Debug usage log (`mcp` only) | `--debug [full]` | `AGENT_ART_DEBUG=1` or `full` | off |
 | Debug log file | | `AGENT_ART_DEBUG_FILE` | `<workspace>/debug/usage-<date>.jsonl` |
+| ElevenLabs API key for voice acting | | `ELEVENLABS_API_KEY`, or that line in a `.env` file | none (voice acting is off) |
 
 The workspace holds `canvases/*.json` (layers stored as PNG), `models/*.json` (3D model definitions), `projects/`, `exports/` and `packs/`, plus `graph.json` (asset graph and review notes), `reviews/` (review note crops), `ui-state.json` (hidden and pinned assets in the UI), `debug/` (usage logs, only with `--debug`), `trash/` (cleanup batches and single deletes, until emptied) and `config.json`. Since 0.3.0 there is no implicit fallback to a `./workspace` folder next to a source checkout, because it silently split work between clients started from different folders. If that folder exists, `serve` and `mcp` print a note; pass `--home ./workspace` to keep using it.
 
 `<workspace>/config.json` holds `cleanup.allow_paths` (folders outside `exports/` that cleanup may move files from) and `cleanup.trash_deletes` (`false` makes single deletes hard deletes again). Only the user sets them, in the file or in the web UI under Cleanup › Settings; the agent can read them with `art_cleanup config`.
+
+### ElevenLabs voice acting
+
+`art_audio voice` reads the API key from the `ELEVENLABS_API_KEY` environment variable (system or user), or from a `.env` file in the project folder the MCP server starts in, or in the workspace folder:
+
+```sh
+# .env (add it to .gitignore)
+ELEVENLABS_API_KEY=sk_...
+```
+
+The key is never a tool argument, so it stays out of your MCP config, the chat, replies and the usage log. A `.env` is read on each call; a new environment variable needs a server restart. Saying the same line again with the same voice and settings reuses the saved take, so it costs no credits (`force:true` records a new one). Takes are 24 kHz WAV by default (44.1 / 48 kHz need an ElevenLabs Pro plan) and are stored at 44.1 kHz like every other sound.
 
 The server binds to 127.0.0.1 and refuses cross-origin writes.
 

@@ -339,15 +339,17 @@ export const TOOLS = [
   },
   {
     name: 'art_audio',
-    description: 'Sound effects, music and audio analysis you read as images + reports (you cannot hear). sfx {recipe|params|layers, seed, variants, vars, fx, reverb, target, loop}; instrument {name, patch, notes}; generate {generator,...}; song {name, text (notation) | song (JSON), intent, genre}; render; analyze {name|"x_*", view:"mix"} = image + listener report; critique {name|"x_*", intent, genre}; compare {name, reference}; import {path}; export {name|"x_*", format, stems, layers}; list; info; delete {name|"x_*"}. Details: art_help {topic:"audio"|"music"|"mixing"|"perception"}.',
+    description: 'Sound effects, music and audio analysis you read as images + reports (you cannot hear). sfx {recipe|params|layers, seed, variants, vars, fx, reverb, target, loop}; instrument {name, patch, notes}; generate {generator,...}; song {name, text (notation) | song (JSON), intent, genre}; render; analyze {name|"x_*", view:"mix"} = image + listener report; critique {name|"x_*", intent, genre}; compare {name, reference}; import {path}; voice {name, text, voice} = ElevenLabs voice acting (key in ELEVENLABS_API_KEY or a project .env, never here); voices {search}; export {name|"x_*", format, stems, layers}; list; info; delete {name|"x_*"}. Details: art_help {topic:"audio"|"music"|"mixing"|"perception"}.',
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['sfx', 'instrument', 'generate', 'song', 'render', 'analyze', 'critique', 'compare', 'import', 'export', 'list', 'info', 'delete'] }, name: { type: 'string' },
+        action: { type: 'string', enum: ['sfx', 'instrument', 'generate', 'song', 'render', 'analyze', 'critique', 'compare', 'import', 'voice', 'voices', 'export', 'list', 'info', 'delete'] }, name: { type: 'string' },
         recipe: { type: 'string' }, params: { type: 'object' }, layers: { type: ['array', 'object', 'boolean'] }, seed: { type: 'integer' }, variants: { type: 'integer' }, vars: { type: 'object' },
         patch: { type: 'object' }, notes: { type: ['string', 'object'] }, generator: { type: 'string' }, text: { type: 'string' }, song: { type: 'object' },
         intent: { type: 'string' }, genre: { type: 'string' }, view: { type: 'string', enum: ['overview', 'mix'] }, reference: { type: 'string' }, path: { type: 'string' },
-        format: { type: 'string', enum: ['wav', 'mp3', 'ogg', 'opus'] }, stems: { type: 'boolean' }, sample_rate: { enum: [44100, 48000] },
+        format: { type: 'string', enum: ['wav', 'mp3', 'ogg', 'opus'] }, stems: { type: 'boolean' }, sample_rate: { enum: [44100, 48000, 16000, 22050, 24000] },
+        // voice: voice name|id, model, stability/similarity/style 0-1, speed 0.7-1.2, language ISO 639-1, previous_text/next_text for continuity, force = new take
+        voice: { type: 'string' }, model: { type: 'string' }, stability: { type: 'number' }, similarity: { type: 'number' }, style: { type: 'number' }, speed: { type: 'number' }, language: { type: 'string' }, previous_text: { type: 'string' }, next_text: { type: 'string' }, force: { type: 'boolean' }, search: { type: 'string' },
         // sfx: fx chain [{type}], reverb {preset, wet}, peak target dBFS, loop true|{length, crossfade}, tail s
         fx: { type: ['array', 'string'] }, reverb: { type: ['object', 'string', 'number', 'boolean'] }, target: { type: 'number' }, loop: { type: ['boolean', 'object'] }, tail: { type: 'number' },
         names: { type: 'array', items: { type: 'string' } },

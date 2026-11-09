@@ -544,10 +544,10 @@ Parameters:
 
 ### art_audio
 
-Sound effects, music and audio analysis you read as images + reports (you cannot hear). sfx {recipe|params|layers, seed, variants, vars, fx, reverb, target, loop}; instrument {name, patch, notes}; generate {generator,...}; song {name, text (notation) | song (JSON), intent, genre}; render; analyze {name|"x_*", view:"mix"} = image + listener report; critique {name|"x_*", intent, genre}; compare {name, reference}; import {path}; export {name|"x_*", format, stems, layers}; list; info; delete {name|"x_*"}. Details: art_help {topic:"audio"|"music"|"mixing"|"perception"}.
+Sound effects, music and audio analysis you read as images + reports (you cannot hear). sfx {recipe|params|layers, seed, variants, vars, fx, reverb, target, loop}; instrument {name, patch, notes}; generate {generator,...}; song {name, text (notation) | song (JSON), intent, genre}; render; analyze {name|"x_*", view:"mix"} = image + listener report; critique {name|"x_*", intent, genre}; compare {name, reference}; import {path}; voice {name, text, voice} = ElevenLabs voice acting (key in ELEVENLABS_API_KEY or a project .env, never here); voices {search}; export {name|"x_*", format, stems, layers}; list; info; delete {name|"x_*"}. Details: art_help {topic:"audio"|"music"|"mixing"|"perception"}.
 
 Parameters:
-- action (string, required): one of sfx | instrument | generate | song | render | analyze | critique | compare | import | export | list | info | delete
+- action (string, required): one of sfx | instrument | generate | song | render | analyze | critique | compare | import | voice | voices | export | list | info | delete
 - name (string)
 - recipe (string)
 - params (object)
@@ -567,7 +567,18 @@ Parameters:
 - path (string)
 - format (string): one of wav | mp3 | ogg | opus
 - stems (boolean)
-- sample_rate (enum): one of 44100 | 48000
+- sample_rate (enum): one of 44100 | 48000 | 16000 | 22050 | 24000
+- voice (string)
+- model (string)
+- stability (number)
+- similarity (number)
+- style (number)
+- speed (number)
+- language (string)
+- previous_text (string)
+- next_text (string)
+- force (boolean)
+- search (string)
 - fx (array|string)
 - reverb (object|string|number|boolean)
 - target (number)
@@ -1380,6 +1391,7 @@ INSTRUMENTS: art_audio {action:"instrument"} lists presets; {name:"metal_guitar"
 Presets: cathedral_organ choir_pad boys_choir church_bells tubular_bell metal_guitar bass_guitar sub_bass rumble_bass strings_pad low_brass_stab dread_drone heartbeat wind_ambience sampler metal_kit industrial_kit; drums: metal_kick metal_snare metal_tom1 metal_tom2 metal_tom3 metal_hat metal_ohat metal_crash metal_china metal_ride ind_kick ind_snare ind_tom1 ind_tom2 ind_tom3 ind_hat ind_ohat ind_crash ind_ride clap.
 Patch = {sources:[{type:osc|additive|modal|fm|pluck|bowed|noise|metal|sample, ...}], amp:{a,d,s,r}, filter:{type,cutoff,q,keytrack,env,env_amount,lfo}, pitch_env, vibrato, mute:{...palm-mute overrides}, layers:[{max_vel, ...velocity layer}], hits, oneshot, fx:[...], gain, pan, width, reverb (send), double (L/R takes), humanize:{time,vel}, round_robin, octave}.
 SAMPLES: art_audio {action:"import", path:"kick.wav"} (mp3/ogg via ffmpeg) -> instrument {name:"my_kick", patch:{base:"sampler", sources:[{zones:[{sample:"kick", root:"c3", lo:"c0", hi:"c8", vel:[0,1]}]}]}}.
+VOICE ACTING (ElevenLabs): art_audio {action:"voice", name:"guard_halt", text:"Halt! Who goes there?", voice:"<name or voice_id>", model?:"eleven_multilingual_v2", stability?:0.5, similarity?:0.75, style?:0, speed?:1, seed?, language?:"en", previous_text?/next_text? (continuity across lines), sample_rate?:24000 (44100/48000 need an ElevenLabs Pro plan)} -> a sample asset (analyze, critique, export, sampler zones like any import). The same text + voice + settings reuses the saved take (no credits); force:true makes a new one. {action:"voices", search?:"deep"} lists voices. The API key is never a tool argument: ELEVENLABS_API_KEY as a system / user environment variable or in a .env file in the project folder (the server's working directory) or the workspace (a .env is read on each call; a new environment variable needs a server restart).
 EXPORT: {action:"export", name:"gib_burst_*", format:"wav|mp3|ogg|opus", bits:16|24|32, bitrate:192, stems:true, layers:true, path:"sfx/"} -> files + <name>.json sidecar (seed + recipe to re-render). Loops get a WAV smpl chunk and OGG LOOPSTART/LOOPLENGTH tags. mp3/ogg/opus need ffmpeg (AGENT_ART_FFMPEG or PATH).
 SAMPLE RATE: renders run at 44100 Hz; sample_rate:48000 (on export, or stored on song/sfx/render) delivers 48 kHz through a windowed-sinc resampler. Loop points stay sample-exact (the loop body is resampled as a seamless periodic segment); the sidecar/manifest report the delivered rate, samples and loop.
 Topics: music (notation + genre recipes), mixing (chains, buses, mastering), perception (how to read analyze/critique).
