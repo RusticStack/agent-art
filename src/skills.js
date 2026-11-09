@@ -1,6 +1,8 @@
 // Skills: step-by-step recipes with concrete, copyable command batches. Weaker models do far
 // better adapting a worked example than composing from a reference. Served via art_help
-// {skill}, as MCP prompts, and as Claude Code / agent skill files (skills/<name>/SKILL.md).
+// {skill}, as MCP prompts, and as Claude Code / agent skill files (agent-art skills --out DIR
+// writes DIR/agent-art-<name>/SKILL.md). `desc` is the frontmatter description: what the skill
+// makes and when to use it, with the words an agent harness matches on.
 import { AUDIO_SKILLS } from './audio/docs.js';
 import { PLANET_SKILLS } from './space/docs.js';
 import { FX_SKILLS } from './fx/docs.js';
@@ -11,6 +13,7 @@ export const SKILLS = {
   'tileable-texture': {
     title: 'Tileable block/floor texture (stone, cobble, dirt, wood, metal)',
     when: 'Any seamless texture: Minecraft blocks, RPG floor/wall tiles.',
+    desc: 'Makes seamless, tileable pixel-art textures (stone, cobble, bricks, dirt, sand, planks, metal) with Agent Art. Use when asked for a tileable or seamless texture, a Minecraft block texture, or RPG floor and wall tiles.',
     body: `1. Canvas + ramp (4-5 shades, hue-shifted):
    art_create_canvas ${J({ name: 'cobble', width: 16 })}
    art_palette ${J({ canvas: 'cobble', action: 'ramp', base: '#8a8a94', steps: 5, prefix: 's' })}
@@ -26,6 +29,7 @@ export const SKILLS = {
   'sprite': {
     title: 'Character / item / monster sprite',
     when: 'A single sprite (hero, enemy, item icon, prop).',
+    desc: 'Draws one pixel-art sprite (hero, enemy, monster, item, prop) with palette ramps, form shading and an outline in Agent Art. Use for a single sprite or icon-sized character; for several views or animations use agent-art-rig.',
     body: `1. Size (16/24/32/48) and ramps: one 4-5 shade ramp per material (skin, cloth, metal) + one dark outline color (hue-shifted, not black).
 2. Flat silhouette, one mid color per part (head, body, limbs, gear) with rect/ellipse/polygon/grid. Keep it chunky: thin 1px limbs vanish.
 3. Form shading per part, one light (top-left):
@@ -38,6 +42,7 @@ Multiple views or animations of this sprite -> use the "rig" skill so it stays i
   'rig': {
     title: 'Consistent character: views (front/side/back) + animations from one rig',
     when: 'A character/creature needed in several directions or animations (walk, idle, attack) — keeps it the SAME everywhere.',
+    desc: 'Builds a rigged pixel-art character or creature (humanoid, blob, flyer or custom) whose parts are drawn once and tweened into side, front and back views and animations (walk, idle, attack, jump, death). Use whenever a sprite needs more than one direction or frame.',
     body: `Fast path (any humanoid, blob/slime, bat/bird): a template is a starting point you can reshape:
    art_rig ${J({ action: 'create', name: 'knight', frame: [32, 32], template: 'humanoid', parts: { head: { w: 12, h: 10 }, cape: { w: 8, h: 12, pivot: [4, 0], parent: 'body', at: [-2, -6], z: -4 } } })}
    draw every listed cell (step 2), art_rig preview, then one call per animation:
@@ -57,6 +62,7 @@ Custom rig (anything else: quadrupeds, vehicles, props with moving parts):
   'rig-hd': {
     title: 'High-detail character rig (humanoid_hd: 8 directions, per-view poses, IK, foot planting, follow-through)',
     when: 'Detailed characters at 64x96 .. 160x240 (late-90s pre-rendered look, shooters, action games) that need many smooth animations in several directions.',
+    desc: 'Builds a high-detail humanoid_hd character rig (64x96 to 160x240, 8 directions) with per-view poses, two-bone IK, foot planting and cape follow-through. Use for detailed, pre-rendered-style or shooter characters with many smooth animations.',
     body: `1. Create from the template (sizes scale with the frame; cape/gear_hip follow-through, RotSprite sampling and scale_children are already on):
    art_rig ${J({ action: 'create', name: 'soldier', frame: [128, 192], template: 'humanoid_hd', secondary: { cape: { stiffness: 0.15, damping: 0.2, gravity: 0.5 } } })} (merged over the template's cape/gear_hip springs)
    Parts: pelvis (root), torso, chest, neck, head (+head:blink), upper_arm/forearm/hand and thigh/shin/foot _f (near) / _b (far), slots weapon (child of hand_f), gear_back, gear_hip, cape. Remove a slot with parts:{cape:null}.
@@ -78,6 +84,7 @@ Armed characters: use the "weapon-handling" skill (hands on grips in every frame
   'weapon-handling': {
     title: 'Characters holding guns: grips, carry states, reach, dead zone, validation (2D rigs and FP arms)',
     when: 'Any character sprite or first-person arms holding a rifle, SMG, shotgun, DMR, LMG or pistol, including attachments (vertical / angled grip, bipod, suppressor), in every direction and animation.',
+    desc: 'Makes characters hold guns correctly: both hands on the grips, carry states (aim, ready, sprint, reload, holster), reach, no clipping and draw order, with validation, for 2D rigs and first-person arms. Use for any armed character or viewmodel with a rifle, SMG, shotgun, pistol or attachments.',
     body: `2D characters (art_rig, humanoid_hd):
 1. Create with the weapon declared (cell sized for the class; attachment cells added):
    art_rig ${J({ action: 'create', name: 'soldier', frame: [128, 192], template: 'humanoid_hd', weapon: { class: 'rifle', attachments: { vgrip: 'vertical_grip' } } })}
@@ -94,6 +101,7 @@ First-person (art_model):
   'anim-library': {
     title: 'Animation library: one skeleton + clip library, many skins, batch render to game strips + manifest',
     when: 'Several characters (factions, armour sets, body types) sharing the same motion set, or rendering a whole character roster for a game manifest.',
+    desc: 'Authors motion once on a skeleton and renders it on many skins and loadouts (art_anim), batching game sprite strips and a characters manifest, with optional runtime gun layers. Use for a roster of characters that share a clip library, for retargeting, or for exporting every animation to a game.',
     body: `1. Skeleton (rig definition + the standard clips): art_anim ${J({ action: 'skeleton', name: 'hd', template: 'humanoid_hd', frame: [128, 192], weapon: { class: 'rifle' }, proportions: { heavy: { width: 1.15, spine: 1.04 }, lean: { width: 0.9, legs: 1.04 } } })}
 2. One skin per character: art_anim ${J({ action: 'skin', name: 'mec', skeleton: 'hd', proportions: 'heavy' })} creates rig "mec" with cells sized for its proportions. Draw the cells (art_rig info {name:"mec"} lists them). Linked cells save work: parts.<p>.link:{back_side:"side"}; art_rig derive {name:"mec", from:"side", to:["front_side"]} copies a view to paint over.
 3. Check the drawing before rendering: art_rig ${J({ action: 'consistency', name: 'mec' })} (views agree: palette, bone lengths, joints, silhouette) and art_rig ${J({ action: 'zcheck', name: 'mec' })} (no z-flicker, arm order agrees with depth).
@@ -106,6 +114,7 @@ First-person (art_model):
   'walk-cycle': {
     title: 'Walk cycle without a rig (frame-by-frame)',
     when: 'Quick hand-drawn animation of an existing sprite.',
+    desc: 'Hand-animates a short frame-by-frame walk cycle for an existing pixel sprite without a rig. Use for a quick 4-frame walk or bob; for 8+ frames or several directions use agent-art-rig.',
     body: `1. art_animation ${J({ canvas: 'hero', action: 'insert', count: 3, copy_from: 0 })}  -> 4 identical frames to edit.
 2. Poses: 0 contact (legs apart), 1 down (body 1px lower), 2 contact mirrored, 3 up (body 1px higher). Only redraw legs/arms per frame: art_draw {frame:N, commands:[clear the leg area, grid new legs]}.
 3. Keep head/torso pixels identical (copy from_frame 0) and the feet on the same ground row.
@@ -115,6 +124,7 @@ For 8+ frames or several directions use the rig skill.`,
   'iso-scene': {
     title: 'Isometric scene (tactics map, room, courtyard)',
     when: '2:1 pixel isometric dioramas.',
+    desc: 'Builds a 2:1 isometric pixel-art scene (tactics map, room, courtyard) from iso tiles and boxes with light and shadow layers. Use when asked for an isometric map, diorama or iso tiles.',
     body: `1. Canvas e.g. 160x120 with a background gradient; origin = top vertex of cell 0,0 (e.g. [80,24]), tile 32.
 2. Floor back to front: ${J({ op: 'iso_tile', at: [0, 0, 0], tile: 32, origin: [80, 24], color: '#6a7a5a', outline: '#2a3326', inset: 1 })} for each cell (increasing gx+gy).
 3. Blocks/props back to front: ${J({ op: 'iso_box', at: [1, 1, 0], tile: 32, origin: [80, 24], height: 16, top: '#b89a72', outline: '#3a2a20', edge: '#e0c79c' })}; small props with w:16 anchor:"center".
@@ -125,6 +135,7 @@ For 8+ frames or several directions use the rig skill.`,
   'hd2d-scene': {
     title: '2.5D / HD-2D scene (parallax layers, light, fog)',
     when: 'Backgrounds, title screens, atmospheric scenes.',
+    desc: 'Paints a layered 2.5D / HD-2D pixel-art scene: sky, parallax far / mid / foreground layers, light rays, fog, glow and vignette. Use for backgrounds, title screens and atmospheric scenes.',
     body: `1. Layers bottom->top: sky (gradient), far (silhouettes, low contrast, bluish), mid, play, foreground. art_layer add {position:"top"} each.
 2. Far layers: shapes + adjust lightness/saturation down; blur radius 1 optional.
 3. Light: layer blend "screen": rays from the light source, light at lamps/windows; shadows: layer blend "multiply".
@@ -135,6 +146,7 @@ For 8+ frames or several directions use the rig skill.`,
   'minecraft-pack': {
     title: 'Minecraft resource pack',
     when: 'Making block/item textures for a Minecraft Java version.',
+    desc: 'Makes a Minecraft Java resource pack: textures under the real vanilla names and sizes, animated textures, and the built pack zip. Use when asked for Minecraft block or item textures or a resource pack.',
     body: `1. art_project create {name, meta:{minecraft:"1.12.2", pack:"my-pack"}, palette, notes (style rules)}.
 2. art_minecraft vanilla {version:"1.12.2", filter:"stone|planks"} -> real names/sizes (1.12: blocks/planks_oak; 1.13+: block/oak_planks).
 3. One canvas per texture with meta.texture (e.g. "blocks/stone"), using the tileable-texture skill; animated ones with frames + meta.frametime.
@@ -144,6 +156,7 @@ For 8+ frames or several directions use the rig skill.`,
   '3d-kit': {
     title: 'HD-2D 3D environment kit (modular pieces -> .glb) and props',
     when: 'Map environments for a 3D game in the HD-2D look (pixel textures on low-poly meshes): floors, walls, arches, stairs, ruins, dioramas; also extruded/lathed props.',
+    desc: 'Builds a modular HD-2D 3D environment kit (floors, walls, arches, stairs, ruins, dioramas) and extruded or lathed props from pixel textures, exported as .glb. Use for low-poly 3D map pieces with pixel-art textures, connected textures (CTM) or moss and grime overlays.',
     body: `1. Tileable textures at the game density (32 px = 1 unit = one grid cell), using the tileable-texture skill:
    art_create_canvas ${J({ name: 'stone', width: 32 })}  -> cells/noise, check art_view tile:3.  Also e.g. "floor_tile", "cap" (wall top), "grime" (mostly transparent dirt for overlays), "crack" (a transparent canvas with painted cracks = holes mask).
 2. One model per kit piece (pieces snap on the 32 px grid; textures repeat at 1 texel = 1 px so neighbours line up):
@@ -167,6 +180,7 @@ Keep pieces light (< 500 tris), reuse a few textures, characters stay 2D billboa
   'ship-model': {
     title: 'Spaceship / vehicle 3D model (low-poly + pixel textures -> .glb)',
     when: 'Ships, fighters, dropships, cars, tanks, turrets, drones: standalone 3D models with hulls, wings, canopies, engines and panels.',
+    desc: 'Models a low-poly spaceship or vehicle (lofted hull, wedges, cones, canopy, engines, inset panels, mirrored parts) with pixel textures and exports it as .glb. Use for ships, fighters, cars, tanks, drones or turrets as standalone 3D models.',
     body: `1. Textures: a tileable hull plate (32x32, cells/noise + panel lines) and small decals (an "emissive" layer for lights and engine glow):
    art_create_canvas ${J({ name: 'hull', width: 32 })}  -> tileable-texture skill.
 2. Build with origin:"bottom" (centred, sits on y=0). Y-up, +z = nose, units px (32 px = 1 unit). mirror:"x" makes the other side:
@@ -185,6 +199,7 @@ Keep pieces light (< 500 tris), reuse a few textures, characters stay 2D billboa
   'hard-surface': {
     title: 'Hard-surface sci-fi detail: greebles, trim sheets, PBR, normals, baked AO, LODs + impostors (.glb)',
     when: 'Big-budget sci-fi look at a pixel-texture budget: ship hull sections, stations, carrier corridors, city blocks; anything that needs greebles, pipes, panel trims, metal/rough, contact shadows, and must stay fast in a browser.',
+    desc: 'Adds sci-fi hard-surface detail to .glb models: greebles, pipes and cables, trim sheets, PBR metal / rough, pixel-correct height normals, baked AO, LODs, impostors and collision proxies. Use for hull sections, stations, corridors and city blocks that must look rich and stay fast in a browser.',
     body: `1. Textures with surface data layers (left out of the colour): a 32x32 hull plate with panel lines, then layers "height" (white = high: grooves black, rivets white), "metal" and "rough" (grey = value):
    art_create_canvas ${J({ name: 'hull', width: 32 })}; art_layer ${J({ canvas: 'hull', action: 'add', name: 'height' })} (and "metal", "rough") -> art_draw on each layer. Canvas-wide PBR instead of layers: art_canvas ${J({ canvas: 'hull', action: 'meta', meta: { material: 'painted_metal' } })}.
 2. One trim sheet for edges, seams, pipes, hazard and light strips: art_model ${J({ action: 'trim', canvas: 'hull_trim' })} (or strips:{name:[y,h]} on your own sheet).
@@ -202,6 +217,7 @@ Keep pieces light (< 500 tris), reuse a few textures, characters stay 2D billboa
   'ships-structures': {
     title: 'Sci-fi ships, ship interiors, industrial exteriors, underground cities and megastructures (.glb, pixel textures)',
     when: 'Big-budget sci-fi set pieces at a PSX pixel-texture budget for a browser game (later Roblox): fighters, dropships, haulers, capital ring modules, ship interiors that fit the hull, mining colonies, neon market districts, stations. Designs stay ORIGINAL (no real ship designs, names or marks).',
+    desc: 'Builds original sci-fi ships with walkable interiors, industrial exteriors, mining colonies, neon markets and megastructures from templates, hull curves and kits (art_model), with player-metric checks and triangle budgets. Use for gunships, fighters, dropships, haulers, capital ships, ship interiors or sci-fi set pieces.',
     body: `0. Hero / walkable ship at true scale (32 px = 1 m): art_model ${J({ action: 'create', name: 'tern', template: 'gunship' })} then ${J({ action: 'walk_check', name: 'tern' })} (player metrics: doors 1.2 x 2.1 m, corridors 1.4 x 2.3 m, stairs 0.2 m, ramps 20 deg) and ${J({ action: 'export', name: 'tern', static: 'landed', lods: [1, 0.5, 0.25], split: true, walk: true })}. Your own: hull {shell:6, openings:[{t, u}]} + glazing / ring_door in the openings + interior parts tagged inside:"<hull id>" (portal_arch, locker_wall, pilot_seat, screen_arm, decals) + walk markers; preview mood + ao, a figure for scale.
 1. Kit textures + trim sheet once: art_model ${J({ action: 'kit' })} (kit_hull, kit_deck, kit_wall, kit_screen, kit_glow, kit_hazard, kit_rock, ... with height / metal / rough / emissive layers).
 2. Ship from a template (original, seeded), then refine by part name:
@@ -218,6 +234,7 @@ Keep pieces light (< 500 tris), reuse a few textures, characters stay 2D billboa
   'fp-weapon': {
     title: 'First-person weapon + arms: 3D rig with clips (.glb) or pre-rendered pixel sprites',
     when: 'FPS viewmodels: a gun with moving parts (magazine, bolt, slide) and separate arms, either shipped as true 3D (glTF animations, Roblox Motor6D) or rendered to 2D sprite layers with per-frame hand anchors.',
+    desc: 'Builds a first-person gun and arms as a rigid 3D rig (art_model fp_rifle / fp_pistol / fp_arms) with fire and reload clips and sockets, exported as an animated .glb or rendered to pixel sprite layers with per-frame hand anchors. Use for an FPS viewmodel; for the sprite-composed art_fp pipeline see art_help {topic:"fp"}.',
     body: `1. Textures first: small tileable canvases (32 px = 1 m; a slot also takes a colour). Texture canvases must exist before create:
    art_create_canvas ${J({ name: 'gun_metal', width: 16, height: 16, background: '#2c2e33' })} (also gun_poly, sleeve, glove; then noise / cells, tileable-texture skill)
 2. Gun rig from a template (view space: origin = the eye, -Z forward, +Y up): art_model ${J({ action: 'create', name: 'ar', template: 'fp_rifle', textures: { metal: 'gun_metal', polymer: 'gun_poly' } })}
@@ -242,6 +259,7 @@ Keep pieces light (< 500 tris), reuse a few textures, characters stay 2D billboa
   'prop-rig': {
     title: 'Rigid prop rig: doors, chests, turrets, levers (named parts, pivots, poses, clips -> animated .glb)',
     when: 'A 3D prop with moving parts and no skinning: a door or gate on a hinge, a chest lid, a turret that yaws and pitches, a lever, a drawbridge. Exported as glTF nodes + animations (in Roblox: one MeshPart per node + Motor6D).',
+    desc: 'Rigs a 3D prop with rigid moving parts (door, chest lid, turret, lever, drawbridge): named parts, pivots, poses and clips, exported as an animated .glb. Use for any hinged or rotating prop that needs no skinning.',
     body: `1. Parts: name a part to make it its own node (own mesh); parent nests it (children follow the parent). pivot:[x,y,z] (part-local px; most builders have their origin at the bottom centre) is the JOINT the node rotates about: a lid's back edge, a door's hinge side. Unnamed parts merge into their named parent (latches, rivets) or the root mesh. origin:"bottom" for a standalone prop. Texture canvases must exist first (or use color).
    art_model ${J({ action: 'create', name: 'chest', origin: 'bottom', parts: [{ type: 'box', name: 'base', w: 16, h: 10, d: 10, texture: 'wood' }, { type: 'box', name: 'lid', parent: 'base', w: 16, h: 4, d: 10, texture: 'wood', at: [0, 10, 0], pivot: [0, 0, -5] }, { type: 'box', parent: 'lid', w: 2, h: 2, d: 1, color: '#d9b44a', at: [0, 10, 5] }], sockets: { loot: { part: 'base', at: [0, 8, 0], look: [0, 1, 0] } } })}
    Turret: base cylinder (root mesh) > box name:"yaw" > box name:"pitch" (parent yaw, pivot at its centre) > cylinder name:"barrel" (parent pitch, rotate:[90,0,0]) + sockets:{muzzle:{part:"barrel", at, look:[0,0,1]}}. Door: frame > leaf with pivot:[-w/2,0,0]. rig:{merge:false} = every part its own node.
@@ -255,6 +273,7 @@ Keep pieces light (< 500 tris), reuse a few textures, characters stay 2D billboa
   'ui-icons': {
     title: 'UI icons / item icons set',
     when: 'Inventory icons, ability icons, HUD elements.',
+    desc: 'Makes a consistent set of pixel-art UI, inventory or ability icons and HUD elements with a shared palette and light direction. Use when asked for an icon set or HUD art.',
     body: `1. Project with a shared palette; 16x16 or 24x24 canvases, 1px transparent margin.
 2. Same light direction, outline color and ramp structure for every icon (consistency beats detail).
 3. Silhouette -> shade -> outline -> one bright highlight pixel cluster.
@@ -270,8 +289,18 @@ export function skillText(name) {
   return `# ${s.title}\nWhen: ${s.when}\n\n${s.body}`;
 }
 
+/**
+ * Frontmatter description of a skill: what it makes and when to use it (`desc`, written with the
+ * trigger words an agent harness matches on), else the title + when.
+ */
+export function skillDescription(name) {
+  const s = SKILLS[name];
+  return `${s.desc || `${s.title}. ${s.when}`} Uses the Agent Art MCP tools (art_*).`;
+}
+
 /** SKILL.md file content (Claude Code / Agent Skills format) for a skill. */
 export function skillFile(name) {
-  const s = SKILLS[name];
-  return `---\nname: agent-art-${name}\ndescription: ${s.title}. ${s.when} Uses the Agent Art MCP tools (art_*).\n---\n\n${skillText(name)}\n`;
+  if (!SKILLS[name]) skillText(name); // throws the "Unknown skill" error with the list
+  // JSON string = a valid YAML double-quoted scalar, so colons and quotes in the text are safe
+  return `---\nname: agent-art-${name}\ndescription: ${JSON.stringify(skillDescription(name))}\n---\n\n${skillText(name)}\n`;
 }

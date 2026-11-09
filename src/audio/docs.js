@@ -138,6 +138,7 @@ export const AUDIO_SKILLS = {
   'sfx-pack': {
     title: 'Sound-effect pack with variants (gore, combat, holy, UI, monsters, FPS firearms, sci-fi)',
     when: 'Game SFX: hits, gore, weapons, gunshots, reloads, lasers, explosions, bells, UI clicks, level-up, roars, footsteps; N variants each.',
+    desc: 'Generates game sound effects with seeded variants (gore, hits, gunshots, reloads, lasers, explosions, UI clicks, monsters, footsteps) and checks them with analysis images and critiques you can read (art_audio). Use when asked for SFX, sound effects or a sound pack.',
     body: `1. One call per sound, 3 variants each (different seeds = different takes):
    art_audio ${J({ action: 'sfx', recipe: 'gib_burst', seed: 1, variants: 3 })}
    Other recipes: ${Object.values(RECIPE_GROUPS).flat().slice(0, 30).join(' ')}.
@@ -152,6 +153,7 @@ export const AUDIO_SKILLS = {
   'music-track': {
     title: 'Loopable game music track (any genre), checked with the listener report',
     when: 'Background music, boss themes, ambience; anything with tempo, sections and instruments.',
+    desc: 'Composes a loopable game music track in any genre with the art_audio notation and generators, then checks it against the intent with the listener report and critique. Use when asked for background music, a boss theme, ambience or a song.',
     body: `1. Pick the genre profile and read its needs: art_help ${J({ topic: 'music' })} (GENRE RECIPES). Copy the worked cathedral-doom text if it fits.
 2. Generate parts you can edit: art_audio ${J({ action: 'generate', generator: 'doom_riff', style: 'chug', key: 'e phrygian', bars: 2, seed: 4 })} (also organ_progression, blast_beat, dread_ambient).
 3. Write the song (text or JSON, or both: JSON tracks/buses/master deep-merge over the text, so keep notes in text and put fx/gain/bus tweaks in JSON), with intent + genre so critique can check them:

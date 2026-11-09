@@ -142,6 +142,7 @@ export const PLANET_SKILLS = {
   'planets-space': {
     title: 'Planets, ground terrain and space backdrops (art_planet)',
     when: 'Planets seen from orbit and landed on, star systems, landing-zone terrain, rocks and colony anchors, asteroid fields, nebula skyboxes, sun / flare / storm sprites for a browser (three.js) or Roblox game.',
+    desc: 'Bakes pixel-art planets (orbit maps, LOD meshes, clouds, rings, atmosphere), star systems, matching landing-zone terrain, asteroid fields, nebula skyboxes and space FX sprites for three.js or Roblox (art_planet). Use for planets, space backdrops or alien ground terrain.',
     body: `1. Pick the system first: art_planet ${J({ action: 'system', seed: 11, count: 6 })} and read the strip (one biome each, distinct palettes). Keep names original.
 2. Bake each world: art_planet ${J({ action: 'planet', name: 'kethra', preset: 'bloom', seed: 7, hue: -6, equirect: 1024, face: 256 })}. Look at the orbit image; iterate on biomes / ramps / sea_level / clouds before going bigger.
    Same palette as your project: palette:"project:<name>" (dither stays ordered).
