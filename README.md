@@ -1,6 +1,14 @@
+<p align="center"><img src="docs/brand/banner.png" alt="Agent Art: game art for AI agents. A pixel-art knight by a campfire on a ledge above a lake at dusk, crates and a potion beside him, a planet and a starfighter in the sky." width="100%"></p>
+
 # Agent Art
 
-**Pixel art for AI agents.** Agent Art is an MCP server with a live web UI that lets any agent (Claude, GPT, DeepSeek, local models) make real game art: sprites, rigged characters with animations in 8 directions, tilesets, seamless textures, icons, isometric and HD-2D scenes, low-poly 3D models (`.glb`), planets, combat effects, sound effects and music. The agent builds every asset from tools it can reason about (shapes, form shading, Voronoi cells, outlines, lighting, rigs), looks at its own work as an image, gets a critique, fixes what's wrong, and exports PNGs, GIFs, spritesheets, glTF and audio for any engine. You watch, steer and review in the browser while it works.
+[![npm](https://img.shields.io/npm/v/@rusticstack/agent-art)](https://www.npmjs.com/package/@rusticstack/agent-art) [![license: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE) ![node >= 20](https://img.shields.io/badge/node-%3E%3D20-339933) ![dependencies: 0](https://img.shields.io/badge/dependencies-0-brightgreen)
+
+**Game art and audio for AI agents.** Agent Art is an MCP server with a live web UI that lets any agent (Claude, GPT, DeepSeek, local models) make real game art: sprites, rigged characters with animations in 8 directions, tilesets, seamless textures, icons, isometric and HD-2D scenes, low-poly 3D models (`.glb`), planets, combat effects, sound effects and music. The agent builds every asset from tools it can reason about (shapes, form shading, Voronoi cells, outlines, lighting, rigs), looks at its own work as an image, gets a critique, fixes what's wrong, and exports PNGs, GIFs, spritesheets, glTF and audio for any engine. You watch, steer and review in the browser while it works.
+
+The banner and every asset in this showcase were made by an agent through Agent Art's own tools:
+
+![Asset showcase: a knight walk cycle from one rig, hand-pixeled props, a seamless cobblestone texture, a 3D crate intact and wrecked, a planet, a starfighter with livery, muzzle-flash and impact flipbooks, and the analysis of a recorded rifle shot](docs/brand/showcase.png)
 
 ![Agent Art web UI: activity timeline, asset browser and canvas viewer](docs/ui/01-overview.png)
 
@@ -158,6 +166,10 @@ More: [docs/planets/README.md](docs/planets/README.md).
 Agents cannot hear, so `art_audio` turns audio into things they can read: an analysis image (waveform, beat grid, spectrogram, loudness, band balance, stem masking) and a listener report in plain words (felt tempo, drum feel, key and chords, timbre, what is buried or repetitive, fit to a genre and the stated intent). It makes SFX from seeded recipes (gore, combat, firearms, sci-fi, UI, monsters, footsteps) with variants (gunshots are real CC0 field recordings: AR-15, AK-47, 9mm pistol, .38 revolver, .30-06, 7.62x54R, 12 gauge, SMGs; the `sample` layer plays them or your own WAVs), music from a compact text notation with generators and instrument presets, and mixes and masters to a LUFS target. With an [ElevenLabs](https://elevenlabs.io) API key it also records voice lines (`art_audio voice`) as sample assets you can analyze, process and export. Export is WAV with loop points, mp3 / ogg / opus through ffmpeg, stems and adaptive layers; renders run at 44.1 kHz, and `sample_rate:48000` delivers 48 kHz with sample-exact loop points.
 
 ![Audio player with waveform, spectrum and the analysis report](docs/ui/09-audio-player.png)
+
+Listen to the bundled recorded gunshots, rendered by their recipes with seed 1: [rifle](docs/audio/samples/gunshot_rifle.ogg), [pistol](docs/audio/samples/gunshot_pistol.ogg), [shotgun](docs/audio/samples/gunshot_shotgun.ogg). This is what an agent "hears" instead, `art_audio analyze` on the rifle:
+
+![Analysis of gunshot_rifle: waveform, spectrogram, loudness curve, band balance and the listener report](docs/audio/samples/gunshot_rifle_analysis.png)
 
 More: [docs/audio/README.md](docs/audio/README.md).
 

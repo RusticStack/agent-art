@@ -1,6 +1,6 @@
 # Agent Art
 
-> Agent Art (npm `@rusticstack/agent-art`) is an MCP server with a live web UI that lets AI agents make real game art: pixel-art sprites, rigged 8-direction characters and animations, tilesets, textures, icons, isometric and HD-2D scenes, low-poly glTF models, planets, combat effects, sound effects and music. It has 29 `art_*` tools, help topics served on demand through `art_help`, and step-by-step skills. Plain Node.js 20+, no dependencies.
+> Agent Art (npm `@rusticstack/agent-art`) is an MCP server with a live web UI that lets AI agents make real game art: pixel-art sprites, rigged 8-direction characters and animations, tilesets, textures, icons, isometric and HD-2D scenes, low-poly glTF models, planets, combat effects, sound effects (recorded CC0 gunshots included), music and ElevenLabs voice acting. It has 29 `art_*` tools, help topics served on demand through `art_help`, and step-by-step skills. Plain Node.js 20+, no dependencies.
 
 Install for Claude Code: `claude mcp add agent-art -s user -- npx -y @rusticstack/agent-art mcp`. Any MCP client (stdio): command `npx`, args `["-y", "@rusticstack/agent-art", "mcp"]`. Without MCP: `npx -y @rusticstack/agent-art tools` lists the tools and `npx -y @rusticstack/agent-art tool <art_tool> '<json>'` calls one. The web UI runs at http://localhost:7420.
 

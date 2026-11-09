@@ -1,5 +1,7 @@
 # Sound effects and music: `art_audio`
 
+Samples: the recorded [rifle](samples/gunshot_rifle.ogg), [pistol](samples/gunshot_pistol.ogg) and [shotgun](samples/gunshot_shotgun.ogg) gunshots (recipe, seed 1), and the [analysis image](samples/gunshot_rifle_analysis.png) of the rifle.
+
 [Back to the README](../../README.md)
 
 Agents cannot hear, so `art_audio` turns audio into things they can read: an analysis image (waveform with beat grid and onsets, log spectrogram, loudness and energy per section, goniometer, band balance; `view:"mix"` overlays stem spectra and marks masking) and a **listener report** in plain words: what a listener taps along to versus the written BPM, the drum feel per section (half-time, blast, double-kick, four-on-the-floor, ...), the key/mode and chord progression, timbre words (dark, muddy, harsh, distorted and which stem, reverb size), what stands out or is buried, what gets repetitive, and how it compares with a genre profile and the stated intent. `critique` ranks issues by audibility and names the parameter to change.
