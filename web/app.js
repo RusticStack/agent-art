@@ -14,7 +14,7 @@ import { CanvasViewer as CanvasViewerTS, TOOL_KEYS } from './src/viewers/canvas/
 import { AnimViewer as AnimViewerTS } from './src/viewers/anim/AnimViewer.ts';
 import { SheetViewer as SheetViewerTS } from './src/viewers/sheet/SheetViewer.ts';
 import { RigViewer } from './ui/viewers/rig.js';
-import { ModelViewer } from './ui/viewers/model.js';
+import { ModelViewer as ModelViewerTS } from './src/viewers/model/ModelViewer.ts';
 import { AudioViewer as AudioViewerTS } from './src/viewers/audio/AudioViewer.ts';
 import { ProjectViewer } from './ui/viewers/project.js';
 import { ExportViewer } from './ui/viewers/export.js';
@@ -25,6 +25,7 @@ import { cleanupPanel } from './ui/cleanup.js';
 const CanvasViewer = adapt(CanvasViewerTS);
 const AnimViewer = adapt(AnimViewerTS);
 const SheetViewer = adapt(SheetViewerTS);
+const ModelViewer = adapt(ModelViewerTS);
 const AudioViewer = adapt(AudioViewerTS);
 const GraphViewer = adapt(GraphViewerTS);
 

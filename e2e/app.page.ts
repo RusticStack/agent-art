@@ -61,6 +61,12 @@ export class AppPage {
   audioWave(s: 'A' | 'B' = 'A'): Locator { return this.slot(s).locator('canvas.wave'); }
   audioReport(s: 'A' | 'B' = 'A'): Locator { return this.slot(s).locator('.audio-report'); }
   graph(): Locator { return this.slot('A').locator('.graph-viewer'); }
+  modelViewer(): Locator { return this.slot('A').locator('.viewer.model-viewer'); }
+  modelCanvas(): Locator { return this.slot('A').locator('.model-stage canvas'); }
+  modelFallback(): Locator { return this.slot('A').locator('.model-stage img.fallback'); }
+  modelChannel(): Locator { return this.slot('A').locator('.model-viewer .vtoolbar select[title^="Material channel"]'); }
+  modelClip(): Locator { return this.slot('A').locator('.model-viewer .vtoolbar select[title^="Clip"]'); }
+  modelToggle(label: string): Locator { return this.slot('A').locator('.model-viewer label.toggle', { hasText: label }).locator('input'); }
   frameLabel(): Locator { return this.slot('A').locator('.frames-controls .mono'); }
   swapButton(): Locator { return this.page.locator('#swapB'); }
   closeCompareButton(): Locator { return this.page.locator('#closeB'); }

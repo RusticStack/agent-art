@@ -411,7 +411,7 @@ test('help, tool schema and the UI: materials topic, art_model material action, 
   const tool = TOOLS.find((t) => t.name === 'art_model');
   assert.ok(tool.inputSchema.properties.action.enum.includes('material'));
   for (const k of ['profile', 'lightmap', 'probes', 'channel', 'packing', 'vertex_colors']) assert.ok(tool.inputSchema.properties[k], k);
-  const viewer = fs.readFileSync(new URL('../web/ui/viewers/model.js', import.meta.url), 'utf8');
+  const viewer = ['three.ts', 'channels.ts', 'ModelViewer.ts'].map((f) => fs.readFileSync(new URL(`../web/src/viewers/model/${f}`, import.meta.url), 'utf8')).join('\n');
   for (const k of ['chanSel', 'profile=three', 'bake=1', 'lightMap', 'bentNormalTexture', 'RawShaderMaterial']) assert.ok(viewer.includes(k), `viewer has ${k}`);
   const e = setup();
   e.run('model_create', { name: 'kit', parts: KIT });

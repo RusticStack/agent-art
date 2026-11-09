@@ -138,3 +138,5 @@ button.ov-tile { text-align: left; }
 .graph-list li.on, .graph-list li[aria-selected="true"] { background: #2b2410; color: #ffd28a; }
 .graph-list:focus-visible, .graph-canvas:focus-visible, .wave:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .graph-viewer > .vstatus[hidden] { display: none; }
+.model-stage canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.vstatus .btn.small { flex: none; }

@@ -232,7 +232,7 @@ test('ui: sources load three.js from the npm package through the bundler (no ven
   const web = (p) => new URL(`../web/${p}`, import.meta.url);
   assert.ok(!fs.existsSync(web('vendor')));
   assert.doesNotMatch(fs.readFileSync(web('index.html'), 'utf8'), /importmap/);
-  const viewer = fs.readFileSync(web('ui/viewers/model.js'), 'utf8');
+  const viewer = ['three.ts', 'channels.ts', 'ModelViewer.ts'].map((f) => fs.readFileSync(web(`src/viewers/model/${f}`), 'utf8')).join('\n');
   for (const m of ['three', 'three/addons/controls/OrbitControls.js', 'three/addons/loaders/GLTFLoader.js', 'three/addons/helpers/VertexNormalsHelper.js']) assert.ok(viewer.includes(`import('${m}')`), m);
   const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   assert.deepEqual(pkg.dependencies || {}, {});
