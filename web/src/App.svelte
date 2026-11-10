@@ -58,6 +58,7 @@
   onMount(() => {
     performance.mark('aa:shell');
     shellHooks.focusSearch = () => browser?.focusSearch();
+    shellHooks.newCanvas = () => browser?.openNewCanvas();
     const offKeys = installShortcuts();
     // U3: another hash opens its target (without rewriting the hash)
     const onHash = () => {
@@ -77,6 +78,7 @@
       mq.removeEventListener('change', onMq);
       window.removeEventListener('resize', onResize);
       shellHooks.focusSearch = () => {};
+      shellHooks.newCanvas = () => {};
     };
   });
 </script>

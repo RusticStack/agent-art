@@ -65,6 +65,8 @@ export default defineConfig({
             // lazy graph libraries (Svelte Flow + its d3 parts; dagre): stable names for the budget script
             { name: 'graph-cards', test: /[\\/]node_modules[\\/](@xyflow|@svelte-put|d3-[a-z]+)[\\/]/, includeDependenciesRecursively: false },
             { name: 'graph-layout', test: /[\\/]node_modules[\\/]@dagrejs[\\/]/, includeDependenciesRecursively: false },
+            // the command palette (step 18b): component + item builder + fuzzysort, fetched on first open / hover of the search button
+            { name: 'palette', test: /[\\/]node_modules[\\/]fuzzysort[\\/]|[\\/]components[\\/]dialogs[\\/](CommandPalette\.svelte|commands\.ts)$/, includeDependenciesRecursively: false },
           ],
         },
       },

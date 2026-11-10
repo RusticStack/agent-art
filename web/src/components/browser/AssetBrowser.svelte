@@ -43,6 +43,7 @@
   let selected = $state.raw<ReadonlySet<string>>(new Set());
   let lastSel: string | null = null;
   let showNew = $state(false);
+  let rootEl: HTMLElement | null = $state(null);
   let focusKey = $state<string | null>(null);
   let flashing = $state.raw<ReadonlySet<string>>(new Set());
   let offset = $state(0);
@@ -274,6 +275,12 @@
     });
   });
 
+  /** The command palette's "New canvas…": show the New form (or focus its name field when it is already shown). */
+  export function openNewCanvas(): void {
+    if (!showNew) { showNew = true; return; } // NewCanvasForm focuses its name field on mount
+    rootEl?.querySelector<HTMLInputElement>('form.new-form input')?.focus();
+  }
+
   /** `/` (K10): focus and select the filter. */
   export function focusSearch(): void {
     searchEl?.focus();
@@ -281,7 +288,7 @@
   }
 </script>
 
-<div class="asset-browser">
+<div class="asset-browser" bind:this={rootEl}>
   <PaneHeader title="Assets">
     {#if uiState.solo.size}
       <Button size="sm" onclick={() => uiState.clearSolo()}>Clear solo</Button>

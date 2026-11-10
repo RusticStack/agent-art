@@ -1,6 +1,6 @@
 <!--
   Top bar (T1–T13): pane toggles (narrow layout), brand, connection status, workspace path, follow
-  button + mode, Compare, Review, Notes (open count), Graph, Cleanup, Help.
+  button + mode, Search (command palette, Ctrl+K), Compare, Review, Notes (open count), Graph, Cleanup, Help.
 -->
 <script lang="ts">
   import { assets } from '@/state/assets.svelte';
@@ -10,11 +10,22 @@
   import { reviews } from '@/state/reviews.svelte';
   import { workspace } from '@/state/workspace.svelte';
   import type { FollowMode } from '@/lib/util/storage';
+  import { loadPalette } from '../dialogs/loadPalette';
   import Icon from '../ui/Icon.svelte';
+  import IconButton from '../ui/IconButton.svelte';
   import StatusPill from './StatusPill.svelte';
 
   const home = $derived(assets.index?.home ?? '');
   const open = $derived(reviews.openCount);
+
+  // Warm-up: start fetching the palette chunk when the pointer enters or focus reaches the search
+  // button (IconButton's element belongs to its Tooltip, so the listeners sit on a display:contents wrapper).
+  function warm(node: HTMLElement) {
+    const go = () => { void loadPalette().catch(() => {}); };
+    node.addEventListener('pointerenter', go, { once: true });
+    node.addEventListener('focusin', go, { once: true });
+    return { destroy() { node.removeEventListener('pointerenter', go); node.removeEventListener('focusin', go); } };
+  }
 </script>
 
 <header class="topbar">
@@ -36,6 +47,7 @@
       <option value="off">off</option>
     </select>
   </div>
+  <span class="warm" use:warm><IconButton icon="search" label="Search assets and actions (Ctrl+K)" onclick={() => dialogs.openPalette()} /></span>
   <button type="button" class={['btn', workspace.comparing && 'on']} id="compareBtn" aria-pressed={workspace.comparing}
     title="Compare two assets or states side by side (C)" onclick={() => workspace.setCompare(!workspace.comparing)}><Icon name="columns-2" />Compare</button>
   <button type="button" class={['btn', editor.reviewMode && 'on']} id="reviewBtn" aria-pressed={editor.reviewMode}
@@ -57,6 +69,7 @@
   .logo { width: 16px; height: 16px; image-rendering: pixelated; background: conic-gradient(from 90deg, #22c55e 0 25%, #38bdf8 0 50%, #e5484d 0 75%, #f5a524 0); border-radius: 3px; }
   .ws { color: var(--dim); max-width: 26vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; }
   .pane-toggle { display: none; }
+  .warm { display: contents; }
   @media (max-width: 1100px) {
     .ws { display: none; }
   }

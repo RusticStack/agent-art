@@ -731,6 +731,8 @@ export class ModelViewer extends BaseViewer {
   }
 
   // ---- view presets (numpad / View select / gizmo) ----
+  /** Fly to a view preset (the command palette's "View: …" items). */
+  setViewPreset(p: ViewPreset): void { this.viewCmd(p); }
   private viewCmd(cmd: ViewPreset | 'opposite' | 'frame'): void {
     if (!this.box || !this.T) return;
     const tg = this.controls.target, p = this.camera.position;

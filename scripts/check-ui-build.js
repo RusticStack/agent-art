@@ -123,7 +123,8 @@ function main() {
     else if (/^graph-layout-/.test(base)) kind = 'graph-layout';
     else if (!isInitial && /^CommandPalette-|^palette-/.test(base)) kind = 'palette';
     else if (!isInitial && code.includes('saturation-pointer')) kind = 'picker';
-    else if (!isInitial && /^DialogHost-/.test(base)) kind = 'dialogs';
+    // DialogHost, and (step 18b) the shared ui/Dialog + Bits Dialog chunk that DialogHost and the palette both import
+    else if (!isInitial && /^(DialogHost|Dialog)-/.test(base)) kind = 'dialogs';
     rows.push([f, kind, s.raw, s.gz]);
     if (isInitial) initialGz += s.gz;
     if (kind === 'three' && isInitial) fail(`the three chunk ${f} is in the initial set`);

@@ -101,6 +101,25 @@ describe('decide()', () => {
     expect(decide(ev('/'), ctx())).toEqual({ action: { type: 'viewer', key: '/', fallback: { type: 'filter' } }, preventDefault: true });
     expect(decide(ev('/'), ctx({ browserShown: false }))).toEqual({ action: { type: 'viewer', key: '/', fallback: null }, preventDefault: undefined });
   });
+  it('18b: Ctrl/Cmd+K opens the palette (default prevented), also while Help is open', () => {
+    const open = { action: { type: 'palette' }, preventDefault: true };
+    expect(decide(ev('k', { ctrlKey: true }), ctx())).toEqual(open);
+    expect(decide(ev('K', { metaKey: true }), ctx())).toEqual(open);
+    expect(decide(ev('k', { ctrlKey: true }), ctx({ helpOpen: true }))).toEqual(open);
+    // over a focused button and during compare / review mode too (it is a modifier chord, not Space / Enter)
+    expect(decide(ev('k', { ctrlKey: true }), ctx({ onInteractive: true, comparing: true, reviewMode: true }))).toEqual(open);
+  });
+  it('18b: Ctrl+K does nothing in a text field, in a blocking dialog, or with Alt / Shift', () => {
+    expect(decide(ev('k', { ctrlKey: true }), ctx({ inText: true }))).toBeNull();
+    expect(decide(ev('k', { ctrlKey: true }), ctx({ dialogBlocking: true }))).toBeNull();
+    expect(decide(ev('k', { ctrlKey: true, altKey: true }), ctx())).toBeNull();
+    expect(decide(ev('K', { ctrlKey: true, shiftKey: true }), ctx())).toBeNull();
+    // plain k is still the viewer's / nothing
+    expect(fb('k')).toBeNull();
+  });
+  it('18b: the palette row is in the table (Everywhere, new)', () => {
+    expect(SHORTCUTS.find((s) => s.id === 'palette')).toMatchObject({ keys: 'Ctrl+K', group: 'Everywhere', action: 'palette', isNew: true });
+  });
   it('digits past the tab count do nothing; an unknown count allows 1–5', () => {
     expect(fb('2', { tabCount: 2 })).toEqual({ type: 'tab', index: 1 });
     expect(fb('3', { tabCount: 2 })).toBeNull();
@@ -123,10 +142,11 @@ describe('install() and the focus helpers', () => {
     expect(fire('f')).toBe(false); // declined: the shell fallback, no preventDefault
     expect(fire('z', { ctrlKey: true })).toBe(true);
     expect(fire('x', { altKey: true })).toBe(false);
-    expect(seen).toEqual(['viewer', 'viewer', 'undo']);
+    expect(fire('k', { ctrlKey: true })).toBe(true);
+    expect(seen).toEqual(['viewer', 'viewer', 'undo', 'palette']);
     off();
     fire('f');
-    expect(seen).toHaveLength(3);
+    expect(seen).toHaveLength(4);
   });
   it('isInteractive / isTextTarget', () => {
     const b = document.createElement('button'); const span = document.createElement('span'); b.append(span);

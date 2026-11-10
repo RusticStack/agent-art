@@ -27,6 +27,17 @@ test.describe('@shots', () => {
     await shot(app, '01-overview');
   });
 
+  test('33-command-palette', async ({ app }) => {
+    await app.goto('helmet_side');
+    await expect(app.pixelCanvas()).toBeVisible();
+    await settle(app);
+    await app.openPalette();
+    await app.paletteInput().fill('helm');
+    await expect(app.paletteOptions().first()).toBeVisible();
+    await app.page.waitForTimeout(200);
+    await app.page.screenshot({ path: path.join(dir(), '33-command-palette.png'), mask: app.volatile(), maskColor: '#15171c' });
+  });
+
   test.describe('narrow', () => {
     test.use({ viewport: { width: 430, height: 900 } });
     test('18-narrow', async ({ app }) => {

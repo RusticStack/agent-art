@@ -1,6 +1,6 @@
 // The one shortcut table (4.4) and the global key handler. Help renders the table; the tooltips' <kbd>
 // hints and the command palette read it. decide() is the pure decision (K1–K10 in order, plus the 4.4
-// rule for Space / Enter on interactive elements and the narrow drawer Esc); install() adds the single
+// rule for Space / Enter on interactive elements, the narrow drawer Esc and Ctrl/Cmd+K before K4); install() adds the single
 // window keydown listener and hands the decided action to the shell's runner (state/actions.ts).
 //
 // `keys` syntax: space-separated groups; inside a group `+`, `/` and `–` join keys (`Ctrl+Z/Y`, `1–5`);
@@ -11,7 +11,7 @@ import type { Tool, ViewerKind } from '@/viewers/types';
 export type ShortcutGroup = 'Everywhere' | 'Canvas' | 'Players' | '3D view' | 'Graph';
 export type ActionId =
   | 'follow' | 'compare' | 'review' | 'filter' | 'graph' | 'overview' | 'dock' | 'panes' | 'tabs' | 'escape' | 'help'
-  | 'undo';
+  | 'undo' | 'palette';
 export interface Shortcut {
   id: string;
   keys: string;
@@ -36,6 +36,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: 'tabs', keys: '1–5', label: 'viewer tabs', group: 'Everywhere', action: 'tabs' },
   { id: 'escape', keys: 'Esc', label: 'back to live / close', group: 'Everywhere', action: 'escape' },
   { id: 'help', keys: '?', label: 'this help', group: 'Everywhere', action: 'help' },
+  { id: 'palette', keys: 'Ctrl+K', label: 'search assets and actions', group: 'Everywhere', action: 'palette', isNew: true },
 
   { id: 'tool-pencil', keys: 'B', label: 'pencil', group: 'Canvas' },
   { id: 'tool-eraser', keys: 'E', label: 'eraser', group: 'Canvas' },
@@ -123,6 +124,7 @@ export type Action =
   | { type: 'undo'; redo: boolean }
   | { type: 'closeDrawer' } | { type: 'reviewOff' } | { type: 'closeHelp' } | { type: 'closeCompare' } | { type: 'backToLive' }
   | { type: 'graph' }
+  | { type: 'palette' }
   | { type: 'tool'; tool: Tool }
   | { type: 'follow' } | { type: 'compare' } | { type: 'review' } | { type: 'filter' } | { type: 'help' } | { type: 'dock' }
   | { type: 'pane'; which: 'browser' | 'side' }
@@ -174,6 +176,9 @@ export function decide(e: KeyEventLike, ctx: ShortcutContext): Decision | null {
   // K3: undo / redo of the slot A viewer
   if (mod && k === 'z') return { action: { type: 'undo', redo: e.shiftKey }, preventDefault: true };
   if (mod && k === 'y') return { action: { type: 'undo', redo: true }, preventDefault: true };
+  // 18b: Ctrl/Cmd+K opens the command palette (also over Help; K1 / K2 above keep it out of text
+  // fields and blocking dialogs; the palette's own input handles Ctrl+K itself and stops it)
+  if (mod && k === 'k' && !e.altKey && !e.shiftKey) return { action: { type: 'palette' }, preventDefault: true };
   // K4: any other modifier combination is not ours
   if (mod || e.altKey) return null;
   // 4.4: Space / Enter on a button, link, tab, tree item, menu item or summary belong to that element

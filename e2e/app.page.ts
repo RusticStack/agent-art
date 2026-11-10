@@ -16,6 +16,8 @@ export class AppPage {
     return this.page.locator(ids[name]);
   }
   followMode(): Locator { return this.page.locator('#followMode'); }
+  /** The top bar search button (command palette, step 18b). */
+  paletteButton(): Locator { return this.page.getByRole('button', { name: 'Search assets and actions (Ctrl+K)' }); }
   notesCount(): Locator { return this.page.locator('#reviewCount'); }
   workspacePath(): Locator { return this.page.locator('#wsPath'); }
   // ---- browser ----
@@ -174,6 +176,15 @@ export class AppPage {
   reviewListDialog(): Locator { return this.page.getByRole('dialog', { name: /^Review notes · \d+ open$/ }); }
   alertDialog(name: string | RegExp): Locator { return this.page.getByRole('alertdialog', { name }); }
   helpDialog(): Locator { return this.page.getByRole('dialog', { name: 'Keyboard shortcuts' }); }
+  // ---- command palette (step 18b) ----
+  palette(): Locator { return this.page.getByRole('dialog', { name: 'Search assets and actions' }); }
+  paletteInput(): Locator { return this.palette().getByRole('combobox', { name: 'Search assets and actions' }); }
+  paletteOptions(): Locator { return this.palette().getByRole('option'); }
+  /** The active option (aria-selected). */
+  paletteActive(): Locator { return this.palette().locator('[role=option][aria-selected=true]'); }
+  /** URLs of the lazy palette chunks (the `palette` group and the CommandPalette entry). */
+  static readonly PALETTE_CHUNK = /\/assets\/(palette|CommandPalette)-[^/]+\.js(\?|$)/;
+  async openPalette() { await this.page.keyboard.press('ControlOrMeta+k'); await expect(this.paletteInput()).toBeFocused(); }
   /** The toast stack (role=status, "Notifications") and its toasts; errors are role=alert. */
   toastRegion(): Locator { return this.page.getByRole('status', { name: 'Notifications' }); }
   toasts(): Locator { return this.toastRegion().locator('.toast'); }
