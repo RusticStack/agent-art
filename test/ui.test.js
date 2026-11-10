@@ -231,7 +231,12 @@ test('ui: serves the built bundle with the UI token, a clear page when it is not
 test('ui: sources load three.js from the npm package through the bundler (no vendored copy, no import map)', () => {
   const web = (p) => new URL(`../web/${p}`, import.meta.url);
   assert.ok(!fs.existsSync(web('vendor')));
-  assert.doesNotMatch(fs.readFileSync(web('index.html'), 'utf8'), /importmap/);
+  const html = fs.readFileSync(web('index.html'), 'utf8');
+  assert.doesNotMatch(html, /importmap/);
+  // step 18: the Svelte shell is the only entry; the legacy app.js / ui/ / svelte/ are gone
+  assert.match(html, /<script type="module" src="\.\/src\/main\.ts"><\/script>/);
+  for (const gone of ['app.js', 'ui', 'svelte', 'style.css']) assert.ok(!fs.existsSync(web(gone)), gone);
+  assert.ok(fs.existsSync(web('src/main.ts')) && fs.existsSync(web('src/App.svelte')));
   const viewer = ['three.ts', 'channels.ts', 'ModelViewer.ts'].map((f) => fs.readFileSync(web(`src/viewers/model/${f}`), 'utf8')).join('\n');
   for (const m of ['three', 'three/addons/controls/OrbitControls.js', 'three/addons/loaders/GLTFLoader.js', 'three/addons/helpers/VertexNormalsHelper.js']) assert.ok(viewer.includes(`import('${m}')`), m);
   const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));

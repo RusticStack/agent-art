@@ -2,10 +2,15 @@
 import type { ActivityEntry, Review } from '@/lib/api/types';
 import { targetToHash } from '@/lib/util/hash';
 import { idOfTarget, splitId } from '@/lib/util/ids';
+import { toast } from '@/lib/util/notify';
 import { store, readFollowMode, type FollowMode } from '@/lib/util/storage';
 import { followTarget, reviewCompareTargets, reviewTarget, switchViewTarget, targetForId, viewerKindFor, type TabId } from '@/lib/util/targets';
-import type { CompareOverlay, SlotId, Target, Viewer } from '@/viewers/types';
+import type { CompareOverlay, ReviewDraft, SlotId, Target, Viewer, ViewerHostApi } from '@/viewers/types';
 import { assets } from './assets.svelte';
+import { dialogs } from './dialogs.svelte';
+import { editor } from './editor.svelte';
+import { reviews } from './reviews.svelte';
+import { bumpInspector } from './signals.svelte';
 import { uiState } from './uiState.svelte';
 
 export interface Slot { target: Target | null; error: string | null }
@@ -13,6 +18,7 @@ export interface OpenOpts { slot?: SlotId; history?: boolean }
 export const RECENT_MAX = 8;
 
 const isSnap = (t: Target | null | undefined): boolean => !!t && 'snap' in t && !!t.snap;
+const other = (s: SlotId): SlotId => (s === 'A' ? 'B' : 'A');
 
 export class Workspace {
   slots = $state<{ A: Slot; B: Slot }>({ A: { target: null, error: null }, B: { target: null, error: null } });
@@ -25,9 +31,10 @@ export class Workspace {
   inspected = $state.raw<Target | null>(null);
   followMode = $state<FollowMode>(readFollowMode());
   private viewers: Record<SlotId, Viewer | null> = { A: null, B: null };
+  private hosts: Partial<Record<SlotId, ViewerHostApi>> = {};
   /**
-   * Who performs a navigation. Until the Svelte shell owns the slots (step 18) the legacy App sets
-   * this to its own open(), which mounts the viewer and then calls workspace.open() for the state.
+   * Optional interceptor for navigation (tests spy on it). Null in the app: open() sets the slot state
+   * and the shell's ViewerSlot mounts / updates the viewer from it.
    */
   navigator: ((t: Target, o?: OpenOpts) => void) | null = null;
   /** Is a blocking dialog open (follow mode pauses)? Set by the shell. */
@@ -47,6 +54,8 @@ export class Workspace {
   open(target: Target, { slot = 'A', history = true }: OpenOpts = {}): void {
     if (slot === 'B' && !this.comparing) this.setCompare(true);
     this.slots[slot] = { target, error: null };
+    // RV7: the compare overlay only exists between two canvas viewers
+    if (this.comparing && viewerKindFor(target) !== 'canvas') this.resetOverlay();
     if (slot !== 'A') return;
     this.inspected = target.kind === 'graph' ? { kind: 'graph' } : target;
     const h = targetToHash(target);
@@ -73,9 +82,13 @@ export class Workspace {
     this.comparing = on;
     if (!on) {
       this.slots.B = { target: null, error: null };
-      this.compareOverlay = 'off';
-      this.compareStatus = null;
+      this.resetOverlay();
     }
+  }
+  /** RV7: overlay back to Off, status cleared (compare closed, swap, a non-canvas viewer). */
+  resetOverlay(): void {
+    this.compareOverlay = 'off';
+    this.compareStatus = null;
   }
   compare(a: Target, b: Target): void {
     this.setCompare(true);
@@ -84,7 +97,9 @@ export class Workspace {
   }
   swap(): void {
     const a = this.slots.A.target, b = this.slots.B.target;
-    if (a && b) this.compare(b, a);
+    if (!a || !b) return;
+    this.resetOverlay(); // Link stays as it is
+    this.compare(b, a);
   }
   backToLive(): void {
     const t = this.current;
@@ -114,6 +129,53 @@ export class Workspace {
   }
   viewer(slot: SlotId): Viewer | null { return this.viewers[slot]; }
   registerViewer(slot: SlotId, v: Viewer | null): void { this.viewers[slot] = v; }
+
+  /** R3: the review note dialog; on success toast and leave review mode. Resolves with the new note. */
+  async requestReview(draft: ReviewDraft, leaveReviewMode: () => void = () => editor.setReviewMode(false)): Promise<{ id: string } | null> {
+    const r = await dialogs.reviewNote(draft);
+    if (r) {
+      toast(`Review note ${r.id} added — the agent sees it in art_review list and in replies about this asset`, 'ok');
+      leaveReviewMode();
+    }
+    return r;
+  }
+
+  /** What a viewer in a slot may ask of the app (one object per slot). Slot B is read-only. */
+  hostApi(slot: SlotId): ViewerHostApi {
+    const cached = this.hosts[slot];
+    if (cached) return cached;
+    const host: ViewerHostApi = {
+      slot,
+      readOnly: slot === 'B',
+      assets: () => assets.index,
+      isHidden: (id) => uiState.isHidden(id),
+      reviewMarks: (a) => reviews.marks(a),
+      open: (t, o) => this.go(t, o),
+      openNode: (id) => this.openNode(id),
+      inspectNode: (id) => this.inspectNode(id),
+      requestReview: (d) => { void this.requestReview(d); },
+      setTool: (t) => editor.setTool(t),
+      setColor: (hex) => editor.setColor(hex),
+      canvasInfoChanged: (name) => {
+        const ins = this.inspected;
+        if (ins?.kind === 'canvas' && ins.name === name) bumpInspector();
+      },
+      toast: (text, kind) => toast(text, kind),
+      peerViewer: () => (this.comparing ? this.viewers[other(slot)] : null),
+      notifyPeer: () => {
+        const peer = other(slot);
+        if (this.comparing && this.viewers[peer]) this.peerRev = { ...this.peerRev, [peer]: this.peerRev[peer] + 1 };
+      },
+      compareStatus: (text) => { if (slot === 'A' && this.compareStatus !== text) this.compareStatus = text; },
+      setCompareOverlay: (mode) => { if (this.comparing) this.compareOverlay = mode; },
+      togglePinned: (id) => { void uiState.togglePinned(id); },
+      toggleHidden: (id) => { void uiState.toggleHidden(id); },
+      isPinned: (id) => uiState.isPinned(id),
+      followMode: () => this.followMode,
+    };
+    this.hosts[slot] = host;
+    return host;
+  }
 }
 
 export const workspace = new Workspace();

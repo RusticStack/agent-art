@@ -22,7 +22,7 @@ export class Connection {
   get label(): string {
     return { connecting: 'connecting…', live: 'live', busy: 'agent is working…', down: 'disconnected — retrying' }[this.status];
   }
-  /** CSS class of the legacy status pill. */
+  /** CSS class of the status pill (components/shell/StatusPill). */
   get pillClass(): string {
     return { connecting: 'status', live: 'status ok', busy: 'status busy', down: 'status down' }[this.status];
   }

@@ -13,6 +13,7 @@ import { button, fillSelect, group, link, range, select, spacer, toggle } from '
 import { PixelView } from '../pixel/PixelView';
 import type { CanvasTarget, CompareImage, LinkState, Target, Tool, ViewerEnv } from '../types';
 import { ColorPicker } from './colorPicker';
+import { diffStatus, modeHint, nextOverlay, overlayPlan } from './compare';
 import { frameCount, frameLabel, frameRect, gifUrl, hoverText, metaText, onionNeighbours, planChange, zoomText } from './logic';
 
 export const TOOLS: [Tool, IconName, string][] = [
@@ -38,6 +39,9 @@ export class CanvasViewer extends BaseViewer {
   private imgSeq = 0;
   private imgAbort: AbortController | null = null;
   private thumbIO: IntersectionObserver | null = null;
+  // compare (RV7): applying the peer's link state (never echo it back); an overlay is shown
+  private applyingLink = false;
+  private overlayOn = false;
   // DOM
   private view!: PixelView;
   private toolGroup!: HTMLElement;
@@ -119,6 +123,7 @@ export class CanvasViewer extends BaseViewer {
       onCommands: (commands, label) => this.draw(commands, label),
       onHover: (p, c) => { this.cursorEl.textContent = hoverText(p, c, this.info?.frameHeight, this.frameMode()); },
       onZoom: (z) => { this.zoomLabel.textContent = zoomText(z); },
+      onView: () => this.linkOut(),
       onionFrames: () => onionNeighbours(this.frame, this.nFrames, this.frameMode()),
       onReview: (r) => this.host.requestReview({
         asset: `canvas:${this.name}`,
@@ -164,6 +169,7 @@ export class CanvasViewer extends BaseViewer {
     if (prev.tool !== next.tool || prev.reviewMode !== next.reviewMode) this.applyTool();
     if (prev.color.hex8 !== next.color.hex8) { this.picker?.sync(next.color.hex8); this.setAlpha(next.color.hex8); }
     if (prev.reviewsRev !== next.reviewsRev || prev.reviewMode !== next.reviewMode) this.view.render();
+    if (prev.compareOverlay !== next.compareOverlay || prev.peerRev !== next.peerRev) this.syncOverlay();
   }
   private applyTool(): void {
     const t = this.env.tool;
@@ -283,6 +289,8 @@ export class CanvasViewer extends BaseViewer {
     else this.view.setFrameRect(rect);
     this.scrub.value = String(f);
     this.frameLabelEl.textContent = frameLabel(f, this.nFrames, fm);
+    if (changed) { this.linkOut(); this.host.notifyPeer(); }
+    if (changed || force) this.syncOverlay();
     if (changed || force) {
       for (const [i, t] of [...this.thumbs.children].entries()) t.classList.toggle('active', i === f);
       const act = this.thumbs.children[f] as HTMLElement | undefined;
@@ -377,22 +385,54 @@ export class CanvasViewer extends BaseViewer {
     if (k === ',') { this.step(-1); return true; }
     if (k === '.') { this.step(1); return true; }
     if (k === 'n') { this.flip(this.onionCb); return true; }
-    if (k === 'x' && this.view.blinkManual) { this.view.swapBlink(); return true; }
+    if (k === 'x' && this.view.overlayMode === 'blink') { this.view.swapBlink(); return true; }
+    if (k === 'd' && this.host.peerViewer()?.compareImage) { this.host.setCompareOverlay(nextOverlay(this.env.compareOverlay)); return true; }
     if (this.editable && TOOL_KEYS[k] && !e.shiftKey) { this.host.setTool(TOOL_KEYS[k]); return true; }
     return false;
   }
   private flip(cb: HTMLInputElement): void { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); }
 
-  // ---- compare (RV7; wired in step 18c) ----
-  applyLinkState(s: LinkState): void {
-    if (s.frame !== this.frame && this.frameMode()) this.showFrame(s.frame);
-    this.view.setView({ zoom: s.zoom, cx: s.cx, cy: s.cy });
+  // ---- compare (RV7, step 18c) ----
+  /** Mirror zoom / pan / frame to the other slot (user changes only; never while applying the peer's). */
+  private linkOut(): void {
+    if (this.applyingLink || !this.env.compareLink || !this.strip) return;
+    this.host.peerViewer()?.applyLinkState?.({ ...this.view.getView(), frame: this.frame });
   }
+  applyLinkState(s: LinkState): void {
+    if (!this.strip) return;
+    this.applyingLink = true;
+    try {
+      const f = Math.max(0, Math.min(this.nFrames - 1, s.frame));
+      if (f !== this.frame && this.frameMode()) this.showFrame(f);
+      this.view.setView({ zoom: s.zoom, cx: s.cx, cy: s.cy });
+    } finally { this.applyingLink = false; }
+  }
+  /** Slot A: draw the other slot's image over this one (Difference / Swipe / Blink), or nothing. */
+  private syncOverlay(): void {
+    if (this.host.slot !== 'A' || !this.view) return;
+    const mode = this.env.compareOverlay;
+    if (mode === 'off' && !this.overlayOn) return; // compare closed / overlay off: no work, no host calls
+    const peer = mode === 'off' ? null : this.host.peerViewer()?.compareImage?.() ?? null;
+    const plan = overlayPlan(mode, this.view.rect, peer);
+    this.view.setOverlay(plan.overlay);
+    this.overlayOn = !!plan.overlay;
+    this.setEditPaused(this.overlayOn);
+    const status = plan.status === 'diff' ? diffStatus(this.view.overlayInfo) : plan.status ?? (plan.overlay ? modeHint(mode, this.view.blinkManual) : null);
+    this.host.compareStatus(status);
+  }
+  /** While an overlay is shown, slot A is view-only (undo / redo keys stay). */
+  private setEditPaused(on: boolean): void {
+    if (!this.toolGroup) return;
+    for (const b of this.toolBtns.values()) b.disabled = on;
+    if (on) this.toolGroup.title = 'Editing is paused while an overlay is shown'; else this.toolGroup.removeAttribute('title');
+    this.toolGroup.setAttribute('aria-disabled', String(on));
+  }
+  get overlayInfo(): { changed: number; total: number } | null { return this.view?.overlayInfo ?? null; }
   compareImage(): CompareImage | null {
     if (!this.strip || !this.view.rect) return null;
     return { image: this.strip, rect: { ...this.view.rect }, key: `${this.name}|${this.snap ?? ''}|${this.frame}|${this.layerSolo}` };
   }
   debugInfo(): unknown {
-    return { name: this.name, snap: this.snap, frame: this.frame, frames: this.nFrames, zoom: this.view.zoom, autoFit: this.view.autoFit, layerSolo: this.layerSolo };
+    return { name: this.name, snap: this.snap, frame: this.frame, frames: this.nFrames, zoom: this.view.zoom, autoFit: this.view.autoFit, layerSolo: this.layerSolo, overlay: this.view.overlayMode, overlayInfo: this.view.overlayMode === 'diff' ? this.view.overlayInfo : null, split: this.view.split };
   }
 }

@@ -2,12 +2,14 @@
 //   npm run build:ui   production build (no sourcemaps; three.js is a lazy chunk for the 3D viewer)
 //   npm run dev:ui     dev server with hot reload; /api (REST, ops, SSE) is proxied to a running
 //                      agent-art server (AGENT_ART_URL, default http://127.0.0.1:7420)
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { notices } from './scripts/vite-notices.js';
 
 const here = (p) => fileURLToPath(new URL(p, import.meta.url));
+const VERSION = JSON.parse(fs.readFileSync(here('./package.json'), 'utf8')).version;
 const API = (process.env.AGENT_ART_URL || 'http://127.0.0.1:7420').replace(/\/+$/, '');
 const TOKEN_META = /<meta name="agent-art-ui-token"[^>]*>/;
 const isLocal = (origin) => { try { return ['localhost', '127.0.0.1', '[::1]'].includes(new URL(origin).hostname); } catch { return false; } };
@@ -38,6 +40,8 @@ export default defineConfig({
   root: here('./web'),
   base: './',
   publicDir: false,
+  // the package version, for window.agentArt.version (web/src/main.ts)
+  define: { __AGENT_ART_VERSION__: JSON.stringify(VERSION) },
   plugins: [svelte({ configFile: here('./svelte.config.js') }), devUiToken(), notices()],
   resolve: {
     alias: { '@': here('./web/src') },

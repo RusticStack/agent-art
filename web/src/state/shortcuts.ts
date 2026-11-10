@@ -1,9 +1,12 @@
-// The one shortcut table (4.4). Help renders it; the tooltips' <kbd> hints and the command palette read
-// it later (steps 18, 18b). Data only: the key handler itself arrives in step 18.
+// The one shortcut table (4.4) and the global key handler. Help renders the table; the tooltips' <kbd>
+// hints and the command palette read it. decide() is the pure decision (K1–K10 in order, plus the 4.4
+// rule for Space / Enter on interactive elements and the narrow drawer Esc); install() adds the single
+// window keydown listener and hands the decided action to the shell's runner (state/actions.ts).
 //
 // `keys` syntax: space-separated groups; inside a group `+`, `/` and `–` join keys (`Ctrl+Z/Y`, `1–5`);
 // a group that is only `+` or `/` is the key itself. An empty `keys` is a pointer gesture written out in
 // the label. `label` of every legacy row is the legacy help text verbatim.
+import type { Tool, ViewerKind } from '@/viewers/types';
 
 export type ShortcutGroup = 'Everywhere' | 'Canvas' | 'Players' | '3D view' | 'Graph';
 export type ActionId =
@@ -49,6 +52,8 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: 'canvas-tile', keys: 'T', label: 'tile 3×3', group: 'Canvas' },
   { id: 'canvas-frames', keys: ', .', label: 'frames', group: 'Canvas' },
   { id: 'canvas-onion', keys: 'N', label: 'onion skin', group: 'Canvas' },
+  { id: 'compare-overlay', keys: 'D', label: 'compare overlay: off / difference / swipe / blink (two canvases side by side)', group: 'Canvas', isNew: true },
+  { id: 'compare-blink', keys: 'X', label: 'swap the blink image', group: 'Canvas', isNew: true },
 
   { id: 'play', keys: 'Space', label: 'play / pause (animation, rig clip, 3D clip, audio)', group: 'Players' },
   { id: 'wireframe', keys: 'W', label: 'wireframe (3D)', group: 'Players' },
@@ -82,3 +87,138 @@ export function keyTokens(keys: string): KeyToken[] {
 }
 
 export const shortcutById = (id: string): Shortcut | undefined => SHORTCUTS.find((s) => s.id === id);
+
+// ---------------------------------------------------------------------------------------------------
+// Global key handler (K1–K10)
+
+/** What decide() reads from a keyboard event. */
+export interface KeyEventLike { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }
+
+/** The app state decide() needs; built by the shell for every key press. */
+export interface ShortcutContext {
+  /** focus is in input / textarea / select / contenteditable (K1) */
+  inText: boolean;
+  /** the event target is a button, link, tab, tree item, menu item or summary (4.4) */
+  onInteractive: boolean;
+  /** a dialog other than Help is open (K2) */
+  dialogBlocking: boolean;
+  helpOpen: boolean;
+  reviewMode: boolean;
+  comparing: boolean;
+  /** slot A shows a snapshot */
+  snapOpen: boolean;
+  /** a narrow-layout drawer is open */
+  drawerOpen: boolean;
+  /** a pixel canvas has focus (K6) */
+  pixelCanvasFocused: boolean;
+  slotAKind: ViewerKind | null;
+  /** the asset browser is on screen (`/`) */
+  browserShown: boolean;
+  /** number of viewer tabs of slot A (`1`–`5`); unknown = 5 */
+  tabCount?: number;
+}
+
+export type Action =
+  | { type: 'blur' }
+  | { type: 'undo'; redo: boolean }
+  | { type: 'closeDrawer' } | { type: 'reviewOff' } | { type: 'closeHelp' } | { type: 'closeCompare' } | { type: 'backToLive' }
+  | { type: 'graph' }
+  | { type: 'tool'; tool: Tool }
+  | { type: 'follow' } | { type: 'compare' } | { type: 'review' } | { type: 'filter' } | { type: 'help' } | { type: 'dock' }
+  | { type: 'pane'; which: 'browser' | 'side' }
+  | { type: 'overview' }
+  | { type: 'tab'; index: number }
+  /** K7: offer the key to the slot A viewer; when it does not take it, run `fallback` (K8–K10). */
+  | { type: 'viewer'; key: string; fallback: Action | null };
+
+export interface Decision { action: Action; preventDefault?: boolean }
+
+/** Paint tool keys (K9), the same letters CanvasViewer uses. */
+export const TOOL_KEY_MAP: Readonly<Record<string, Tool>> = { b: 'pencil', e: 'eraser', g: 'fill', l: 'line', r: 'rect', i: 'picker', h: 'hand' };
+
+/** The key as viewers get it: lower-cased single characters, else e.key. */
+export const normKey = (key: string): string => (key.length === 1 ? key.toLowerCase() : key);
+
+/** K8–K10: the shell's own keys, after the slot A viewer declined. */
+function shellKey(e: KeyEventLike, k: string, ctx: ShortcutContext): Decision | null {
+  if (e.shiftKey && k === 'g') return { action: { type: 'graph' } };
+  if (ctx.slotAKind === 'canvas' && TOOL_KEY_MAP[k]) return { action: { type: 'tool', tool: TOOL_KEY_MAP[k] } };
+  switch (k) {
+    case 'f': return { action: { type: 'follow' } };
+    case 'c': return { action: { type: 'compare' } };
+    case 'm': return { action: { type: 'review' } };
+    // legacy: `/` never types into the page; it focuses the filter only while the browser is shown
+    case '/': return ctx.browserShown ? { action: { type: 'filter' }, preventDefault: true } : null;
+    case '?': return { action: { type: 'help' } };
+    case 'p': return { action: { type: 'dock' } };
+    case '[': return { action: { type: 'pane', which: 'browser' } };
+    case ']': return { action: { type: 'pane', which: 'side' } };
+    case 'o': return { action: { type: 'overview' } };
+    default: break;
+  }
+  if (/^[1-5]$/.test(k)) {
+    const i = Number(k) - 1;
+    return i < (ctx.tabCount ?? 5) ? { action: { type: 'tab', index: i } } : null;
+  }
+  return null;
+}
+
+/** K1–K10 in order (plan 1.10) plus the 4.4 rules. null = the shell does nothing with this key. */
+export function decide(e: KeyEventLike, ctx: ShortcutContext): Decision | null {
+  // K1: typing in a field: only Esc acts (blurs it)
+  if (ctx.inText) return e.key === 'Escape' ? { action: { type: 'blur' } } : null;
+  // K2: a dialog other than Help is open: it handles its own keys (Esc closes it)
+  if (ctx.dialogBlocking) return null;
+  const k = normKey(e.key);
+  const mod = e.ctrlKey || e.metaKey;
+  // K3: undo / redo of the slot A viewer
+  if (mod && k === 'z') return { action: { type: 'undo', redo: e.shiftKey }, preventDefault: true };
+  if (mod && k === 'y') return { action: { type: 'undo', redo: true }, preventDefault: true };
+  // K4: any other modifier combination is not ours
+  if (mod || e.altKey) return null;
+  // 4.4: Space / Enter on a button, link, tab, tree item, menu item or summary belong to that element
+  if (ctx.onInteractive && (e.key === ' ' || e.key === 'Enter')) return null;
+  // K5: Esc, first match wins (the narrow drawer first, 2.6)
+  if (e.key === 'Escape') {
+    if (ctx.drawerOpen) return { action: { type: 'closeDrawer' } };
+    if (ctx.reviewMode) return { action: { type: 'reviewOff' } };
+    if (ctx.helpOpen) return { action: { type: 'closeHelp' } };
+    if (ctx.comparing) return { action: { type: 'closeCompare' } };
+    if (ctx.snapOpen) return { action: { type: 'backToLive' } };
+    return null;
+  }
+  // K6: Space on a focused pixel canvas is the canvas's (hold-space panning)
+  if (e.key === ' ' && ctx.pixelCanvasFocused) return null;
+  // K7: the slot A viewer next, then K8–K10
+  const fallback = shellKey(e, k, ctx);
+  return { action: { type: 'viewer', key: k, fallback: fallback?.action ?? null }, preventDefault: fallback?.preventDefault };
+}
+
+/** Is this element one whose Space / Enter must not trigger a global shortcut (4.4)? */
+export function isInteractive(el: Element | null): boolean {
+  return !!el?.closest?.('button, a[href], summary, [role=button], [role=tab], [role=treeitem], [role=menuitem], [role=menuitemcheckbox], [role=menuitemradio]');
+}
+/** Is focus in a text field (K1)? */
+export function isTextTarget(el: Element | null): boolean {
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (el as HTMLElement).isContentEditable === true;
+}
+
+export interface ShortcutRunner {
+  context(e: KeyboardEvent): ShortcutContext;
+  /** Run an action; for `viewer`, return true when the viewer took the key. */
+  run(action: Action, e: KeyboardEvent): boolean | void;
+}
+
+/** The single window keydown listener. Returns the uninstall function. */
+export function install(runner: ShortcutRunner, target: Window = window): () => void {
+  const onKey = (e: KeyboardEvent) => {
+    const d = decide(e, runner.context(e));
+    if (!d) return;
+    const taken = runner.run(d.action, e) === true;
+    if (d.preventDefault || taken) e.preventDefault();
+  };
+  target.addEventListener('keydown', onKey);
+  return () => target.removeEventListener('keydown', onKey);
+}

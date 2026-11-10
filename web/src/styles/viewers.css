@@ -92,6 +92,7 @@ img.big { min-width: 256px; }
 
 /* layers view */
 .layers-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 300px; }
+@media (max-width: 860px) { .layers-body { grid-template-columns: 1fr; grid-template-rows: 1fr auto; } }
 .layers-stage { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .layers-canvas { image-rendering: pixelated; border: 1px solid var(--line2); cursor: crosshair; }
 .layers-viewer .vtoolbar .mono { white-space: nowrap; }
@@ -200,7 +201,7 @@ button.cu-item:hover { background: var(--panel2); }
 .cu-settings p { margin: 0 0 var(--s-2, 4px); }
 @media (prefers-reduced-motion: reduce) { .cu-twisty .icon { transition: none; } }
 
-/* inspector (step 16: components/inspector, the review dialogs; legacy-shell.css keeps its copies until the shell takes over) */
+/* inspector (step 16: components/inspector, the review dialogs) */
 #inspector .insp-body { padding: var(--s-2) var(--s-5) 14px; display: flex; flex-direction: column; gap: var(--s-3); transition: opacity var(--t-med); }
 #inspector .insp-body.stale { opacity: .55; }
 .insp-title { display: flex; align-items: center; gap: var(--s-3); font-size: 14px; font-weight: 600; padding-top: var(--s-3); word-break: break-all; }

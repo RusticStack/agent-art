@@ -12,11 +12,11 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(ROOT, 'dist', 'ui');
 const KB = 1024;
 
-// Budgets in kB gzip (raw for distTotal). FINAL = the values of plan 7.1; before the Svelte shell takes
-// over (plan step 18) the baseline numbers of the vanilla UI apply to the initial JS, CSS and three.
-const FINAL = false;
+// Budgets in kB gzip (raw for distTotal), the values of plan 7.1. FINAL (step 18, the Svelte shell owns
+// the page): the notices file must name every package of 7.1 (all five are bundled).
+const FINAL = true;
 export const BUDGETS = {
-  initialJs: 116, // plan 7.1 (the legacy bundle was 51 kB; the migration grows it towards the final shell)
+  initialJs: 116, // plan 7.1 (the legacy bundle was 51 kB)
   lazyViewer: 15,          // any single lazy viewer chunk
   lazyViewersTotal: 55,
   three: 220, // plan 7.1 (5.7b addons + ViewHelper)
@@ -25,7 +25,7 @@ export const BUDGETS = {
   palette: 14,
   picker: 5,
   dialogs: 45, // step 17: + Bits Tooltip/floating-ui via Button in the cleanup dialogs; not in plan 7.1 ("the dialogs' heavy parts are lazy"): a guard for the lazy DialogHost chunk (Bits Dialog)
-  cssInitial: 14, // plan 7.1; the interim (migration) budget is the final one, as for initialJs (step 14 note)
+  cssInitial: 14, // plan 7.1
   cssTotal: 20,
   distTotalRaw: 1.8 * 1024, // kB raw
   icons: 60,

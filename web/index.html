@@ -7,57 +7,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 4' shape-rendering='crispEdges'><rect width='2' height='2' fill='%23f5a524'/><rect x='2' y='2' width='2' height='2' fill='%2338bdf8'/><rect x='2' width='2' height='2' fill='%2322c55e'/><rect y='2' width='2' height='2' fill='%23e5484d'/></svg>">
 </head>
 <body>
-  <header class="topbar">
-    <button class="btn icon pane-toggle" id="toggleBrowser" title="Assets pane ([)">☰</button>
-    <div class="brand"><span class="logo"></span>Agent Art</div>
-    <div id="status" class="status"><span class="dot"></span><span id="statusText">connecting…</span></div>
-    <span id="wsPath" class="ws mono"></span>
-    <div class="spacer"></div>
-    <div class="group">
-      <button class="btn" id="followBtn" title="Follow mode (F): the viewer switches to whatever the agent touches">◉ Follow</button>
-      <select id="followMode" title="What follow mode opens">
-        <option value="canvas">asset</option>
-        <option value="project">project overview</option>
-        <option value="off">off</option>
-      </select>
-    </div>
-    <button class="btn" id="compareBtn" title="Compare two assets or states side by side (C)">⇆ Compare</button>
-    <button class="btn" id="reviewBtn" title="Review mode (M): drag a box or click a pin to leave a note for the agent">⚑ Review</button>
-    <button class="btn" id="reviewListBtn" title="All review notes">Notes <span id="reviewCount" class="count-badge" hidden></span></button>
-    <button class="btn" id="graphBtn" title="Asset graph (Shift+G)">⬡ Graph</button>
-    <button class="btn" id="cleanupBtn" title="Trash, disk usage and cleanup settings">🗑 Cleanup</button>
-    <button class="btn icon" id="helpBtn" title="Keyboard shortcuts (?)">?</button>
-    <button class="btn icon pane-toggle" id="toggleSide" title="Inspector / activity pane (])">☷</button>
-  </header>
-
-  <main id="app" class="app">
-    <aside id="browser" class="pane browser" aria-label="Assets"></aside>
-    <div class="splitter v browser-split" data-size="browser-w" data-dir="x" data-sign="1" title="Drag to resize"></div>
-
-    <section class="center">
-      <div id="viewers" class="viewers">
-        <div class="slot-wrap" id="slotWrapA">
-          <div class="slot-head"><div class="slot-title" id="titleA"></div><div class="tabs" id="tabsA"></div></div>
-          <div class="slot" id="slotA"></div>
-        </div>
-        <div class="slot-wrap" id="slotWrapB" hidden>
-          <div class="slot-head"><div class="slot-title" id="titleB"></div><div class="tabs" id="tabsB"></div><div class="spacer"></div>
-            <button class="btn small" id="swapB" title="Swap sides">⇄</button><button class="btn small" id="closeB" title="Close comparison (C / Esc)">✕</button></div>
-          <div class="slot" id="slotB"></div>
-        </div>
-      </div>
-      <div class="splitter h bottom-split" data-size="bottom-h" data-dir="y" data-sign="-1"></div>
-      <div id="bottomDock" class="bottom-dock"></div>
-    </section>
-
-    <div class="splitter v side-split" data-size="side-w" data-dir="x" data-sign="-1" title="Drag to resize"></div>
-    <aside id="side" class="pane side">
-      <div id="inspector" class="inspector" aria-label="Inspector"></div>
-      <div class="splitter h insp-split" data-size="insp-h" data-dir="y" data-sign="1"></div>
-      <div id="sideDock" class="side-dock"><div id="timelinePane" class="timeline-pane" aria-label="Activity"></div></div>
-    </aside>
-  </main>
-
-  <script src="app.js" type="module"></script>
+  <div id="app"></div>
+  <script type="module" src="./src/main.ts"></script>
 </body>
 </html>

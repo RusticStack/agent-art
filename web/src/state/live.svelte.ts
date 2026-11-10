@@ -10,24 +10,15 @@ import { connection } from './connection.svelte';
 import { reviews } from './reviews.svelte';
 import { uiState } from './uiState.svelte';
 import { workspace } from './workspace.svelte';
+import { bumpInspector, signals } from './signals.svelte';
 
 /** browserFlash (asset rows that should flash: the agent changed them) and inspectorTick (refetch the inspector). */
-class Signals {
-  flash = $state.raw<{ id: string; n: number }>({ id: '', n: 0 });
-  inspectorTick = $state(0);
-}
-export const signals = new Signals();
+export { signals };
 
 const ASSET_EVENTS = new Set(['change', 'deleted', 'model', 'audio', 'project', 'anim_library', 'planet']);
 const KNOWN = new Set(['hello', 'activity', 'ui-state', 'graph', 'resync', ...ASSET_EVENTS]);
 const OWN_EVENTS = new Set(['hello', 'activity', 'ui-state']);
 const INSPECT_EVENTS = new Set(['change', 'model', 'audio', 'project']);
-
-let inspectTimer: ReturnType<typeof setTimeout> | null = null;
-function bumpInspector(): void {
-  if (inspectTimer) return;
-  inspectTimer = setTimeout(() => { inspectTimer = null; signals.inspectorTick++; }, 150);
-}
 
 /** The asset an event is about, as an id (for the inspector refresh). */
 function eventAssetId(ev: AnyEvent): string | null {
@@ -37,14 +28,6 @@ function eventAssetId(ev: AnyEvent): string | null {
   if (ev.type === 'audio') return `audio:${e.name}`;
   if (ev.type === 'project') return `project:${e.project}`;
   return null;
-}
-
-type Hook = (ev: AnyEvent) => void;
-const afterHooks: Hook[] = [];
-/** Temporary (removed in step 18): the legacy App re-renders its DOM after each event. */
-export function onAfterEvent(fn: Hook): () => void {
-  afterHooks.push(fn);
-  return () => { const i = afterHooks.indexOf(fn); if (i >= 0) afterHooks.splice(i, 1); };
 }
 
 /** Route one server event to the stores and the viewers. */
@@ -81,7 +64,6 @@ export function route(ev: AnyEvent): void {
       workspace.viewer('B')?.onEvent?.(ev);
     }
   }
-  for (const h of afterHooks) h(ev);
 }
 
 /** The entry script URL of an HTML page (the stale-build check). */
@@ -114,7 +96,6 @@ export async function resync(): Promise<void> {
   const ev = { type: 'resync' } as const;
   workspace.viewer('A')?.onEvent?.(ev);
   workspace.viewer('B')?.onEvent?.(ev);
-  for (const h of afterHooks) h(ev);
 }
 
 let stream: EventStream | null = null;

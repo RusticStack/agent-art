@@ -2,7 +2,7 @@
   Inspector (I1..I14): what workspace.inspected shows, its review notes and its relations. Data comes from
   a keyed Resource on (inspected id, snap, inspectorTick): abortable, last-wins, and the previous content
   stays (dimmed, aria-busy) until the next arrives; a spinner after 150 ms (2.7). Mounted into #inspector.
-  The callbacks default to the stores; the legacy App passes its own while it still owns the DOM.
+  The callbacks default to the stores (tests pass their own).
 -->
 <script lang="ts">
   import { onDestroy, untrack } from 'svelte';

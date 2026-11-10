@@ -102,6 +102,52 @@ export class AppPage {
   swapButton(): Locator { return this.page.locator('#swapB'); }
   closeCompareButton(): Locator { return this.page.locator('#closeB'); }
   backToLive(): Locator { return this.slotTitle('A').getByRole('button', { name: 'Back to live' }); }
+  /** The snapshot badge ("state …") in a slot title. */
+  stateBadge(s: 'A' | 'B' = 'A'): Locator { return this.slotTitle(s).locator('.badge.state'); }
+  // ---- compare tools (slot B header, step 18c) ----
+  compareTools(): Locator { return this.slotWrap('B').getByRole('group', { name: 'Compare tools' }); }
+  compareLink(): Locator { return this.compareTools().getByRole('button', { name: 'Link' }); }
+  overlaySelect(): Locator { return this.compareTools().getByRole('combobox', { name: 'Overlay' }); }
+  compareStatus(): Locator { return this.compareTools().getByRole('status'); }
+  /** A hash of the slot's pixel canvas content, to see that something on screen changed. */
+  async canvasHash(s: 'A' | 'B' = 'A'): Promise<number> {
+    return this.pixelCanvas(s).evaluate((c) => {
+      const cv = c as HTMLCanvasElement;
+      const t = document.createElement('canvas'); t.width = cv.width; t.height = cv.height;
+      const x = t.getContext('2d')!; x.drawImage(cv, 0, 0);
+      const d = x.getImageData(0, 0, t.width, t.height).data;
+      let h = 2166136261;
+      for (let i = 0; i < d.length; i++) { h ^= d[i]; h = Math.imul(h, 16777619); }
+      return h >>> 0;
+    });
+  }
+  /** Find the swipe bar on slot A's canvas (the cursor turns col-resize over it): its page x, y. */
+  async swipeBar(): Promise<{ x: number; y: number }> {
+    const box = (await this.pixelCanvas('A').boundingBox())!;
+    const y = box.y + box.height / 2;
+    for (let x = box.x + 4; x < box.x + box.width - 4; x += 3) {
+      await this.page.mouse.move(x, y);
+      if (await this.pixelCanvas('A').evaluate((c) => (c as HTMLElement).style.cursor === 'col-resize')) return { x, y };
+    }
+    throw new Error('swipe bar not found');
+  }
+  // ---- layout ----
+  splitter(label: 'Resize the assets pane' | 'Resize the inspector / activity pane' | 'Resize the inspector' | 'Resize the activity dock'): Locator {
+    return this.page.getByRole('separator', { name: label });
+  }
+  bottomDock(): Locator { return this.page.locator('#bottomDock'); }
+  /** window.agentArt.state() (P4). */
+  async shellState<T = Record<string, unknown>>(): Promise<T> {
+    return this.page.evaluate(() => (window as unknown as { agentArt: { state(): unknown } }).agentArt.state() as T);
+  }
+  /** Open a target through the debug handle (for slot B setups the browser cannot reach quickly). */
+  async openTarget(target: Record<string, unknown>, slot: 'A' | 'B' = 'A') {
+    await this.page.evaluate(([t, s]) => (window as unknown as { agentArt: { open(t: unknown, o: unknown): void } }).agentArt.open(t, { slot: s }), [target, slot] as const);
+  }
+  /** performance marks / paint entries by name, in ms since navigation start (null = not there). */
+  async perfMark(name: string): Promise<number | null> {
+    return this.page.evaluate((n) => performance.getEntriesByName(n)[0]?.startTime ?? null, name);
+  }
   // ---- timeline ----
   timelinePane(): Locator { return this.page.locator('#timelinePane'); }
   timelineEntries(): Locator { return this.page.locator('#timelinePane .tl-entry'); }
@@ -110,6 +156,12 @@ export class AppPage {
   timelineSearch(): Locator { return this.page.locator('#timelinePane input.search'); }
   timelineList(): Locator { return this.page.locator('#timelinePane .tl-list'); }
   dockButton(): Locator { return this.page.locator('#timelinePane .pane-head button'); }
+  /** Timeline entries that mention the text (newest first). */
+  timelineEntry(hasText: string | RegExp): Locator { return this.timelineEntries().filter({ hasText }).first(); }
+  /** TL11: the entry's "Compare before / after" button (⇆). */
+  timelineCompare(entry: Locator): Locator { return entry.getByRole('button', { name: 'Compare before / after' }); }
+  /** TL10: the entry's main line (opens the after snapshot). */
+  timelineOpen(entry: Locator): Locator { return entry.locator('button.tl-open'); }
   // ---- inspector ----
   inspector(): Locator { return this.page.locator('#inspector'); }
   inspectorTitle(): Locator { return this.page.locator('#inspector .insp-title .name'); }

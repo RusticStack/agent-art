@@ -10,7 +10,7 @@ import { connection } from './connection.svelte';
 import { reviews } from './reviews.svelte';
 import { uiState } from './uiState.svelte';
 import { workspace } from './workspace.svelte';
-import { entryScript, onAfterEvent, resync, route, signals } from './live.svelte';
+import { entryScript, resync, route, signals } from './live.svelte';
 
 const viewer = () => ({ onEvent: vi.fn() } as unknown as Viewer & { onEvent: ReturnType<typeof vi.fn> });
 let A: ReturnType<typeof viewer>, B: ReturnType<typeof viewer>;
@@ -50,12 +50,9 @@ describe('live.route', () => {
     expect(B.onEvent.mock.calls.length > 0).toBe(!!want.viewers);
     expect(vi.mocked(workspace.follow).mock.calls.length > 0).toBe(!!want.follow);
   });
-  it('activity upserts, marks the agent busy, hooks run after the stores', () => {
-    const seen: string[] = [];
-    const off = onAfterEvent((ev) => seen.push(ev.type + ':' + activity.get(7)?.id));
+  it('activity upserts and marks the agent busy', () => {
     route(act({}));
-    off();
-    expect(seen).toEqual(['activity:7']);
+    expect(activity.get(7)?.id).toBe(7);
     expect(connection.status).toBe('busy');
   });
   it('an agent change flashes the row; a change of the inspected asset bumps the inspector', () => {

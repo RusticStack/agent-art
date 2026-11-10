@@ -2,12 +2,14 @@
 :root { font: 13px/1.4 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); overflow: hidden; }
+#app { height: 100%; }
 button, input, select, textarea { font: inherit; color: inherit; }
 a { color: var(--blue); }
 [hidden] { display: none !important; }
 .mono { font-family: ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace; font-size: 12px; }
 .muted { color: var(--muted); } .small { font-size: 11px; } .dim { opacity: .6; } .pad { padding: 12px; }
 .spacer { flex: 1; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .error { color: var(--red); padding: 6px 0; }
 .warn-line { color: var(--accent); font-size: 12px; }
 kbd { background: var(--panel2); border: 1px solid var(--line2); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; font: 11px ui-monospace, monospace; }
@@ -59,3 +61,19 @@ span.icon svg { width: 100%; height: 100%; }
 .menu-item[data-disabled] { opacity: .45; cursor: default; }
 .menu-item.danger { color: var(--red-fg); }
 .menu-sep { height: 1px; margin: var(--s-2) 0; background: var(--line); }
+
+/* ---------- shared shell pieces (moved from legacy-shell.css in step 18) ---------- */
+.pane-head { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--line); min-height: 34px; }
+.pane-head h2, .pane-head h3 { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.kicon { width: 22px; flex: none; text-align: center; display: inline-flex; justify-content: center; }
+.label { min-width: 0; flex: 1; display: flex; flex-direction: column; line-height: 1.15; }
+.label .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.label .meta { font-size: 10px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-inline { display: flex; align-items: center; gap: 4px; }
+.row-inline input[type=number] { width: 64px; }
+.btn.grow, .grow { flex: 1; justify-content: center; }
+
+/* compact layout (N1): narrower default panes */
+@media (max-width: 1100px) {
+  :root { --side-w: 300px; --browser-w: 230px; }
+}
