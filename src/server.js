@@ -21,6 +21,57 @@ import { rigLayers, rigDebugRender } from './rigdebug.js';
 export const UI_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'ui');
 export const UI_NOT_BUILT = 'Agent Art web UI not built: run npm run build:ui';
 let warnedNotBuilt = false;
+export const UI_STALE = 'Agent Art web UI build is older than web/ sources: run npm run build:ui';
+
+/**
+ * Newest mtime (ms) of the UI sources of a source checkout (`<root>/web/src/**` and `<root>/web/index.html`),
+ * or null when `<root>/web/src` does not exist (the npm package ships no sources). One walk; call it at
+ * startup, never per request.
+ */
+export function uiSourcesMtime(root) {
+  const src = path.join(root, 'web', 'src');
+  let newest = 0;
+  try { if (!fs.statSync(src).isDirectory()) return null; } catch { return null; }
+  const walk = (dir) => {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.isFile()) { try { newest = Math.max(newest, fs.statSync(p).mtimeMs); } catch { /* removed meanwhile */ } }
+    }
+  };
+  walk(src);
+  try { newest = Math.max(newest, fs.statSync(path.join(root, 'web', 'index.html')).mtimeMs); } catch { /* no index.html */ }
+  return newest;
+}
+
+/**
+ * Is the built web UI there, and is it older than the sources? `built`: `index.html` exists. `stale` only
+ * in a source checkout (a `web/src` folder next to `src/`, i.e. two levels above `uiDir`): `build.json`
+ * missing or unreadable, its `version` is not VERSION, or a source file is newer than its `builtAt`.
+ * `sourcesMtime` (from uiSourcesMtime) skips the walk; startServer walks once and passes it.
+ */
+export function uiBuildStatus(uiDir = UI_DIR, { root = path.resolve(uiDir, '..', '..'), sourcesMtime } = {}) {
+  const dir = path.resolve(uiDir);
+  const built = fs.existsSync(path.join(dir, 'index.html'));
+  if (!built) return { built: false, stale: false, reason: `${dir} is missing` };
+  const newest = sourcesMtime === undefined ? uiSourcesMtime(root) : sourcesMtime;
+  if (newest === null) return { built: true, stale: false };
+  let stamp;
+  try { stamp = JSON.parse(fs.readFileSync(path.join(dir, 'build.json'), 'utf8')); } catch { return { built: true, stale: true, reason: 'build.json is missing' }; }
+  if (stamp?.version !== VERSION) return { built: true, stale: true, reason: `built for version ${stamp?.version}, the package is ${VERSION}` };
+  if (!(Number(stamp.builtAt) >= newest)) return { built: true, stale: true, reason: 'web/ sources changed after the build' };
+  return { built: true, stale: false };
+}
+
+/** The note for art_open_ui's reply when the UI is not built or stale (null when it is fine). */
+export function uiBuildNote(ui, root = path.resolve(UI_DIR, '..', '..')) {
+  if (!ui) return null;
+  if (!ui.built) return `web UI not built: run npm run build:ui in ${root}`;
+  if (ui.stale) return `web UI build is older than the web/ sources: run npm run build:ui in ${root}`;
+  return null;
+}
 const NOT_BUILT_PAGE = `<!doctype html>
 <html lang="en">
 <head>
@@ -114,6 +165,10 @@ export function startServer(engine, { port, host = '127.0.0.1', uiDir = UI_DIR }
   const clients = new Set();
   const uiToken = crypto.randomBytes(24).toString('hex');
   const modelThumbs = new Map(); // `${model name}\n${size}` -> {key, png}
+  // UI build status (step 21): the sources are walked once here; /api/health re-reads only build.json,
+  // so a rebuild while the server runs clears the stale flag without a restart
+  const sourcesMtime = uiSourcesMtime(path.resolve(uiDir, '..', '..'));
+  const uiStatus = () => { const s = uiBuildStatus(uiDir, { sourcesMtime }); return { built: s.built, stale: s.stale }; };
   engine.on('event', (ev) => {
     const msg = `data: ${JSON.stringify(ev)}\n\n`;
     for (const c of clients) c.write(msg);
@@ -155,7 +210,7 @@ export function startServer(engine, { port, host = '127.0.0.1', uiDir = UI_DIR }
         return sendJSON(res, 404, { ok: false, error: 'Not found' });
       }
 
-      if (p === '/api/health') return sendJSON(res, 200, { app: APP_ID, version: VERSION, pid: process.pid, home: engine.home, canvases: engine.docs.size });
+      if (p === '/api/health') return sendJSON(res, 200, { app: APP_ID, version: VERSION, pid: process.pid, home: engine.home, canvases: engine.docs.size, ui: uiStatus() });
       if (p === '/api/canvases') return sendJSON(res, 200, engine.peek('list'));
       if (p === '/api/assets') return sendJSON(res, 200, assetIndex(engine));
       if (p === '/api/ui-state') return sendJSON(res, 200, readUiState(engine));
@@ -352,6 +407,10 @@ export function startServer(engine, { port, host = '127.0.0.1', uiDir = UI_DIR }
     server.listen(port, host, () => {
       server.off('error', reject);
       engine.uiUrl = `http://localhost:${port}`;
+      // one line at startup when the UI is missing or older than its sources (a source checkout)
+      const st = uiBuildStatus(uiDir, { sourcesMtime });
+      if (!st.built) { warnedNotBuilt = true; process.stderr.write(`${UI_NOT_BUILT} (${path.resolve(uiDir)} is missing)\n`); }
+      else if (st.stale) process.stderr.write(`${UI_STALE}\n`);
       resolve(server);
     });
   });

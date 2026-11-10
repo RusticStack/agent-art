@@ -1,6 +1,7 @@
 // Web UI build checks: bundle budgets (plan section 7.1) and the contents of dist/ui.
 //   node scripts/check-ui-build.js           budgets + dist/ui file rules
-//   node scripts/check-ui-build.js --pack    also runs `npm pack --dry-run --json` and checks the package (7.2)
+//   node scripts/check-ui-build.js --pack    also runs `npm pack --dry-run --json --ignore-scripts` and checks the package (7.2)
+//   node scripts/check-ui-build.js --pack-json <file>   the same checks on saved `npm pack --dry-run --json` output
 // Exit code 1 with a clear message when a rule is broken. Plain Node, no dependencies.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -82,6 +83,13 @@ function main() {
   }
   if (!/<head>/.test(html)) fail('dist/ui/index.html must contain a literal <head> (the server injects the UI token there)');
   if (/(?:src|href)=["'](?:https?:)?\/\//i.test(html)) fail('index.html references an absolute URL / another origin');
+  // step 21: the build stamp the server compares with the package version and the web/ sources
+  if (!files.includes('build.json')) fail('build.json is missing (the agent-art-build-stamp plugin in vite.config.js writes it)');
+  else {
+    const stamp = JSON.parse(fs.readFileSync(path.join(DIST, 'build.json'), 'utf8'));
+    const version = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
+    if (stamp.version !== version || !Number.isFinite(stamp.builtAt)) fail(`build.json ${JSON.stringify(stamp)} does not match { version: "${version}", builtAt: <ms> }`);
+  }
   if (!files.includes('THIRD-PARTY-NOTICES.txt')) fail('THIRD-PARTY-NOTICES.txt is missing');
   else {
     const n = fs.readFileSync(path.join(DIST, 'THIRD-PARTY-NOTICES.txt'), 'utf8');
@@ -165,7 +173,7 @@ function main() {
   for (const [f, k, raw, g] of rows) console.log(f.padEnd(52), k.padEnd(13), kb(raw).padStart(8), kb(g).padStart(8));
   console.log(`initial JS ${kb(initialGz)} / ${BUDGETS.initialJs} kB · lazy viewers ${kb(lazyTotal)} / ${BUDGETS.lazyViewersTotal} kB · graph-cards ${kb(graphCardsGz)} / ${BUDGETS.graphCards} kB · CSS initial ${kb(cssInit)} / ${BUDGETS.cssInitial} kB · CSS total ${kb(cssTotal)} / ${BUDGETS.cssTotal} kB · dist ${kb(distRaw)} / ${BUDGETS.distTotalRaw} kB raw · icons ${icons} / ${BUDGETS.icons}`);
 
-  if (process.argv.includes('--pack')) checkPack();
+  if (process.argv.includes('--pack') || process.argv.includes('--pack-json')) checkPack();
 
   if (errors.length) {
     console.error('\nUI build check FAILED:\n  - ' + errors.join('\n  - '));
@@ -174,21 +182,52 @@ function main() {
   console.log('UI build check ok');
 }
 
-/** Plan 7.2: what `npm pack` would publish. */
-function checkPack() {
-  const out = execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], { cwd: ROOT, encoding: 'utf8', shell: process.platform === 'win32' });
-  const list = JSON.parse(out.slice(out.indexOf('[')))[0].files.map((f) => f.path.replace(/\\/g, '/'));
-  for (const need of ['dist/ui/index.html', 'dist/ui/build.json', 'dist/ui/THIRD-PARTY-NOTICES.txt']) if (!list.includes(need)) fail(`package lacks ${need}`);
-  for (const re of [/^dist\/ui\/assets\/index-.*\.js$/, /^dist\/ui\/assets\/index-.*\.css$/, /^dist\/ui\/assets\/three-.*\.js$/]) if (!list.some((f) => re.test(f))) fail(`package lacks a file matching ${re}`);
+/**
+ * Plan 7.2: problems with a package file list (`npm pack --dry-run --json` -> [0].files[].path) and
+ * package.json. Pure, so test/ui.test.js can feed it lists.
+ */
+export function packProblems(list, pkg) {
+  const out = [];
+  list = list.map((f) => f.replace(/\\/g, '/'));
+  for (const need of ['dist/ui/index.html', 'dist/ui/build.json', 'dist/ui/THIRD-PARTY-NOTICES.txt']) if (!list.includes(need)) out.push(`package lacks ${need}`);
+  for (const re of [/^dist\/ui\/assets\/index-.*\.js$/, /^dist\/ui\/assets\/index-.*\.css$/, /^dist\/ui\/assets\/three-.*\.js$/]) if (!list.some((f) => re.test(f))) out.push(`package lacks a file matching ${re}`);
   for (const f of list) {
-    if (/^(web|e2e|test|docs|scripts|node_modules|test-results)\//.test(f)) fail(`package contains ${f}`);
-    if (/^(playwright\.config\.ts|vite\.config\.js|svelte\.config\.js|tsconfig\.json)$/.test(f) || f.endsWith('.map') || f === 'src/meshfixtures.js') fail(`package contains ${f}`);
+    if (/^(web|e2e|test|docs|scripts|node_modules|test-results)\//.test(f)) out.push(`package contains ${f}`);
+    else if (/^(playwright\.config\.ts|vite\.config\.js|svelte\.config\.js|tsconfig\.json)$/.test(f) || f.endsWith('.map') || f === 'src/meshfixtures.js') out.push(`package contains ${f}`);
   }
+  if (pkg.dependencies && Object.keys(pkg.dependencies).length) out.push('package.json dependencies must be empty');
+  if (pkg.scripts?.postinstall || pkg.scripts?.prepare) out.push('no postinstall / prepare script allowed');
+  if (!pkg.files?.includes('dist/ui/')) out.push('files must list dist/ui/');
+  if (pkg.scripts?.prepack !== 'npm run build:ui') out.push('prepack must be npm run build:ui');
+  return out;
+}
+
+/**
+ * The file list from `npm pack --dry-run --json` output. npm may print lines before the JSON (a prepack
+ * build); npm <= 10 prints an array of packages, npm 11 an object keyed by package name.
+ */
+export function packFileList(output) {
+  const start = output.search(/^[[{]/m);
+  if (start < 0) throw new Error('npm pack printed no JSON');
+  const j = JSON.parse(output.slice(start));
+  const entry = Array.isArray(j) ? j[0] : Object.values(j)[0];
+  if (!Array.isArray(entry?.files)) throw new Error('npm pack JSON has no file list');
+  return entry.files.map((f) => f.path.replace(/\\/g, '/'));
+}
+
+/**
+ * Plan 7.2: what `npm pack` would publish. `--pack-json <file>` reads saved `npm pack --dry-run --json`
+ * output; otherwise it runs `npm pack --dry-run --json --ignore-scripts` (no prepack rebuild here: this
+ * script checks the dist/ui that is already built, run npm run build:ui first).
+ */
+function checkPack() {
+  const at = process.argv.indexOf('--pack-json');
+  const out = at > 0 && process.argv[at + 1]
+    ? fs.readFileSync(path.resolve(process.argv[at + 1]), 'utf8')
+    : execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], { cwd: ROOT, encoding: 'utf8', shell: process.platform === 'win32', timeout: 120000 });
+  const list = packFileList(out);
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
-  if (pkg.dependencies && Object.keys(pkg.dependencies).length) fail('package.json dependencies must be empty');
-  if (pkg.scripts.postinstall || pkg.scripts.prepare) fail('no postinstall / prepare script allowed');
-  if (!pkg.files.includes('dist/ui/')) fail('files must list dist/ui/');
-  if (pkg.scripts.prepack !== 'npm run build:ui') fail('prepack must be npm run build:ui');
+  for (const m of packProblems(list, pkg)) fail(m);
   console.log(`pack: ${list.length} files, ${list.filter((f) => f.startsWith('dist/ui/')).length} under dist/ui`);
 }
 

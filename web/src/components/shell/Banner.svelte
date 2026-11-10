@@ -1,20 +1,21 @@
 <!--
   Page-wide notice under the top bar: a newer build of the web UI is being served (after a server
-  restart, 3.5). Dismissible for the session.
+  restart, 3.5), or the served build is older than the web/ sources of a source checkout (step 21,
+  `health.ui.stale`). Each is dismissible for the session.
 -->
 <script lang="ts">
-  import { connection } from '@/state/connection.svelte';
+  import { BANNER_TEXT, connection } from '@/state/connection.svelte';
   import Icon from '../ui/Icon.svelte';
 
-  let dismissed = $state(false);
+  const kind = $derived(connection.banner);
 </script>
 
-{#if connection.uiOutdated && !dismissed}
-  <div class="banner" role="alert">
+{#if kind}
+  <div class="banner" role="alert" data-banner={kind}>
     <Icon name="triangle-alert" size={14} />
-    <span>The server was restarted with a newer web UI. Reload the page to use it.</span>
+    <span>{BANNER_TEXT[kind]}</span>
     <button type="button" class="btn small" onclick={() => location.reload()}>Reload</button>
-    <button type="button" class="btn small icon ghost" aria-label="Dismiss" title="Dismiss" onclick={() => { dismissed = true; }}><Icon name="x" size={14} /></button>
+    <button type="button" class="btn small icon ghost" aria-label="Dismiss" title="Dismiss" onclick={() => connection.dismiss(kind)}><Icon name="x" size={14} /></button>
   </div>
 {/if}
 

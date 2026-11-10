@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { Engine } from './engine.js';
-import { startServer, APP_ID, packResult } from './server.js';
+import { startServer, APP_ID, packResult, uiBuildNote } from './server.js';
 import { COMMAND_NAMES } from './doc.js';
 import { drawDescription, helpText, TOPICS } from './docs.js';
 import { SKILLS, skillText, skillList } from './skills.js';
@@ -495,7 +495,10 @@ export const TOOLS = [
     run: async (call, a, ctx) => {
       const url = ctx.uiUrl() + (a.canvas ? `/#${encodeURIComponent(a.canvas)}` : '');
       openBrowser(url);
-      return { opened: url };
+      // a source checkout without a (fresh) UI build: say what to run (step 21); the schema is unchanged
+      const h = await fetch(`${ctx.uiUrl()}/api/health`, { signal: AbortSignal.timeout(1000) }).then((r) => r.json()).catch(() => null);
+      const note = h?.app === APP_ID ? uiBuildNote(h.ui) : null;
+      return note ? { opened: url, note } : { opened: url };
     },
   },
 ];

@@ -33,7 +33,9 @@ export async function boot(): Promise<void> {
     const { entries } = await api.activity({ limit: 600 });
     activity.load(entries);
   } catch { /* older server */ }
-  connection.serverPid = (await health)?.pid ?? null;
+  const h = await health;
+  connection.serverPid = h?.pid ?? null;
+  connection.setUiStatus(h?.ui);
   if (!started) { started = true; live.start(); }
   if (!assets.index) { bootState.phase = 'failed'; return; }
   openInitial();

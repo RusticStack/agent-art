@@ -292,3 +292,168 @@ test('ui: build notices plugin collects one notice per bundled package and enfor
   assert.equal(noticesFor(['/r/node_modules/toolbelt/dist/index.js'], read, list)[0].licence, 'MIT');
   assert.throws(() => noticesFor(['/r/node_modules/nolicence/index.js'], read, list), /licence "none" is not in the allow-list/);
 });
+
+// ---- step 21: build stamp, staleness, startup line, health, art_open_ui note, pack checks ----
+
+/** A source checkout (web/src + web/index.html) or a package layout (no web/), with dist/ui. */
+function uiLayout({ checkout = true, built = true, stamp } = {}) {
+  const root = tmp();
+  const dist = path.join(root, 'dist', 'ui');
+  if (checkout) {
+    fs.mkdirSync(path.join(root, 'web', 'src', 'state'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'web', 'index.html'), '<!doctype html>');
+    fs.writeFileSync(path.join(root, 'web', 'src', 'main.ts'), 'export {};');
+    fs.writeFileSync(path.join(root, 'web', 'src', 'state', 'x.ts'), 'export {};');
+  }
+  if (built) {
+    fs.mkdirSync(dist, { recursive: true });
+    fs.writeFileSync(path.join(dist, 'index.html'), '<!doctype html><html><head></head><body></body></html>');
+    if (stamp) fs.writeFileSync(path.join(dist, 'build.json'), JSON.stringify(stamp));
+  }
+  // every source an hour old, so a stamp of "now" is fresh
+  const old = new Date(Date.now() - 3600e3);
+  if (checkout) for (const f of ['web/index.html', 'web/src/main.ts', 'web/src/state/x.ts']) fs.utimesSync(path.join(root, f), old, old);
+  return { root, dist };
+}
+
+/** Run fn while collecting process.stderr.write. */
+async function captureStderr(fn) {
+  const lines = [];
+  const orig = process.stderr.write;
+  process.stderr.write = (s, ...rest) => { lines.push(String(s)); return typeof rest.at(-1) === 'function' ? (rest.at(-1)(), true) : true; };
+  try { return { result: await fn(), lines }; } finally { process.stderr.write = orig; }
+}
+
+test('ui: uiBuildStatus (missing, checkout without stamp, fresh, older than a source, version, package layout)', async () => {
+  const { uiBuildStatus, uiSourcesMtime, VERSION } = await import('../src/server.js');
+  // missing dir
+  let L = uiLayout({ built: false });
+  assert.deepEqual({ ...uiBuildStatus(L.dist), reason: undefined }, { built: false, stale: false, reason: undefined });
+  assert.match(uiBuildStatus(L.dist).reason, /is missing/);
+  // built, checkout layout, no build.json: stale
+  L = uiLayout();
+  assert.deepEqual(uiBuildStatus(L.dist), { built: true, stale: true, reason: 'build.json is missing' });
+  // fresh stamp
+  L = uiLayout({ stamp: { version: VERSION, builtAt: Date.now() } });
+  assert.deepEqual(uiBuildStatus(L.dist), { built: true, stale: false });
+  // a source touched after the build (nested under web/src), and web/index.html alone
+  const later = new Date(Date.now() + 60e3);
+  fs.utimesSync(path.join(L.root, 'web/src/state/x.ts'), later, later);
+  assert.equal(uiBuildStatus(L.dist).stale, true);
+  assert.match(uiBuildStatus(L.dist).reason, /sources changed/);
+  L = uiLayout({ stamp: { version: VERSION, builtAt: Date.now() } });
+  fs.utimesSync(path.join(L.root, 'web/index.html'), later, later);
+  assert.equal(uiBuildStatus(L.dist).stale, true);
+  // another version
+  L = uiLayout({ stamp: { version: '0.0.1', builtAt: Date.now() } });
+  assert.equal(uiBuildStatus(L.dist).stale, true);
+  assert.match(uiBuildStatus(L.dist).reason, /0\.0\.1/);
+  // unreadable stamp
+  L = uiLayout();
+  fs.writeFileSync(path.join(L.dist, 'build.json'), '{oops');
+  assert.equal(uiBuildStatus(L.dist).stale, true);
+  // package layout (no web/): never stale, even without build.json or with an old one
+  L = uiLayout({ checkout: false });
+  assert.deepEqual(uiBuildStatus(L.dist), { built: true, stale: false });
+  assert.equal(uiSourcesMtime(L.root), null);
+  L = uiLayout({ checkout: false, stamp: { version: '0.0.1', builtAt: 1 } });
+  assert.deepEqual(uiBuildStatus(L.dist), { built: true, stale: false });
+  // a precomputed sources mtime skips the walk
+  L = uiLayout({ stamp: { version: VERSION, builtAt: 1000 } });
+  assert.equal(uiBuildStatus(L.dist, { sourcesMtime: 999 }).stale, false);
+  assert.equal(uiBuildStatus(L.dist, { sourcesMtime: 1001 }).stale, true);
+  assert.equal(uiBuildStatus(L.dist, { sourcesMtime: null }).stale, false);
+});
+
+test('ui: startup prints one stderr line when the UI is stale or missing; /api/health has ui {built, stale}', async () => {
+  const { UI_STALE, UI_NOT_BUILT, VERSION } = await import('../src/server.js');
+  const e = new Engine({ home: tmp() });
+  // stale checkout
+  let L = uiLayout();
+  let port = nextPort++;
+  let { result: srv, lines } = await captureStderr(() => startServer(e, { port, uiDir: L.dist }));
+  try {
+    assert.deepEqual(lines, [`${UI_STALE}\n`], 'one line, at startup (before any request)');
+    const h = await (await fetch(`http://127.0.0.1:${port}/api/health`)).json();
+    assert.equal(h.app, 'agent-art');
+    assert.ok(h.version && h.pid && h.home && 'canvases' in h, 'existing fields unchanged');
+    assert.deepEqual(h.ui, { built: true, stale: true });
+    // a rebuild while the server runs clears it (only build.json is re-read; the sources were walked at startup)
+    fs.writeFileSync(path.join(L.dist, 'build.json'), JSON.stringify({ version: VERSION, builtAt: Date.now() }));
+    assert.deepEqual((await (await fetch(`http://127.0.0.1:${port}/api/health`)).json()).ui, { built: true, stale: false });
+  } finally {
+    await close(srv);
+  }
+  // fresh: nothing printed
+  L = uiLayout({ stamp: { version: VERSION, builtAt: Date.now() } });
+  port = nextPort++;
+  ({ result: srv, lines } = await captureStderr(() => startServer(e, { port, uiDir: L.dist })));
+  try {
+    assert.deepEqual(lines, []);
+    assert.deepEqual((await (await fetch(`http://127.0.0.1:${port}/api/health`)).json()).ui, { built: true, stale: false });
+  } finally {
+    await close(srv);
+  }
+  // not built: the existing text at startup, not again on the first page request
+  L = uiLayout({ built: false });
+  port = nextPort++;
+  const cap = await captureStderr(async () => {
+    const s = await startServer(e, { port, uiDir: L.dist });
+    assert.equal((await fetch(`http://127.0.0.1:${port}/`)).status, 503);
+    assert.deepEqual((await (await fetch(`http://127.0.0.1:${port}/api/health`)).json()).ui, { built: false, stale: false });
+    return s;
+  });
+  try {
+    assert.deepEqual(cap.lines, [`${UI_NOT_BUILT} (${path.resolve(L.dist)} is missing)\n`]);
+  } finally {
+    await close(cap.result);
+  }
+});
+
+test('ui: art_open_ui reply note (not built / stale / fine) with its input schema unchanged', async () => {
+  const { uiBuildNote } = await import('../src/server.js');
+  const { TOOLS } = await import('../src/mcp.js');
+  assert.equal(uiBuildNote({ built: false, stale: false }, '/repo'), 'web UI not built: run npm run build:ui in /repo');
+  assert.equal(uiBuildNote({ built: true, stale: true }, '/repo'), 'web UI build is older than the web/ sources: run npm run build:ui in /repo');
+  assert.equal(uiBuildNote({ built: true, stale: false }, '/repo'), null);
+  assert.equal(uiBuildNote(undefined), null);
+  assert.match(uiBuildNote({ built: false, stale: false }), /run npm run build:ui in .+/);
+  const t = TOOLS.find((x) => x.name === 'art_open_ui');
+  assert.deepEqual(t.inputSchema, { type: 'object', properties: { canvas: { type: 'string' } } });
+});
+
+test('ui: the build stamp plugin writes build.json {version, builtAt} into the resolved outDir', async () => {
+  const { buildStamp } = await import('../vite.config.js');
+  const root = tmp();
+  const p = buildStamp('9.9.9', () => 1234);
+  assert.equal(p.apply, 'build');
+  p.configResolved({ root, build: { outDir: 'out/ui' } });
+  p.closeBundle();
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, 'out', 'ui', 'build.json'), 'utf8')), { version: '9.9.9', builtAt: 1234 });
+  const cfg = (await import('../vite.config.js')).default;
+  assert.ok(cfg.plugins.some((x) => x && x.name === 'agent-art-build-stamp'));
+});
+
+test('ui: pack checks (plan 7.2) on a package file list', async () => {
+  const { packProblems, packFileList } = await import('../scripts/check-ui-build.js');
+  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  const good = ['package.json', 'README.md', 'LICENSE', 'bin/agent-art.js', 'src/server.js', 'dist/ui/index.html', 'dist/ui/build.json', 'dist/ui/THIRD-PARTY-NOTICES.txt',
+    'dist/ui/assets/index-Ab1.js', 'dist/ui/assets/index-Cd2.css', 'dist/ui/assets/three-Ef3.js'];
+  assert.deepEqual(packProblems(good, pkg), [], 'the real package.json passes');
+  assert.deepEqual(packProblems(good.map((f) => f.replace(/\//g, '\\')), pkg), [], 'Windows separators');
+  const missing = packProblems(good.filter((f) => !/build\.json|three-/.test(f)), pkg);
+  assert.ok(missing.includes('package lacks dist/ui/build.json'));
+  assert.ok(missing.some((m) => /three-/.test(m)));
+  const extra = packProblems([...good, 'web/src/main.ts', 'e2e/a.spec.ts', 'test/ui.test.js', 'docs/ui/01.png', 'scripts/x.js', 'node_modules/a/b.js', 'test-results/x',
+    'playwright.config.ts', 'vite.config.js', 'svelte.config.js', 'tsconfig.json', 'dist/ui/assets/index-Ab1.js.map', 'src/meshfixtures.js'], pkg);
+  assert.equal(extra.length, 13);
+  const bad = packProblems(good, { ...pkg, dependencies: { three: '1' }, scripts: { ...pkg.scripts, postinstall: 'x', prepack: 'vite build' }, files: ['src/'] });
+  assert.deepEqual(bad, ['package.json dependencies must be empty', 'no postinstall / prepare script allowed', 'files must list dist/ui/', 'prepack must be npm run build:ui']);
+  // npm may print lines before the JSON
+  const out = 'npm notice something\n' + JSON.stringify([{ name: 'x', files: [{ path: 'dist\\ui\\index.html' }, { path: 'README.md' }] }]);
+  assert.deepEqual(packFileList(out), ['dist/ui/index.html', 'README.md']);
+  // npm 11: an object keyed by package name
+  const out11 = '> prepack\n> vite build\n\n' + JSON.stringify({ '@rusticstack/agent-art': { name: 'x', files: [{ path: 'README.md' }] } }, null, 2);
+  assert.deepEqual(packFileList(out11), ['README.md']);
+  assert.throws(() => packFileList('nothing'), /no JSON/);
+});

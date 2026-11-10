@@ -3,6 +3,7 @@
 //   npm run dev:ui     dev server with hot reload; /api (REST, ops, SSE) is proxied to a running
 //                      agent-art server (AGENT_ART_URL, default http://127.0.0.1:7420)
 import fs from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
@@ -36,13 +37,30 @@ function devUiToken() {
   };
 }
 
+/**
+ * Build only: write `<outDir>/build.json` `{ version, builtAt }` after the bundle is written. The server
+ * compares it with the package version and the newest web/ source mtime (src/server.js uiBuildStatus).
+ */
+export function buildStamp(version = VERSION, now = () => Date.now()) {
+  let outDir = here('./dist/ui');
+  return {
+    name: 'agent-art-build-stamp',
+    apply: 'build',
+    configResolved(config) { outDir = path.resolve(config.root, config.build.outDir); },
+    closeBundle() {
+      fs.mkdirSync(outDir, { recursive: true });
+      fs.writeFileSync(path.join(outDir, 'build.json'), JSON.stringify({ version, builtAt: now() }, null, 2) + `\n`);
+    },
+  };
+}
+
 export default defineConfig({
   root: here('./web'),
   base: './',
   publicDir: false,
   // the package version, for window.agentArt.version (web/src/main.ts)
   define: { __AGENT_ART_VERSION__: JSON.stringify(VERSION) },
-  plugins: [svelte({ configFile: here('./svelte.config.js') }), devUiToken(), notices()],
+  plugins: [svelte({ configFile: here('./svelte.config.js') }), devUiToken(), notices(), buildStamp()],
   resolve: {
     alias: { '@': here('./web/src') },
     conditions: process.env.VITEST ? ['browser'] : undefined,

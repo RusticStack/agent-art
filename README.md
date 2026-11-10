@@ -46,7 +46,7 @@ npx -y @rusticstack/agent-art tool art_create_canvas '{"name":"slime","width":16
 npx -y @rusticstack/agent-art serve --open                # the web UI on its own
 ```
 
-**From a source checkout:** `npm install`, then `npm run build:ui` once (the web UI is built with Vite into `dist/ui/`; without it the page says so), `npm start` (web UI), `npm test`. To work on the UI, `npm run dev:ui` serves it with hot reload and forwards `/api` to a running server on port 7420 (or `AGENT_ART_URL`). The included `.mcp.json` registers the server for Claude Code in this folder.
+**From a source checkout:** `npm install`, then `npm run build:ui` once, and again after pulling changes to `web/` (the web UI is built with Vite into `dist/ui/`; without a build the page says so and the server prints it at startup, and a build older than the sources shows a banner), `npm start` (web UI), `npm test`. To work on the UI, `npm run dev:ui` serves it with hot reload and forwards `/api` to a running server on port 7420 (or `AGENT_ART_URL`). The included `.mcp.json` registers the server for Claude Code in this folder.
 
 ## Your first asset in 5 calls
 
@@ -314,6 +314,8 @@ The UI shows everything the agent does, live, and lets you steer it: an activity
 | ![timeline](docs/ui/02-timeline.png) | ![rig](docs/ui/04-rig-skeleton.png) | ![model](docs/ui/07-model-viewer.png) |
 
 Every feature and more screenshots: [docs/ui/README.md](docs/ui/README.md).
+
+Running from a source checkout: run `npm install` and `npm run build:ui` once, and again after pulling changes to `web/`. Without a build the page says so and the server prints it at startup. When the build is older than the sources (`web/src`, `web/index.html`, or another package version), the server prints `Agent Art web UI build is older than web/ sources: run npm run build:ui`, the page shows a banner, `/api/health` reports `ui: {built, stale}` and `art_open_ui` adds a `note` to its reply. The npm package ships the built UI and is never stale.
 
 ## Debug and usage logging
 

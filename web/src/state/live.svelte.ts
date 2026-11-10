@@ -87,6 +87,7 @@ export async function resync(): Promise<void> {
       else toast('Reconnected to a restarted server', 'info');
     }
     connection.serverPid = h.pid;
+    connection.setUiStatus(h.ui);
   } catch { /* the stream is up, health will answer next time */ }
   await Promise.all([assets.refresh(), reviews.refresh(), uiState.load()]);
   try {

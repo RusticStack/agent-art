@@ -1,5 +1,10 @@
 // Connection status: the SSE phase, agent activity (busy pill), server restarts and stale builds.
 export type ConnStatus = 'connecting' | 'live' | 'busy' | 'down';
+export type BannerKind = 'outdated' | 'stale';
+export const BANNER_TEXT: Record<BannerKind, string> = {
+  outdated: 'The server was restarted with a newer web UI. Reload the page to use it.',
+  stale: 'This web UI build is older than the sources. Run npm run build:ui and reload.',
+};
 export const BUSY_MS = 2500;
 
 export class Connection {
@@ -12,6 +17,10 @@ export class Connection {
   restarted = $state(false);
   /** A newer build of the web UI is being served. */
   uiOutdated = $state(false);
+  /** `health.ui.stale`: the served build is older than the web/ sources of a source checkout (step 21). */
+  uiStale = $state(false);
+  /** Banners the user closed; they stay closed until the page reloads. */
+  dismissed = $state<Record<BannerKind, boolean>>({ outdated: false, stale: false });
   attempt = $state(0);
 
   get status(): ConnStatus {
@@ -26,6 +35,15 @@ export class Connection {
   get pillClass(): string {
     return { connecting: 'status', live: 'status ok', busy: 'status busy', down: 'status down' }[this.status];
   }
+  /** The page-wide banner to show (components/shell/Banner): a newer build first, then a stale one. */
+  get banner(): BannerKind | null {
+    if (this.uiOutdated && !this.dismissed.outdated) return 'outdated';
+    if (this.uiStale && !this.dismissed.stale) return 'stale';
+    return null;
+  }
+  /** `GET /api/health` `ui` (older servers have none: not stale). */
+  setUiStatus(ui: { built: boolean; stale: boolean } | null | undefined): void { this.uiStale = !!ui?.stale; }
+  dismiss(kind: BannerKind): void { this.dismissed = { ...this.dismissed, [kind]: true }; }
   agentActive(at = Date.now()): void { this.lastAgentAt = at; this.now = at; }
   tick(at = Date.now()): void { this.now = at; }
 }
