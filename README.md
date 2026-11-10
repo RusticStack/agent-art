@@ -294,7 +294,7 @@ agent-art serve [--port 7420] [--home DIR] [--open]   # the web UI + HTTP API
 agent-art mcp   [--port 7420] [--home DIR] [--open]   # MCP stdio server (also runs or reuses the web UI); --debug logs usage
 agent-art usage [--since DATE] [--tool art_x] [--json] [--transcript F]   # report from the debug logs
 agent-art tools                                       # tool list + server instructions (for agents without MCP)
-agent-art tool art_draw - --out view.png <<'EOF'      # call any MCP tool; an image reply goes to --out
+agent-art tool art_draw - --out view.png <<'EOF'      # call any MCP tool; an image reply goes to --out (default <home>/views/view.png)
 {"canvas":"stone","commands":[{"op":"cells","size":5,"colors":["#555","#777","#999"]}],"preview":true}
 EOF
 agent-art op create '{"name":"stone","width":16}'     # one raw engine op (json | @file.json | - for stdin; --out f.png)

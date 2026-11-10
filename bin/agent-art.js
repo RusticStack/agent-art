@@ -55,7 +55,7 @@ const USAGE = `agent-art — pixel art editor for AI agents, with a live web UI
   agent-art batch <file.jsonl | file.json | -> [--out-dir DIR] [--keep-going]
         run many ops in order; each item is {"op": "...", "args": {...}, "out": "optional.png"}
   agent-art tools                      the MCP tool list + server instructions (for agents without MCP)
-  agent-art tool <art_tool> [json | @file.json | -] [--out view.png]
+  agent-art tool <art_tool> [json | @file.json | -] [--out view.png]   (default <home>/views/view.png)
         call one MCP tool exactly as an MCP client would; an image reply is written to --out
   agent-art help [topic [section] | op] [--full]   guides (workflow, textures, characters, animation, rig, 3d, ...;
         long ones print a core + section index) or a draw command's usage
@@ -97,6 +97,9 @@ async function makeRunner() {
     // the CLI is a thin client: it still uses the running server (so the UI and the shared
     // workspace stay in sync) but warns when versions differ
     remote = h.app === APP_ID;
+    // a server on another workspace is not ours: --home / AGENT_ART_HOME must win, so run in-process
+    const same = (p) => { const r = path.resolve(String(p || '')); return process.platform === 'win32' ? r.toLowerCase() : r; };
+    if (remote && h.home && same(h.home) !== same(home)) { console.error(`note: the server on port ${port} uses ${h.home}; this call runs in-process on ${home}`); remote = false; }
     if (remote && h.version !== VERSION) console.error(`note: server on port ${port} is Agent Art ${h.version || '<0.2.1'}, this CLI is ${VERSION}; ops run on the server's version`);
   } catch { /* not running */ }
   if (remote) {
@@ -141,7 +144,7 @@ async function main() {
     const args = parseArgs(json);
     const runner = await makeRunner();
     try {
-      const result = saveImage(await runner.run(op, args), out || 'render.png');
+      const result = saveImage(await runner.run(op, args), out || path.join(home, 'views', 'render.png'));
       console.log(JSON.stringify(result, null, 2));
     } finally {
       runner.close();
@@ -178,7 +181,7 @@ async function main() {
     }
     if (failed) process.exitCode = 1;
   } else if (cmd === 'tools') {
-    const cliNote = 'CLI bridge: agent-art tool <art_tool> <json|-> [--out view.png]. --out is only written when the reply has an image. Use forward slashes in JSON paths (C:/x/y.png: a backslash must be escaped in JSON). Each call is a fresh process: art_undo history only survives between calls while "agent-art serve" is running (same AGENT_ART_HOME / port).\n';
+    const cliNote = 'CLI bridge: agent-art tool <art_tool> <json|-> [--out view.png]. --out is only written when the reply has an image (default <home>/views/view.png). A server already on the port is used only when it serves the same workspace (--home / AGENT_ART_HOME). Use forward slashes in JSON paths (C:/x/y.png: a backslash must be escaped in JSON). Each call is a fresh process: art_undo history only survives between calls while "agent-art serve" is running (same AGENT_ART_HOME / port).\n';
     const text = [`${INSTRUCTIONS}\n`, cliNote, ...TOOLS.map((t) => `${t.name}: ${t.description}\n  args: ${Object.keys(t.inputSchema.properties || {}).join(', ')}\n`)].join('\n');
     console.log(text);
     // what a CLI agent loads instead of the MCP tool list
@@ -187,7 +190,7 @@ async function main() {
   } else if (cmd === 'tool') {
     const [name, json] = rest;
     if (!name) throw new Error('usage: agent-art tool <art_tool> <json>');
-    const out = flag('out') || 'view.png';
+    const out = flag('out') || path.join(home, 'views', 'view.png'); // never litter the current folder
     const runner = await makeRunner();
     const usage = cliUsage();
     const args = parseArgs(json);

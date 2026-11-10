@@ -107,7 +107,12 @@ export const FP2D_OPS = {
       if (arm) { if (!ARM_POINTS.includes(n)) throw new Error(`arm points: ${ARM_POINTS.join(', ')}`); next[n] = pt(v, n); } else next.anchors[n] = pt(v, n);
       changed = true;
     }
-    for (const n of [].concat(a.remove || [])) { if (arm) delete next[n]; else delete next.anchors[n]; changed = true; }
+    for (const n of [].concat(a.remove || [])) {
+      if (typeof n !== 'string') throw new Error('remove: anchor names, e.g. remove:["support"]');
+      if (arm && !ARM_POINTS.includes(n)) throw new Error(`arm points: ${ARM_POINTS.join(', ')}`);
+      if (arm) delete next[n]; else delete next.anchors[n];
+      changed = true;
+    }
     const img = artOf(d);
     let suggestions;
     if (!arm && (a.suggest || a.accept !== undefined)) {
