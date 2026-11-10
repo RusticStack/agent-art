@@ -21,4 +21,8 @@
   .status:global(.down) .dot { background: var(--red); }
   @keyframes pulse { 50% { opacity: .35; } }
   @media (prefers-reduced-motion: reduce) { .status:global(.busy) .dot { animation: none; } }
+  /* 4.5: below 420 px only the dot shows; the text stays for screen readers (and the e2e page object) */
+  @media (max-width: 420px) {
+    #statusText { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  }
 </style>

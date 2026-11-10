@@ -31,6 +31,11 @@ img.big { min-width: 256px; }
 .frame-thumb.tagged { background: #2a2140; }
 .frame-thumb.flash, .row.flash, .ov-tile.flash { animation: flash .8s; }
 @keyframes flash { from { box-shadow: 0 0 0 2px var(--blue); background: #0b2534; } }
+/* 4.4 reduced motion: a static outline for the flash time instead of the fade */
+@media (prefers-reduced-motion: reduce) {
+  .frame-thumb.flash, .ov-tile.flash { animation: none; outline: 2px solid var(--blue); outline-offset: -2px; }
+  #inspector .insp-body { transition: none; }
+}
 
 /* animation player */
 .anim-stage { flex: 1; min-height: 0; overflow: auto; display: flex; align-items: center; justify-content: center; padding: 12px; }
@@ -229,7 +234,7 @@ button.cu-item:hover { background: var(--panel2); }
 .insp-sec .notes { white-space: pre-wrap; font-size: var(--fs-3); color: var(--text2); }
 .insp-sec .rel-list { list-style: none; margin: 0; padding: 0; font-size: var(--fs-3); }
 .insp-sec .rel-list li { padding: 1px 0; }
-.insp-sec .rel-list li.derived { opacity: .7; }
+.insp-sec .rel-list li.derived { color: var(--muted); font-style: italic; } /* was opacity .7, which put the text below 4.5:1 (axe) */
 .insp-sec .rel { color: var(--violet); font-family: var(--font-mono); font-size: var(--fs-2); margin-right: var(--s-2); }
 .review-card { border: 1px solid var(--line2); border-left: 3px solid var(--accent); border-radius: var(--r-3); padding: var(--s-3) var(--s-4); margin: var(--s-2) 0; background: var(--bg2); display: flex; flex-direction: column; gap: 3px; }
 .review-card.st-fixed { border-left-color: var(--blue); }

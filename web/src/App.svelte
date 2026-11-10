@@ -50,6 +50,16 @@
     void layout.panes.browser; void layout.panes.side; void layout.dock; void layout.drawer; void workspace.comparing;
     relayout();
   });
+  // narrow drawers (2.6, step 19): when a drawer closes (Esc, scrim, an opened asset) while focus is
+  // inside it, focus goes to its top bar toggle instead of being lost with the hidden pane
+  $effect(() => {
+    const d = layout.drawer;
+    if (!d) return;
+    return () => {
+      const pane = document.getElementById(d === 'browser' ? 'browser' : 'side');
+      if (pane?.contains(document.activeElement)) document.getElementById(d === 'browser' ? 'toggleBrowser' : 'toggleSide')?.focus();
+    };
+  });
   // the server came back after a failed boot (resync refreshed the assets): open the first target now
   $effect(() => {
     if (bootState.phase === 'failed' && assets.index) { bootState.phase = 'ready'; if (!workspace.current) openInitial(); }
@@ -123,6 +133,11 @@
       {/if}
     </div>
   </div>
+  {#if layout.narrow && layout.drawer}
+    <!-- the scrim behind a narrow drawer: a click closes it (Esc does too; not a tab stop) -->
+    <button type="button" class="drawer-scrim" tabindex="-1" aria-label="Close the {layout.drawer === 'browser' ? 'assets' : 'inspector / activity'} pane"
+      onmousedown={(e) => e.preventDefault()} onclick={() => layout.closeDrawer()}></button>
+  {/if}
   {#if DialogHost}<DialogHost />{/if}
   <Toasts />
 </div>
@@ -153,4 +168,5 @@
   .layout.narrow .browser, .layout.narrow .side { position: fixed; top: var(--h-topbar, 42px); bottom: 0; width: min(86vw, 340px); z-index: var(--z-drawer, 20); box-shadow: var(--shadow-drawer); display: none; }
   .layout.narrow .browser { left: 0; } .layout.narrow .side { right: 0; }
   .layout.drawer-browser .browser, .layout.drawer-side .side { display: flex; }
+  .drawer-scrim { position: fixed; inset: var(--h-topbar, 42px) 0 0 0; z-index: var(--z-scrim, 19); background: var(--scrim); border: 0; padding: 0; margin: 0; cursor: default; }
 </style>

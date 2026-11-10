@@ -83,7 +83,7 @@
   .twisty :global(.icon) { transition: transform var(--t-fast, 120ms); }
   .twisty[aria-expanded='true'] :global(.icon) { transform: rotate(90deg); }
   @media (prefers-reduced-motion: reduce) { .twisty :global(.icon) { transition: none; } }
-  .tl-ms, .tl-time { color: var(--dim); flex: none; font-size: 11px; }
+  .tl-ms, .tl-time { color: var(--muted); flex: none; font-size: 11px; }
   .tl-summary { color: #b6bfcc; font-size: 12px; padding-left: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tl-error { color: #ff9a9d; font-size: 12px; padding-left: 14px; white-space: pre-wrap; }
 </style>

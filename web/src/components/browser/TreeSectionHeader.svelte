@@ -19,7 +19,8 @@
 {#snippet body()}
   <span class="twisty"><Icon name="chevron-right" size={12} class={section.collapsed ? '' : 'open'} /></span>
   <span class="title">{section.title}</span>
-  <span class="count">{section.count}</span>
+  <!-- the name comes from the content ("Canvases (3)"); an aria-label that differs from the visible text fails axe label-content-name-mismatch -->
+  <span class="count"><span class="sr-only">{' ('}</span>{section.count}<span class="sr-only">)</span></span>
 {/snippet}
 
 {#if overlay}
@@ -35,7 +36,6 @@
     aria-posinset={section.posinset}
     aria-expanded={!section.collapsed}
     aria-selected={false}
-    aria-label="{section.title} ({section.count})"
     tabindex={focused ? 0 : -1}
     data-act="section"
     data-key={section.section}

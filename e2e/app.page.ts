@@ -16,6 +16,30 @@ export class AppPage {
     return this.page.locator(ids[name]);
   }
   followMode(): Locator { return this.page.locator('#followMode'); }
+  // ---- narrow layout (step 19): overflow menu, drawers ----
+  moreButton(): Locator { return this.page.locator('#moreBtn'); }
+  moreMenu(): Locator { return this.page.getByRole('menu', { name: 'More actions' }); }
+  /** An overflow menu item by id: search, compare, review, notes, graph, cleanup, help, follow-canvas / -project / -off. */
+  moreItem(id: string): Locator { return this.moreMenu().locator(`[data-id="${id}"]`); }
+  async openMore() { await this.moreButton().click(); await expect(this.moreMenu()).toBeVisible(); }
+  drawerScrim(): Locator { return this.page.locator('.drawer-scrim'); }
+  sidePane(): Locator { return this.page.locator('#side'); }
+  /** Does the page scroll horizontally (document wider than the viewport)? */
+  async hasHorizontalScroll(): Promise<boolean> {
+    return this.page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+  }
+  /** A short description of the focused element (tag, id, class, aria-label) for keyboard specs. */
+  async focused(): Promise<{ id: string; inBrowser: boolean; inSlotAToolbar: boolean; label: string }> {
+    return this.page.evaluate(() => {
+      const a = document.activeElement as HTMLElement | null;
+      return {
+        id: a?.id ?? '',
+        inBrowser: !!a?.closest('#browser'),
+        inSlotAToolbar: !!a?.closest('#slotA .vtoolbar'),
+        label: a?.getAttribute('aria-label') ?? a?.textContent?.trim().slice(0, 40) ?? '',
+      };
+    });
+  }
   /** The top bar search button (command palette, step 18b). */
   paletteButton(): Locator { return this.page.getByRole('button', { name: 'Search assets and actions (Ctrl+K)' }); }
   notesCount(): Locator { return this.page.locator('#reviewCount'); }
