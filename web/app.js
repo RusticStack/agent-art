@@ -8,7 +8,7 @@ import './src/styles/legacy-shell.css';
 import { $, el, api, getJSON, store, toast, onToast, splitId, KIND_ICON } from './ui/util.js';
 import { api as rest } from './src/lib/api/client.ts';
 import { Browser } from './ui/browser.js';
-import { Timeline } from './ui/timeline.js';
+import Timeline from './src/components/timeline/Timeline.svelte';
 import { Inspector, reviewDialog } from './ui/inspector.js';
 import { adapt } from './src/viewers/legacyAdapter.ts';
 import { CanvasViewer as CanvasViewerTS, TOOL_KEYS } from './src/viewers/canvas/CanvasViewer.ts';
@@ -68,7 +68,9 @@ class App {
     });
     this.slots = { A: { host: $('slotA'), viewer: null, target: null, tabs: $('tabsA'), title: $('titleA') }, B: { host: $('slotB'), viewer: null, target: null, tabs: $('tabsB'), title: $('titleB') } };
     this.browser = new Browser($('browser'), this);
-    this.timeline = new Timeline($('timelinePane'), this);
+    mount(Timeline, { target: $('timelinePane'), props: { ontoggleDock: () => this.toggleTimelineDock() } });
+    // legacy surface: the Svelte timeline renders from the activity store on its own
+    this.timeline = { upsert: (e) => activity.upsert(e), load: (list) => activity.load(list), render() {}, get f() { return activity.filter; } };
     this.inspector = new Inspector($('inspector'), this);
     this.setupLayout();
     this.setupTopbar();
@@ -104,7 +106,6 @@ class App {
   toggleHidden(id) {
     void uiState.toggleHidden(id);
     this.browser.render();
-    this.timeline.render();
     if (this.current) this.inspector.show(this.current);
   }
   togglePinned(id) {
@@ -194,7 +195,6 @@ class App {
     if (slot === 'A') {
       this.browser.markActive(this.currentId);
       this.inspector.show(target.kind === 'graph' ? { kind: 'graph' } : target);
-      if (this.timeline.f.current) this.timeline.render();
     }
     try { await s.viewer.open(target); } catch (e) { toast(`${target.name || target.kind}: ${e.message}`, 'error'); }
   }
@@ -287,12 +287,7 @@ class App {
   afterEvent(ev) {
     this.setStatus();
     if (ev.type === 'hello') return;
-    if (ev.type === 'activity') { this.timeline.upsert(ev.entry); return; }
-    if (ev.type === 'resync') {
-      this.timeline.entries.clear(); this.timeline.order = [];
-      this.timeline.load(activity.all());
-      return;
-    }
+    if (ev.type === 'activity' || ev.type === 'resync') return; // the activity store has it; the timeline re-renders
     if (ev.type === 'change' && ev.source === 'agent') this.browser.flash(`canvas:${ev.canvas}`);
     if (ev.type === 'change' && this.current?.kind === 'canvas' && this.current.name === ev.canvas && !this.current.snap && this.current.view && this.current.view !== 'edit') this.inspector.refreshFor({ name: ev.canvas });
   }
@@ -422,7 +417,6 @@ class App {
     try {
       const { entries } = await getJSON('/api/activity?limit=600');
       activity.load(entries);
-      this.timeline.load(entries);
     } catch { /* older server */ }
     connection.serverPid = (await health)?.pid ?? null;
     live.start();

@@ -25,7 +25,7 @@ export const BUDGETS = {
   palette: 14,
   picker: 5,
   dialogs: 25, // not in plan 7.1 ("the dialogs' heavy parts are lazy"): a guard for the lazy DialogHost chunk (Bits Dialog)
-  cssInitial: FINAL ? 14 : 8,
+  cssInitial: 14, // plan 7.1; the interim (migration) budget is the final one, as for initialJs (step 14 note)
   cssTotal: 20,
   distTotalRaw: 1.8 * 1024, // kB raw
   icons: 60,
