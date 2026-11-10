@@ -715,7 +715,14 @@ export class Backend {
 
 export async function runMcp({ port, home, open, debug = null }) {
   const backend = new Backend({ port, home, open });
-  await backend.init();
+  // Loading the workspace + starting the web UI is synchronous work that takes seconds on a big
+  // workspace; clients with a short connect timeout (Qoder ~5 s) gave up before initialize was
+  // answered. So the handshake (initialize, tools/list, prompts) is answered first, and the load
+  // starts once the client goes quiet for a moment, or at once when a tool call needs it.
+  let ready = null;
+  const start = () => (ready ??= backend.init().catch((e) => { console.error(`error: ${e.message}`); process.exit(1); }));
+  let idle = setTimeout(start, 400);
+  const poke = () => { if (ready) return; clearTimeout(idle); idle = setTimeout(start, 250); };
   let callSeq = 0;
   // debug: one JSONL usage record per session / list / tool call (agent-art usage reads them)
   const usage = debug ? new UsageLog({ file: usageFile(home), level: debug, version: VERSION }) : null;
@@ -757,6 +764,7 @@ export async function runMcp({ port, home, open, debug = null }) {
           break;
         }
         case 'tools/call': {
+          await start();
           const tool = TOOLS.find((t) => t.name === params?.name);
           if (!tool) {
             result = { content: [{ type: 'text', text: `Unknown tool ${params?.name}` }], isError: true };
@@ -808,6 +816,7 @@ export async function runMcp({ port, home, open, debug = null }) {
   const rl = readline.createInterface({ input: process.stdin });
   rl.on('line', (line) => {
     if (!line.trim()) return;
+    poke();
     let msg;
     try {
       msg = JSON.parse(line);
@@ -819,6 +828,8 @@ export async function runMcp({ port, home, open, debug = null }) {
   });
   rl.on('close', async () => {
     await queue;
+    clearTimeout(idle);
+    if (ready) await ready;
     backend.engine?.flush();
     process.exit(0);
   });

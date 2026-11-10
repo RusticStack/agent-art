@@ -1,4 +1,4 @@
-# Agent Art 1.0.0: full reference for AI agents
+# Agent Art 1.0.1: full reference for AI agents
 
 > Game art and audio for AI agents: MCP server + live web UI for pixel-art sprites, rigs and animations, tilesets, textures, low-poly 3D models (.glb), combat effects, planets, sound effects and music.
 

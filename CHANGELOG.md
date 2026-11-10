@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1
+
+- MCP: the handshake (`initialize`, `tools/list`, prompts) is answered before the workspace loads, in about 0.2 s instead of the workspace load time (about 5 s on a large workspace). Clients with a short connect timeout, such as Qoder, showed Agent Art as disconnected. Tool calls wait for the load as before, and the web UI starts right after the handshake.
+
 ## 1.0.0
 
 - New icon and logo, drawn with Agent Art itself: a pixel "A" whose counter is a robot visor, in the banner's gold and purple. The web UI uses it as its favicon (16 / 32 px, plus a 180 px apple-touch icon) and in the top bar instead of the colour wheel. `docs/brand/` has `logo.png` (mark + wordmark), `icon.png` (512 px) and `icon-64.png`.
