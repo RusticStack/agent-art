@@ -29,6 +29,11 @@
   - Preview, render, rigs, damage, LODs, `bake_ao` and export use the atlas (one material; glass / opacity parts keep theirs). Stale atlases fall back to the part textures and say so. The `/api/model/<name>/uv.png` UI route serves the atlas.
 - The web UI is now built with Vite (first step towards Svelte 5 + TypeScript). Its sources moved from `public/` to `web/`, and the npm package ships the built `dist/ui/` instead. three.js comes from npm (r170, as before) as a separate chunk loaded only when the 3D viewer opens; the vendored copy is gone. Runtime dependencies stay at zero: the build tools are dev dependencies. In a source checkout, run `npm run build:ui` once (the server shows a page saying so until then), or `npm run dev:ui` for hot reload against a running server.
 - Fixes from building the showcase (all additive):
+  - `art_critique {intended:[[x,y],..]}` keeps single pixels placed on purpose (eyes, sparks) out of `orphan_pixels`; the issue also says how many lone pixels it takes to be reported, so a count that drops under it is not a fix.
+  - `art_draw {preview:{scale, max_size}}` renders the preview at that scale (an object used to be read as `true` and the scale dropped). `preview:true` is unchanged.
+  - `art_model render` replies `clipped` (pixels per side and a fix) when the model leaves the frame, e.g. a fixed `zoom` on the perspective `game` camera. The framing itself is unchanged, so frames stay aligned.
+  - The `text` draw help says that `spacing` / `line_spacing` are multiplied by `scale`.
+  - CLI: the "server uses another workspace" note is only printed when the workspace was not passed with `--home`.
   - `art_model unwrap {do:"check"}` read the course height of a texture from its mirror lag (a 32 px stone texture gave "31 px courses"); it now takes the smallest repeating lag up to half the texture height.
   - The "texels do not fit" unwrap error also suggests `{pad:1}` when islands use the default padding of 2.
   - `art_draw cells` accepts `size:[w, h]` (cells of their own width and height); a single number works as before.

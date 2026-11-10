@@ -765,7 +765,8 @@ const OPS = {
   critique(a) {
     const d = this.get(a.canvas);
     const fh = d.frameHeight || d.height;
-    const opts = { kind: a.kind, tileable: a.tileable, maxColors: a.max_colors, style: a.style };
+    if (a.intended !== undefined && !(Array.isArray(a.intended) && a.intended.every((p) => Array.isArray(p) && p.length === 2 && p.every(Number.isInteger)))) throw new Error('intended: [[x,y],..] canvas pixels');
+    const opts = { kind: a.kind, tileable: a.tileable, maxColors: a.max_colors, style: a.style, intended: a.intended };
     const frameList = a.frame !== undefined ? [Number(a.frame)] : a.animation ? [...new Set(d.playback(a.animation).frames)] : [...Array(d.frames).keys()];
     const datas = frameList.map((f) => (d.frameHeight ? d.frameData(f, { layer: a.layer }) : d.composite({ layer: a.layer })));
     // review the first frame in detail (or every frame with all_frames), plus cross-frame consistency

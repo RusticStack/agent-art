@@ -74,7 +74,7 @@ Parameters:
 - layer (string|integer): name or index (default active)
 - frame (integer)
 - label (string): shown in the UI log
-- preview (boolean): also return an image of the result
+- preview (boolean|object): also return an image: true | {scale?, max_size?}
 - critique (boolean): also return the art_critique summary
 
 ### art_view
@@ -113,6 +113,7 @@ Parameters:
 - tileable (boolean)
 - max_colors (integer)
 - all_frames (boolean)
+- intended (array): [[x,y],..] pixels placed on purpose (eyes, sparks): not orphans
 
 ### art_help
 
@@ -841,7 +842,7 @@ example: {"op":"ellipse","x":2,"y":2,"w":12,"h":12,"color":"r2","outline":"o"}
 fill {x,y,color,tolerance?,contiguous?} — flood fill. Flood fill on the target layer; contiguous:false replaces the color everywhere; diagonal:true spreads through corners.
 example: {"op":"fill","x":8,"y":8,"color":"b2"}
 
-text {x,y,text,color,font?,scale?,align?,shadow?} — pixel font. Built-in pixel fonts, uppercase (A-Z 0-9 punctuation, \n). font "3x5" (default, tiny), "5x7" (readable UI/labels) or "7x9" (titles). scale multiplies; align left|center|right around x; spacing, line_spacing in px.
+text {x,y,text,color,font?,scale?,align?,shadow?} — pixel font. Built-in pixel fonts, uppercase (A-Z 0-9 punctuation, \n). font "3x5" (default, tiny), "5x7" (readable UI/labels) or "7x9" (titles). scale multiplies; align left|center|right around x; spacing, line_spacing in font px (multiplied by scale, like the glyphs: spacing:1 at scale 3 = 3 px).
 example: {"op":"text","x":32,"y":4,"text":"HELLO","color":"#fff","align":"center","shadow":"#000"}
 
 replace {from,to,tolerance?,region} — swap one color. region = x?,y?,w?,h? (defaults to the whole canvas/frame).

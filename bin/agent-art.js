@@ -99,7 +99,7 @@ async function makeRunner() {
     remote = h.app === APP_ID;
     // a server on another workspace is not ours: --home / AGENT_ART_HOME must win, so run in-process
     const same = (p) => { const r = path.resolve(String(p || '')); return process.platform === 'win32' ? r.toLowerCase() : r; };
-    if (remote && h.home && same(h.home) !== same(home)) { console.error(`note: the server on port ${port} uses ${h.home}; this call runs in-process on ${home}`); remote = false; }
+    if (remote && h.home && same(h.home) !== same(home)) { if (!flag('home')) console.error(`note: the server on port ${port} uses ${h.home}; this call runs in-process on ${home}`); remote = false; }
     if (remote && h.version !== VERSION) console.error(`note: server on port ${port} is Agent Art ${h.version || '<0.2.1'}, this CLI is ${VERSION}; ops run on the server's version`);
   } catch { /* not running */ }
   if (remote) {

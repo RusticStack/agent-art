@@ -32,7 +32,8 @@ export function isHD(w, h, style) {
   return Math.max(w, h) >= 96 && w * h >= 6144;
 }
 
-export function critiqueImage(data, w, h, { kind = 'auto', tileable, maxColors, style } = {}) {
+export function critiqueImage(data, w, h, { kind = 'auto', tileable, maxColors, style, intended } = {}) {
+  const meant = new Set((intended || []).map(([x, y]) => `${x},${y}`));
   const { at, op, key } = view(data, w, h);
   const N = w * h;
   let opaque = 0, semi = 0;
@@ -106,11 +107,11 @@ export function critiqueImage(data, w, h, { kind = 'auto', tileable, maxColors, 
       else { diffCount++; minD = Math.min(minD, dist(c, at(xx, yy))); }
     }
     if (neighbours >= 3 && diffCount >= 3) noisy++;
-    if (neighbours >= 3 && same === 0 && minD > 40) orphans.push([x, y]);
+    if (neighbours >= 3 && same === 0 && minD > 40 && !meant.has(`${x},${y}`)) orphans.push([x, y]);
   }
   const noiseRatio = noisy / opaque;
   if (orphans.length > Math.max(2, opaque * 0.02)) {
-    add('orphan_pixels', 'warn', `${orphans.length} isolated single pixels (no same-colored neighbour).`, 'Remove them or grow them into 2-3 px clusters; random speckle reads as noise.', { at: orphans.slice(0, 12) });
+    add('orphan_pixels', 'warn', `${orphans.length} isolated single pixels (no same-colored neighbour).`, `Remove them or grow them into 2-3 px clusters; random speckle reads as noise. Reported above ${Math.max(2, Math.floor(opaque * 0.02))} of them; pass intended:[[x,y],..] for ones placed on purpose (eyes, sparks).`, { at: orphans.slice(0, 12) });
   }
   if (noiseRatio > (kind === 'texture' ? 0.35 : kind === 'scene' ? 0.6 : 0.3)) { // scenes use dithered gradients legitimately
     add('noisy', 'warn', `${pct(noiseRatio)}% of pixels differ from 3+ neighbours: the surface reads as noise/static.`, 'Use bigger clusters of the same shade (noise scale 3-4 + despeckle, or hand-placed shapes) and keep 1px detail for edges/highlights.');

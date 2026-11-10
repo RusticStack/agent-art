@@ -708,6 +708,14 @@ export const MODEL_OPS = {
     for (const p of posed) { const b = p.full.mesh.bounds(); for (const x of [b.min[0], b.max[0]]) for (const y of [b.min[1], b.max[1]]) for (const z of [b.min[2], b.max[2]]) fit.push([x, y, z]); }
     const camSpec = a.camera ?? 'fp';
     const cam = makeCamera(camSpec, FW, FH, fit, { fov: a.fov, zoom: a.zoom, margin: a.margin });
+    // the camera keeps the model centre on the frame centre (stable across frames); a fixed zoom or a
+    // perspective camera can push the bounds out of the frame: say where, instead of cropping silently
+    let clipped = null;
+    { let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      for (const p of fit) { const q = cam.project(p); if (!q || q[4]) continue; x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); y0 = Math.min(y0, q[1]); y1 = Math.max(y1, q[1]); }
+      const over = { left: Math.floor(-x0), right: Math.floor(x1 - FW), top: Math.floor(-y0), bottom: Math.floor(y1 - FH) };
+      const sides = Object.entries(over).filter(([, v]) => v >= 1);
+      if (x0 !== Infinity && sides.length) clipped = { px: Object.fromEntries(sides), fix: `the model bounds leave the ${FW}x${FH} frame (${sides.map(([k, v]) => `${k} ${v} px`).join(', ')}): ${a.zoom ? 'lower zoom or ' : ''}raise size, or pass margin` }; }
     const L = a.light || {};
     const lopts = { bg: null };
     if (L.dir && !(Array.isArray(L.dir) && L.dir.length === 3 && L.dir.every((v) => Number.isFinite(Number(v))))) throw new Error('light.dir must be [x,y,z] (toward the light)');
@@ -767,7 +775,7 @@ export const MODEL_OPS = {
     const sheet = packImages(shown, { labels: true, checker: true, columns: grid ? Math.min(grid.columns, 8) : Math.min(shown.length, 6) });
     return {
       canvas: out.name, animation: tag, frames: [start, start + imgs.length - 1], count: imgs.length, size: `${FW}x${FH}`, camera: cam.label, ...(grid ? { grid } : {}),
-      ...(colors ? { colors } : {}), ...(hold ? { hold: holdReport(hold) } : {}), anchors: info.sockets.map((s) => s.name), image: encodePNG(sheet.width, sheet.height, sheet.data),
+      ...(colors ? { colors } : {}), ...(hold ? { hold: holdReport(hold) } : {}), ...(clipped ? { clipped } : {}), anchors: info.sockets.map((s) => s.name), image: encodePNG(sheet.width, sheet.height, sheet.data),
       next: `art_animation export {canvas:"${out.name}", format:"spritesheet"} (json frames[].anchors = socket positions per frame; json:false = png only). Arms: art_rig animate {..., ik_from:{canvas:"${out.name}", animation:"${tag}", map:{hand_f:"socket_grip_r"}}}`,
     };
   },

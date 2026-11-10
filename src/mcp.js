@@ -85,7 +85,7 @@ export const TOOLS = [
         commands_file: { type: 'string' },
         layer: S.layer, frame: S.frame,
         label: { type: 'string', description: 'shown in the UI log' },
-        preview: { type: 'boolean', description: 'also return an image of the result' },
+        preview: { type: ['boolean', 'object'], description: 'also return an image: true | {scale?, max_size?}' },
         critique: { type: 'boolean', description: 'also return the art_critique summary' },
       },
       required: ['canvas'],
@@ -98,7 +98,8 @@ export const TOOLS = [
         r.critique = { score: c.score, issues: (c.issues || []).map((i) => `${i.id}: ${i.message}`) };
       }
       if (!preview) return r;
-      const v = await call('render', { canvas: a.canvas, frame: a.frame, max_size: 384 });
+      const po = preview && typeof preview === 'object' ? preview : {};
+      const v = await call('render', { canvas: a.canvas, frame: a.frame, max_size: po.max_size ?? 384, ...(po.scale !== undefined ? { scale: po.scale } : {}) });
       return { ...r, image: v.image, scale: v.scale };
     },
   },
@@ -124,6 +125,7 @@ export const TOOLS = [
       properties: {
         canvas: S.canvas, kind: { type: 'string', enum: ['auto', 'texture', 'sprite', 'scene'] }, frame: S.frame, animation: { type: 'string' }, style: { enum: ['auto', 'lowres', 'hd'] },
         layer: S.layer, tileable: { type: 'boolean' }, max_colors: { type: 'integer' }, all_frames: { type: 'boolean' },
+        intended: { type: 'array', description: '[[x,y],..] pixels placed on purpose (eyes, sparks): not orphans' },
       },
       required: ['canvas'],
     },
