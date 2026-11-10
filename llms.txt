@@ -19,7 +19,7 @@ Workflow for a sprite: `art_palette ramp` -> flat silhouettes with `art_draw` ->
 - [humanoid_hd step-by-step guide](https://github.com/RusticStack/agent-art/blob/main/docs/rig-hd-guide.md): drawing and animating a high-detail 8-direction character
 - [Melee](https://github.com/RusticStack/agent-art/blob/main/docs/melee/README.md): melee clip sets, paired takedowns, gun disarms, hit volumes, melee weapon models
 - [2D skinning](https://github.com/RusticStack/agent-art/blob/main/docs/skin2d/README.md): bending drawn sprites on rig bones, runtime format
-- [3D models](https://github.com/RusticStack/agent-art/blob/main/docs/3d/README.md): `art_model` kits, props, rigs and clips, sprite renders, ships and vehicles, hard-surface detail, render cost, CTM, ship interiors and megastructures
+- [3D models](https://github.com/RusticStack/agent-art/blob/main/docs/3d/README.md): `art_model` kits, props, rigs and clips, sprite renders, ships and vehicles, hard-surface detail, render cost, one UV atlas per model (default), CTM, ship interiors and megastructures
 - [Materials v2](https://github.com/RusticStack/agent-art/blob/main/docs/materials/README.md): PBR extensions, lightmaps, probes, parallax, packing, export profiles, three.js hookups
 - [Skeletal skinning in 3D](https://github.com/RusticStack/agent-art/blob/main/docs/skinning/README.md): skeletons, weights, blend shapes, retargeting, glTF skins
 - [Mesh processing and cluster LOD](https://github.com/RusticStack/agent-art/blob/main/docs/meshproc/README.md): booleans, remeshing, decimation, cluster LOD (.clod format), visibility

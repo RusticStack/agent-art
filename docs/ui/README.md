@@ -46,4 +46,14 @@ The agent's side of the graph and the notes:
 | **Compare: difference** | **Colour picker** | **Asset context menu** |
 | ![difference](34-compare-difference.png) | ![colour picker](35-colour-picker.png) | ![context menu](36-asset-context-menu.png) |
 
+The 3D viewer's shading modes, Blender-style (`1`–`4`, or the `Z` pie), and a model on the default unwrap path with its one UV atlas canvas (`<name>_uv`, see [docs/3d](../3d/README.md#one-object-not-parts-the-uv-atlas-default)):
+
+| Solid | Material preview | Rendered: shadows + AO |
+| --- | --- | --- |
+| ![solid](26-model-solid.png) | ![material preview](27-model-material-preview.png) | ![rendered](28-model-rendered-shadows-ao.png) |
+| **Baked AO + lightmap** | **Shading pie** | **Unwrapped model (one atlas)** |
+| ![baked](29-model-baked-lightmap.png) | ![pie](30-model-shading-pie.png) | ![unwrapped](37-model-uv-atlas.png) |
+| **Its atlas canvas** | | |
+| ![atlas](38-model-uv-canvas.png) | | |
+
 Cleanup screens (select, plan, trash, disk usage) are in [docs/cleanup/README.md](../cleanup/README.md).

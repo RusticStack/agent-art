@@ -7,7 +7,7 @@ import path from 'node:path';
 import { test, expect } from './fixtures.ts';
 import { ROOT, runTool } from './cli.ts';
 import type { AppPage } from './app.page.ts';
-import { seedCleanup, seedManyCanvases, seedTrooper, trashSome } from './shots-seed.ts';
+import { seedCleanup, seedKiosk, seedManyCanvases, seedTrooper, trashSome } from './shots-seed.ts';
 
 const dir = () => path.resolve(ROOT, process.env.SHOTS_DIR || 'docs/ui');
 
@@ -421,6 +421,27 @@ test.describe('@shots', () => {
     await expect(app.graphFlow()).toBeVisible();
     await expect(app.graphCard('canvas:helmet_old')).toBeVisible();
     await shot(app, '25-cleanup-graph-badges');
+  });
+
+  // ---- a multi-part prop on the default unwrap path: the model and its one atlas canvas ----
+  test('37-model-uv-atlas', async ({ app }) => {
+    seedKiosk();
+    await app.goto('model:kiosk');
+    await expect(app.viewerStatus()).toContainText(/\d+ tris/, { timeout: 20_000 });
+    await app.blur();
+    await app.press('4');
+    await expect(app.shadingRadio('rendered')).toHaveAttribute('aria-checked', 'true');
+    await app.modelToggle('Shadows').check();
+    await app.modelToggle('AO').check();
+    await expect(app.viewerStatus()).toContainText('Rendered');
+    await shot(app, '37-model-uv-atlas');
+  });
+
+  test('38-model-uv-canvas', async ({ app }) => {
+    seedKiosk();
+    await app.goto('kiosk_uv');
+    await expect(app.pixelCanvas()).toBeVisible();
+    await shot(app, '38-model-uv-canvas');
   });
 
   // ---- last: 300 extra canvases in a second project (one agent-art batch call) ----

@@ -5,6 +5,7 @@
 Low-poly glTF `.glb` models textured with pixel art (HD-2D look, NEAREST filtering): modular map kits, props, ships and vehicles, rigid-part rigs with clips, first-person weapons and arms, hard-surface detail, render-cost tools, skinning, mesh processing and damage. Units are art pixels (32 px = 1 unit). Help topics: `art_help {topic:"3d"}`, `{topic:"materials"}`, `{topic:"damage"}`. Skills: `3d-kit`, `ship-model`, `hard-surface`, `ships-structures`, `fp-weapon`, `prop-rig`.
 
 - [Kit pieces, props and dioramas](#3d-environments-and-props-hd-2d)
+- [One object, not parts: the UV atlas (default)](#one-object-not-parts-the-uv-atlas-default)
 - [Rigid-part rigs, animation clips and pre-rendered sprites](#rigid-part-rigs-animation-clips-and-pre-rendered-sprites)
 - [Guns held by arms (first person)](#guns-held-by-arms-first-person)
 - [Ships and vehicles](#ships-and-vehicles)
@@ -39,11 +40,36 @@ Turn pixel art into low-poly game assets in the HD-2D style (pixel textures on l
 - **Overlays:** grime, decay, moss, blood and edge wear become decal shells on a second UV set (glTF `TEXCOORD_1`, strength in `COLOR_0` alpha, alpha MASK). Example: `overlays:[{texture:"grime", where:["bottom","corners"], falloff:20}, {texture:"moss", where:"top"}]`. `map` is `world` (the overlay's own scale) or `face`/`piece`/`surface` (stretched 0..1). Overlays go on a part or on the whole model (model-level `overlays`, kept by `create` and `update`). Decal shells are tessellated adaptively (`detail` defaults from the falloff and face size, 16-64 px), and uniform areas such as `where:"all"` are not split at all.
 - **Hard-surface detail and render cost:** greebles, sweeps (pipes, cables), trim sheets, PBR materials, pixel-correct height normals, baked AO, booleans, morph targets, LODs, impostors, collision/occluder proxies and room/portal cull data; see [Hard-surface detail and render cost](#hard-surface-detail-and-render-cost).
 - **Connected textures (CTM):** `art_model ctm` builds an OptiFine/Continuity-style tileset; see below.
+- **One UV atlas per model (default):** every new model is unwrapped onto one atlas canvas `<name>_uv` with contact AO, edge wear and grime, so its parts read as one object. See [the UV atlas](#one-object-not-parts-the-uv-atlas-default).
 - **Textures:** set them per face (`faces`, `top`, `side`), use a colour, or add a grime `overlay`. Emissive comes from a layer named `emissive`; that layer is left out of the base colour, so a glow-only pixel is black in the albedo and lit only by the emissive texture. `normal_maps:true` adds normal maps.
 - **Preview:** `art_model preview` renders a contact sheet with a software rasterizer. It includes the 38° game camera plus front, side, top and iso views.
 - **Export:** NEAREST samplers, REPEAT wrap, embedded PNGs, alpha MASK (cutoff 0.5) only when a triangle actually samples a transparent texel (unused tileset slots no longer force it), and emissive/normal textures. The file is Y-up with 32 px = 1 unit (`scale`). For a Z-up engine set `object.rotation.x = Math.PI / 2` or export with `up:"z"`. Options: one baked mesh, `instances:true` (shared meshes and nodes), or `atlas:true`.
 
 `art_help {topic:"3d"}` has every option plus recipes for a gothic arch kit, a gargoyle relief, chains, lathed candles, CTM marble floors, wall trims, moss and a spaceship. Skills: `3d-kit`, `ship-model`, `hard-surface`.
+
+### One object, not parts: the UV atlas (default)
+
+`art_model create` unwraps every new model onto one UV atlas canvas `<name>_uv` at 1 texel = 1 px. Islands are unfolded with no stretch and seams go on the back. The part textures are baked in world-aligned, so patterns run on across parts, and the cohesion pass adds contact AO, crease lines, edge wear and ground grime in clean palette bands. The result looks like one object instead of separately textured pieces.
+
+```jsonc
+// default: one atlas canvas "kiosk_uv" (layers base, cohesion, paint; hidden masks / guide)
+{ "action": "create", "name": "kiosk", "parts": [ /* ... */ ] }
+// paint the atlas directly on its "paint" layer (art_draw on kiosk_uv), or through a view:
+{ "action": "unwrap", "name": "kiosk", "unwrap": { "do": "view", "view": "front" } }       // -> canvas kiosk_uv_front
+{ "action": "unwrap", "name": "kiosk", "unwrap": { "do": "project", "from": "kiosk_uv_front" } }
+// why does it look detached? texel density, front seams, cut courses, missing contact shading
+{ "action": "unwrap", "name": "kiosk", "unwrap": { "do": "check" } }
+// the old per-part texturing (byte-identical to before), or convert a saved model
+{ "action": "create", "name": "kiosk_old", "parts": [ /* ... */ ], "unwrap": false }
+{ "action": "unwrap", "name": "kiosk_old" }
+```
+
+- **Re-baking:** `update`, `livery`, `material`, the interior merge of `generate`, and `preview` / `render` / `export` re-bake the atlas when the parts or part textures change. Paint is kept and moves with its island.
+- **Options** (on create, update or unwrap): `unwrap:{texel:1|2, max_size:256..2048, angle:46, parts|exclude, bake:{fit}, cohesion:{ao, contact, edges, grime, courses:{h, len}, overlays:[{texture, where:contact|cavity|top|bottom|edges}], palette}}`. Masonry: give the stone texture no joints and set `courses`, so joints are drawn model-wide and every part is whole courses.
+- **Everything uses it:** preview, render, rigs, damage, LODs, `bake_ao` and export use the atlas (one material). Metal, rough, height and emissive are baked into hidden layers of the atlas. Glass and opacity parts keep their own material. A stale atlas falls back to the part textures and says so.
+- **Per-part automatically**, with one `unwrap_note` and no error: skinned models, morphs, layouts of placed models (pieces stay instanced), models over 6000 triangles (ship templates) or past `max_size`. `unwrap:{do:"check"}` reports it.
+- **Existing models are unchanged:** a model saved without `unwrap` keeps its per-part textures until you run `unwrap {name}`.
+- The web UI shows the atlas (`/api/model/<name>/uv.png`) and the UV checker overlay in the 3D viewer. Design notes: [docs/plans/model-uv.md](../plans/model-uv.md).
 
 ### Rigid-part rigs, animation clips and pre-rendered sprites
 

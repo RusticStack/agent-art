@@ -82,3 +82,22 @@ export function seedManyCanvases() {
     if (/FAILED/.test(out)) throw new Error(`batch: ${out.split('\n').filter((l) => /FAILED/.test(l)).slice(0, 3).join('\n')}`);
   });
 }
+
+/** A multi-part prop on the default unwrap path (one atlas canvas "kiosk_uv": contact AO, edge wear) for 37 / 38. */
+export function seedKiosk() {
+  once('kiosk', () => hasCanvas('kiosk_uv'), () => {
+    const rows = (y0: number, step: number, color: string) => Array.from({ length: Math.ceil((16 - y0) / step) }, (_, i) => ({ op: 'rect', x: 0, y: y0 + i * step, w: 16, h: 1, color }));
+    runTool('art_create_canvas', { name: 'kiosk_plank', width: 16, height: 16 });
+    runTool('art_draw', { canvas: 'kiosk_plank', commands: [{ op: 'rect', x: 0, y: 0, w: 16, h: 16, color: '#8a6440' }, ...rows(3, 4, '#5e4129'), { op: 'rect', x: 5, y: 0, w: 1, h: 3, color: '#5e4129' }, { op: 'rect', x: 11, y: 4, w: 1, h: 3, color: '#5e4129' }, { op: 'rect', x: 3, y: 8, w: 1, h: 3, color: '#5e4129' }, { op: 'rect', x: 9, y: 12, w: 1, h: 3, color: '#5e4129' }] });
+    runTool('art_create_canvas', { name: 'kiosk_metal', width: 16, height: 16 });
+    runTool('art_draw', { canvas: 'kiosk_metal', commands: [{ op: 'rect', x: 0, y: 0, w: 16, h: 16, color: '#6f7a80' }, { op: 'rect', x: 0, y: 7, w: 16, h: 1, color: '#4a5257' }, { op: 'rect', x: 0, y: 15, w: 16, h: 1, color: '#4a5257' }, { op: 'rect', x: 2, y: 2, w: 1, h: 1, color: '#a9b4ba' }, { op: 'rect', x: 13, y: 10, w: 1, h: 1, color: '#a9b4ba' }, { op: 'rect', x: 6, y: 11, w: 3, h: 2, color: '#8a5a3a' }] });
+    runTool('art_model', { action: 'create', name: 'kiosk', parts: [
+      { type: 'box', w: 64, h: 32, d: 40, texture: 'kiosk_plank' },
+      { type: 'box', w: 72, h: 4, d: 46, at: [0, 32, 0], texture: 'kiosk_metal' },
+      { type: 'cylinder', r: 2, h: 40, at: [-32, 36, -18], texture: 'kiosk_metal' },
+      { type: 'cylinder', r: 2, h: 40, at: [32, 36, -18], texture: 'kiosk_metal' },
+      { type: 'box', w: 80, h: 4, d: 52, at: [0, 76, -2], texture: 'kiosk_metal' },
+      { type: 'box', w: 40, h: 10, d: 2, at: [0, 62, -20], texture: 'kiosk_plank' },
+    ] });
+  });
+}
