@@ -37,7 +37,8 @@
 
 <style>
   .selbar { border-top: 1px solid var(--line); background: var(--bg2); padding: var(--s-3) var(--s-4); display: flex; flex-direction: column; gap: var(--s-3); flex: none; }
-  .selbar-row { display: flex; align-items: center; gap: var(--s-3); }
+  /* wraps instead of clipping "Clear" in a narrow pane (the assets pane is 280 px by default) */
+  .selbar-row { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; min-width: 0; }
   .selbar-row :global(select) { max-width: 92px; }
   .count { font-variant-numeric: tabular-nums; white-space: nowrap; }
   .grow { flex: 1; display: flex; }

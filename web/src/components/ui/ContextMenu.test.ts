@@ -83,4 +83,25 @@ describe('ContextMenu (hand-written)', () => {
     await fireEvent.pointerDown(document.body);
     expect(screen.queryByRole('menu')).toBeNull();
   });
+
+  it('opens on a touch long press; a short tap or moving away does not', async () => {
+    vi.useFakeTimers();
+    try {
+      setup();
+      const row = screen.getByRole('button', { name: 'Row A' });
+      const touch = (type: string, x = 5, y = 5) => row.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerType: 'touch', pointerId: 1, clientX: x, clientY: y }));
+      touch('pointerdown'); vi.advanceTimersByTime(300); touch('pointerup'); vi.advanceTimersByTime(600);
+      expect(screen.queryByRole('menu')).toBeNull();
+      touch('pointerdown'); touch('pointermove', 40, 5); vi.advanceTimersByTime(600);
+      expect(screen.queryByRole('menu')).toBeNull();
+      const mouse = new PointerEvent('pointerdown', { bubbles: true, pointerType: 'mouse', pointerId: 2 });
+      row.dispatchEvent(mouse); vi.advanceTimersByTime(600);
+      expect(screen.queryByRole('menu')).toBeNull();
+      touch('pointerdown'); vi.advanceTimersByTime(600);
+      await vi.waitFor(() => expect(screen.getByRole('menu')).toBeTruthy());
+      const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+      row.dispatchEvent(click);
+      expect(click.defaultPrevented).toBe(true); // the click ending the long press does nothing
+    } finally { vi.useRealTimers(); }
+  });
 });

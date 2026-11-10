@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CanvasMeta } from '@/lib/api/types';
 import { fakeBitmap, installCanvasStub, type StubCtx } from '@/test/canvasStub';
-import { ANCHOR_COLORS, anchorColors, autoScale, canvasCells, clampSheetScale, drawSheet, exportCells, layoutCells, sheetSize, type SheetJson } from './drawSheet';
+import { ANCHOR_COLORS, anchorColors, autoScale, canvasCells, clampSheetScale, drawSheet, exportCells, fitLabel, layoutCells, sheetSize, type SheetJson } from './drawSheet';
 
 const twoTags = {
   frames: 4, frameHeight: 16,
@@ -82,9 +82,25 @@ describe('drawSheet', () => {
     expect([...names.keys()]).toEqual(['hand', 'foot']);
     const ctx = canvas.getContext('2d') as unknown as StubCtx;
     expect(ctx.calls.filter((c) => c.fn === 'drawImage')).toHaveLength(4);
-    expect(ctx.calls.filter((c) => c.fn === 'fillText').map((c) => c.args[0])).toEqual(['idle #0 · 100ms', 'idle #1 · 120ms', 'run #2 · 80ms', 'run #3']);
+    expect(ctx.calls.filter((c) => c.fn === 'fillText').map((c) => c.args[0])).toEqual(['i… #0', 'i… #1', 'r… #2', 'r… #3']); // 32 px cells: shortened so they do not run into the next cell (full text: hover title)
     expect(ctx.imageSmoothingEnabled).toBe(false);
     const none = drawSheet(canvas, fakeBitmap(16, 64), placed, { scale: 2, showAnchors: false, labels: false });
     expect(none.size).toBe(0);
+  });
+});
+
+describe('fitLabel', () => {
+  const cx = { measureText: (t: string) => ({ width: t.length * 6 }) } as Pick<CanvasRenderingContext2D, 'measureText'>;
+  it('keeps a label that fits, cuts the name before the frame number and duration otherwise', () => {
+    expect(fitLabel(cx, 'idle #0', '100ms', 200)).toBe('idle #0 · 100ms');
+    const t = fitLabel(cx, 'walk_front_side #6', '63ms', 132);
+    expect(t.endsWith('… #6 · 63ms')).toBe(true);
+    expect(t.length * 6).toBeLessThanOrEqual(132);
+    expect(t.startsWith('walk')).toBe(true);
+    const tiny = fitLabel(cx, 'walk_front_side #6', '63ms', 30);
+    expect(tiny.length * 6).toBeLessThanOrEqual(30);
+    expect(tiny).toBe('w… #6'); // the frame number survives the tightest cut
+    expect(fitLabel(cx, 'walk_side_0', '63ms', 62)).toBe('walk_si…_0'); // export cells: the name beats the duration
+    expect(fitLabel(cx, 'x', undefined, 3)).toBe('…');
   });
 });

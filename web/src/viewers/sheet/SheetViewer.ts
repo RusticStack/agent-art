@@ -10,7 +10,7 @@ import { h } from '@/lib/util/dom';
 import { BaseViewer } from '../base';
 import { button, group, label, range, spacer, toggle } from '../controls';
 import type { Target, ViewerEnv } from '../types';
-import { autoScale, canvasCells, clampSheetScale, drawSheet, exportCells, layoutCells, type SheetJson, type SrcCell } from './drawSheet';
+import { LABEL_H, autoScale, canvasCells, clampSheetScale, drawSheet, exportCells, layoutCells, type Cell, type SheetJson, type SrcCell } from './drawSheet';
 
 /** Env for an embedded sheet (the sheet reads none of it). */
 const EMBED_ENV: ViewerEnv = { tool: 'pencil', color: { hex: '#000000', hex8: '#000000ff' }, reviewMode: false, following: false, reviewsRev: 0, assetsRev: 0, compareLink: false, compareOverlay: 'off', peerRev: 0 };
@@ -22,6 +22,7 @@ export class SheetViewer extends BaseViewer {
   private name = '';
   private img: ImageBitmap | null = null;
   private src: SrcCell[] = [];
+  private placed: Cell[] = [];   // the drawn cells, for the hover title (labels are shortened to fit their cell)
   private baseStatus = '';
   private userScale = 0;
   private scale = 0;
@@ -58,6 +59,7 @@ export class SheetViewer extends BaseViewer {
     this.scroll = h('div', { class: 'sheet-scroll' });
     this.canvas = h('canvas', { class: 'sheet-canvas', role: 'img', 'aria-label': 'Sprite sheet' });
     this.scroll.append(this.canvas);
+    this.canvas.addEventListener('pointermove', (e) => this.hover(e));
     this.status = h('div', { class: 'vstatus mono' });
     root.append(this.scroll, this.status);
     this.onResize(this.scroll, () => { if (!this.userScale) this.draw(); });
@@ -120,10 +122,21 @@ export class SheetViewer extends BaseViewer {
     this.scale = scale;
     this.scaleIn.value = String(scale);
     const cells = layoutCells(this.src, scale, labels, exportMode);
+    this.placed = cells;
     const names = drawSheet(this.canvas, img, cells, { scale, showAnchors: anchors, labels });
     this.canvas.setAttribute('aria-label', `${this.name} sprite sheet, ${cells.length} frames at ${scale}×`);
     this.legend.replaceChildren(...[...names].map(([n, col]) => h('span', { class: 'legend-item' }, h('i', { style: { background: col } }), n)));
     this.status.textContent = this.baseStatus + (clamped ? ` · scale capped at ${scale}× (canvas size limit)` : '');
+  }
+
+  /** The full label of the cell under the pointer as the canvas title. */
+  private hover(e: PointerEvent): void {
+    const r = this.canvas.getBoundingClientRect();
+    const k = r.width ? this.canvas.width / r.width : 1;
+    const x = (e.clientX - r.left) * k, y = (e.clientY - r.top) * k, s = this.scale;
+    const c = this.placed.find((c) => x >= c.dx && x < c.dx + c.w * s && y >= c.dy && y < c.dy + c.h * s + LABEL_H);
+    const t = c ? c.label + (c.sub ? ' · ' + c.sub : '') : '';
+    if (this.canvas.title !== t) this.canvas.title = t;
   }
 
   /** Download the composed sheet (what is drawn now) as PNG. */

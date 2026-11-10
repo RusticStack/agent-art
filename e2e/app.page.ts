@@ -219,6 +219,31 @@ export class AppPage {
   volatile(): Locator[] {
     return [this.workspacePath(), this.page.locator('.tl-time'), this.page.locator('.tl-ms')];
   }
+  // ---- documentation shots (screenshots.spec.ts) ----
+  /** Anything that says "still loading": spinners, the browser skeleton, aria-busy regions. */
+  busy(): Locator { return this.page.locator('.spinner:visible, .skeleton:visible, [aria-busy="true"]:visible'); }
+  graphStage(): Locator { return this.graph().locator('.graph-stage'); }
+  layersViewSelect(): Locator { return this.slot('A').locator('.layers-viewer .vtoolbar select[title="View"]'); }
+  layersClipSelect(): Locator { return this.slot('A').locator('.layers-viewer .vtoolbar select[title^="Clip"]'); }
+  reviewField(name: 'Category' | 'Priority' | 'Note' | 'Compare with' | 'Compare view'): Locator {
+    const d = this.reviewDialog();
+    if (name === 'Category' || name === 'Priority') return d.locator('label', { hasText: name }).locator('select');
+    return d.getByLabel(name, { exact: true });
+  }
+  /** The 3D shading row: a mode radio (wire / solid / material / rendered) and its selects by title prefix. */
+  shadingRadio(mode: string): Locator { return this.slot('A').locator(`.model-viewer .vtoolbar.shading [role=radiogroup] [role=radio][data-mode="${mode}"]`); }
+  shadingSelect(title: string): Locator { return this.slot('A').locator(`.model-viewer .vtoolbar.shading select[title^="${title}"]`); }
+  /** The Z pie menu of the 3D viewer. */
+  shadingPie(): Locator { return this.page.locator('[role=menu]').filter({ has: this.page.locator('[role=menuitemradio]') }); }
+  /** Expand a tree row with children (a project, a rig, a canvas with layers) when it is collapsed. */
+  async expandRow(name: string, kind = 'canvas') {
+    const row = this.browserRow(name, kind);
+    if ((await row.getAttribute('aria-expanded')) === 'false') await row.locator('[data-act="toggle"]').click();
+    await expect(row).toHaveAttribute('aria-expanded', 'true');
+  }
+  planDialog(): Locator { return this.page.getByRole('dialog', { name: /^Plan cleanup · \d+ selected$/ }); }
+  cleanupDialog(): Locator { return this.page.getByRole('dialog', { name: 'Cleanup' }); }
+  planCleanupButton(): Locator { return this.selectionBar().getByRole('button', { name: 'Plan cleanup…' }); }
   /** Wait until every visible image has decoded. */
   async imagesDecoded() {
     await this.page.waitForFunction(() => [...document.images].filter((i) => i.offsetParent !== null).every((i) => i.complete && (i.naturalWidth > 0 || i.classList.contains('gone'))));

@@ -114,6 +114,32 @@ export function anchorColors(cells: { anchors?: Anchors | null }[]): Map<string,
   return names;
 }
 
+/**
+ * The cell label, shortened to maxW so it never runs into the next cell. In order: the full text; the
+ * name cut with "…" (at least 6 letters kept) plus the frame number ("#6" or "_6") and the duration;
+ * the label without the duration (name cut down to 3 letters); then any cut that keeps the number;
+ * then the end cut. The full label is the viewer's hover title.
+ */
+export function fitLabel(cx: Pick<CanvasRenderingContext2D, 'measureText'>, label: string, sub: string | undefined, maxW: number): string {
+  const tail = sub ? ' · ' + sub : '';
+  const full = label + tail;
+  const fits = (t: string) => cx.measureText(t).width <= maxW;
+  if (fits(full)) return full;
+  const m = /^(.*?)((?:\s#|_)\d+)$/.exec(label);
+  const name = m ? m[1] : label, num = m ? m[2] : '';
+  const cut = (keep: string, min: number): string | null => {
+    for (let n = name.length - 1; n >= min; n--) { const t = name.slice(0, n) + '…' + keep; if (fits(t)) return t; }
+    return null;
+  };
+  const best = cut(num + tail, Math.min(6, name.length - 1))
+    ?? (tail && fits(label) ? label : null)
+    ?? (tail ? cut(num, Math.min(3, name.length - 1)) : null)
+    ?? cut(num + tail, 1) ?? cut(num, 1);
+  if (best) return best;
+  for (let n = full.length - 1; n >= 1; n--) { const t = full.slice(0, n) + '…'; if (fits(t)) return t; }
+  return '…';
+}
+
 /** Draw the cells from img at scale onto canvas; returns anchor name -> colour (empty without anchors). */
 export function drawSheet(canvas: HTMLCanvasElement, img: CanvasImageSource, cells: Cell[], { scale = 2, showAnchors = true, labels = true }: DrawOpts = {}): Map<string, string> {
   const { W, H } = sheetSize(cells, scale, labels);
@@ -131,7 +157,7 @@ export function drawSheet(canvas: HTMLCanvasElement, img: CanvasImageSource, cel
     cx.strokeRect(c.dx + 0.5, c.dy + 0.5, c.w * scale - 1, c.h * scale - 1);
     if (labels) {
       cx.fillStyle = tc.muted; cx.font = '10px ui-monospace, monospace';
-      cx.fillText(`${c.label}${c.sub ? ' · ' + c.sub : ''}`, c.dx + 1, c.dy + c.h * scale + 11);
+      cx.fillText(fitLabel(cx, c.label, c.sub, c.w * scale - 2), c.dx + 1, c.dy + c.h * scale + 11);
     }
     if (showAnchors && c.anchors) for (const [n, a] of Object.entries(c.anchors)) {
       if (!names.has(n)) names.set(n, ANCHOR_COLORS[names.size % ANCHOR_COLORS.length]);

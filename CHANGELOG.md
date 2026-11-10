@@ -1,6 +1,20 @@
 # Changelog
 
-## Unreleased
+## 1.0 (unreleased)
+
+- Rewritten web UI (Svelte 5 + TypeScript, built with Vite into `dist/ui/`). No feature was removed: every behaviour of the old UI is kept (checked against the parity list in `web/plan.md`, section 1, and covered by Playwright end-to-end tests). Runtime dependencies stay at zero. Additions:
+  - Command palette (`Ctrl/Cmd+K`): fuzzy jump to any asset and every shell action; `Alt+Enter` opens an asset in compare.
+  - Asset row context menu (right-click, `Shift+F10`, long-press): open, open in compare, view tabs, pin, hide, solo, show in graph, add a review note, copy name or link, select, plan cleanup. Drag a row onto a viewer slot to open it there, or onto "Compare here" to start a comparison.
+  - Full keyboard navigation of the asset tree (arrows, `Home` / `End`, type-ahead), visible focus rings, ARIA roles on the tree, menus, tabs and dialogs, and text contrast of at least 4.5:1.
+  - Asset graph "Cards" renderer (thumbnail cards, minimap, zoom controls, focusable nodes) and a Hierarchy layout. The graph picks Cards for small graphs and the canvas renderer above about 400 nodes (Auto, the default; both can be chosen).
+  - Colour picker popover in the canvas editor: saturation / hue / alpha, hex field, palette and recent colours, screen eyedropper where the browser has one.
+  - Compare tools for two canvases of the same size: linked zoom / pan / frame and an overlay (Difference, Swipe, Blink) with a changed-pixel count.
+  - 3D viewport shading modes Solid (MatCap / Studio / Flat), Material preview and Rendered (shadows, ambient occlusion), a shading pie (`Z`), view presets (front / right / top / opposite), an axis gizmo, frame model and an Overlays toggle. The default is Material preview, with an automatic fallback to Solid › Studio when the GPU cannot run it; the old look is Solid › Studio.
+  - The timeline and asset browser are virtualised: the timeline shows every filtered entry (the 400-row cap is gone) and hundreds of canvases stay fast.
+  - JSON is syntax-coloured wherever it is shown (export preview, timeline arguments, inspector metadata). Rig pose and skin-weight images open in a zoomable, pannable view.
+  - Narrow-screen layout with drawers and an overflow menu for the top bar buttons; drawer state is no longer mixed up with the saved desktop pane visibility.
+  - Confirmations (delete a note, reopen, empty the trash) are styled dialogs instead of browser pop-ups. When the server goes away the status shows "disconnected, retrying" and the UI reconnects and catches the timeline up.
+  - In a source checkout the server, `/api/health` (`ui: {built, stale}`), the page and `art_open_ui` say when the UI build is older than `web/`.
 
 - New models are unwrapped by default. `art_model create` stores a default `unwrap` in the model and bakes one cohesive atlas canvas `<name>_uv` (world-aligned texture, contact AO, edge wear, grime). Existing models are unchanged: a saved model without `unwrap` keeps its per-part textures, and `update` does not add it. `unwrap:false` on create / update keeps the old per-part texturing (byte-identical).
   - `update`, `livery`, `material`, the interior merge of `generate`, and `preview` / `render` / `export` re-bake the atlas when the parts or part textures changed (paint is kept).

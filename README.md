@@ -307,7 +307,7 @@ agent-art skills --out DIR                            # write the skills as DIR/
 
 ## Web UI
 
-The UI shows everything the agent does, live, and lets you steer it: an activity timeline of every tool call with before / after thumbnails, an asset browser, viewers for canvases, animations (all 8 directions as a compass), rigs, 3D models (orbit, wireframe, UVs, normals, channels, clips, sockets), audio and sheets, a Layers view that explains draw order, the asset graph, review notes (press `M`), compare (`C`) and follow (`F`). Your edits go through the same API as the agent's, so the agent sees them.
+The UI shows everything the agent does, live, and lets you steer it: an activity timeline of every tool call with before / after thumbnails, an asset browser (pin, hide, solo, right-click menu, drag a row onto the viewers to compare), viewers for canvases (with a colour picker), animations (all 8 directions as a compass), rigs, 3D models (Solid / Material preview / Rendered shading, view presets and an axis gizmo, wireframe, UVs, normals, channels, clips, sockets), audio and sheets, a Layers view that explains draw order, the asset graph (thumbnail cards with a minimap, Force / Layered / Hierarchy layouts, a canvas renderer for large graphs), review notes (press `M`), compare (`C`, with linked zoom and a Difference / Swipe / Blink overlay), follow (`F`) and a command palette (`Ctrl+K`). Everything works from the keyboard: the asset tree, timeline, menus and dialogs take arrow keys, `Enter` and `Escape`, and `?` lists the shortcuts. Your edits go through the same API as the agent's, so the agent sees them.
 
 | Timeline | Rig skeleton | Model viewer |
 | --- | --- | --- |

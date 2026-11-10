@@ -37,6 +37,11 @@ describe('SheetViewer', () => {
     expect([...el.querySelectorAll('.legend-item')].map((x) => x.textContent)).toEqual(['tip']);
     const c = el.querySelector<HTMLCanvasElement>('canvas.sheet-canvas')!;
     expect(c.getAttribute('aria-label')).toBe('spark sprite sheet, 4 frames at 1×');
+    // the hover title carries the full label of the cell under the pointer (drawn labels are shortened to fit)
+    c.dispatchEvent(new PointerEvent('pointermove', { clientX: 6 + 22 + 2, clientY: 8 }));
+    expect(c.title).toBe('spin #1 · 100ms');
+    c.dispatchEvent(new PointerEvent('pointermove', { clientX: 2, clientY: 2 }));
+    expect(c.title).toBe('');
     // anchors off -> empty legend
     const anchors = el.querySelector<HTMLInputElement>('label.toggle input')!;
     anchors.checked = false; anchors.dispatchEvent(new Event('change'));
