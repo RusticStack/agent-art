@@ -24,7 +24,7 @@ export const BUDGETS = {
   graphLayout: 30,
   palette: 14,
   picker: 5,
-  dialogs: 25, // not in plan 7.1 ("the dialogs' heavy parts are lazy"): a guard for the lazy DialogHost chunk (Bits Dialog)
+  dialogs: 45, // step 17: + Bits Tooltip/floating-ui via Button in the cleanup dialogs; not in plan 7.1 ("the dialogs' heavy parts are lazy"): a guard for the lazy DialogHost chunk (Bits Dialog)
   cssInitial: 14, // plan 7.1; the interim (migration) budget is the final one, as for initialJs (step 14 note)
   cssTotal: 20,
   distTotalRaw: 1.8 * 1024, // kB raw

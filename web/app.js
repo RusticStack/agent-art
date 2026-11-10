@@ -12,7 +12,6 @@ import Timeline from './src/components/timeline/Timeline.svelte';
 import { Inspector, reviewDialog } from './ui/inspector.js';
 import { adapt } from './src/viewers/legacyAdapter.ts';
 import { CanvasViewer as CanvasViewerTS, TOOL_KEYS } from './src/viewers/canvas/CanvasViewer.ts';
-import { cleanupPanel } from './ui/cleanup.js';
 import { assets } from './src/state/assets.svelte.ts';
 import { uiState } from './src/state/uiState.svelte.ts';
 import { reviews, ACTIVE_REVIEW } from './src/state/reviews.svelte.ts';
@@ -321,7 +320,7 @@ class App {
     $('reviewBtn').onclick = () => this.setReviewMode(!this.reviewMode);
     $('reviewListBtn').onclick = () => this.showReviewList();
     $('graphBtn').onclick = () => this.open({ kind: 'graph' });
-    $('cleanupBtn').onclick = () => cleanupPanel(this);
+    $('cleanupBtn').onclick = () => dialogs.openCleanup();
     $('helpBtn').onclick = () => this.toggleHelp();
     $('toggleBrowser').onclick = () => this.togglePane('browser');
     $('toggleSide').onclick = () => this.togglePane('side');

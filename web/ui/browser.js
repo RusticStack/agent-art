@@ -4,7 +4,7 @@
 // Select mode: checkboxes, shift-click ranges, "all shown" (the filter) and "by tag", then
 // "Plan cleanup…" (art_cleanup dry run + apply). Superseded / orphan assets carry badges.
 import { el, enc, thumbURL, KIND_ICON, store, fmtBytes, assetId } from './util.js';
-import { planDialog } from './cleanup.js';
+import { dialogs } from '../src/state/dialogs.svelte.ts';
 
 const SECTIONS = [['pinned', 'Pinned'], ['groups', 'Groups'], ['projects', 'Projects'], ['canvases', 'Canvases'], ['rigs', 'Rigs'], ['models', '3D models'], ['audio', 'Audio'], ['exports', 'Exports']];
 const MAX_PER_GROUP = 400;
@@ -98,7 +98,7 @@ export class Browser {
   }
   async planCleanup() {
     if (!this.selected.size) return;
-    const done = await planDialog(this.app, [...this.selected]);
+    const done = await dialogs.planCleanup([...this.selected]);
     if (done) { this.selected.clear(); this.render(); }
   }
 

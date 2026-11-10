@@ -7,6 +7,8 @@
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import PromptDialog from '../ui/PromptDialog.svelte';
   import HelpDialog from './HelpDialog.svelte';
+  import PlanCleanupDialog from './PlanCleanupDialog.svelte';
+  import CleanupDialog from './CleanupDialog.svelte';
 </script>
 
 {#each dialogs.stack as spec (spec)}
@@ -16,5 +18,9 @@
     <ConfirmDialog title={spec.title} body={spec.body} confirmLabel={spec.confirmLabel} danger={spec.danger} onresult={(ok) => dialogs.close(spec, ok)} />
   {:else if spec.type === 'prompt'}
     <PromptDialog title={spec.title} label={spec.label} placeholder={spec.placeholder} value={spec.value} confirmLabel={spec.confirmLabel} onresult={(v) => dialogs.close(spec, v)} />
+  {:else if spec.type === 'planCleanup'}
+    <PlanCleanupDialog {spec} onclose={(done) => dialogs.close(spec, done)} />
+  {:else if spec.type === 'cleanup'}
+    <CleanupDialog {spec} onclose={() => dialogs.close(spec)} />
   {/if}
 {/each}

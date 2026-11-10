@@ -26,8 +26,11 @@ test('paint a pencil stroke, see the user draw in the timeline, undo it', async 
 
 test('zoom keys, grid toggle persists across reload', async ({ app, page }) => {
   await app.goto('scratch');
-  const z0 = await app.zoomLabel().textContent();
   await app.blur();
+  await app.press('0'); // fit first: reading the label right after open can race the initial fit
+  await expect(app.zoomLabel()).not.toHaveText('');
+  await app.page.waitForTimeout(150);
+  const z0 = await app.zoomLabel().textContent();
   await app.press('-');
   await expect(app.zoomLabel()).not.toHaveText(z0 ?? '');
   await app.press('0');

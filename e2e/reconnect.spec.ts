@@ -19,7 +19,7 @@ test('server restart: disconnected, then live; new ops show up; cleanup settings
   await expect(app.timelineEntries().first()).toContainText('scratch', { timeout: 10_000 });
   await app.openCleanup();
   const dlg = app.dialog();
-  await dlg.getByRole('button', { name: 'Settings' }).click();
+  await dlg.getByRole('tab', { name: 'Settings' }).click();
   await dlg.getByRole('button', { name: 'Save' }).click();
   await expect(app.toasts().filter({ hasText: /saved|Saved/ })).toBeVisible();
   await expect(app.toasts().filter({ hasText: /cleanup_config/ })).toHaveCount(0);

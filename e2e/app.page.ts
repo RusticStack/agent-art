@@ -106,7 +106,8 @@ export class AppPage {
   inspectorSection(title: string | RegExp): Locator { return this.page.locator('#inspector .insp-sec').filter({ has: this.page.locator('.panel-label', { hasText: title }) }); }
   reviewCards(): Locator { return this.page.locator('#inspector .review-card'); }
   // ---- dialogs, toasts ----
-  dialog(): Locator { return this.page.locator('.modal:not(#help):not([hidden])').last(); }
+  /** The top open dialog (legacy .modal until step 16, else the Bits dialogs except Help). */
+  dialog(): Locator { return this.page.locator('.modal:not(#help):not([hidden]), .dlg:not(.help-dialog)').last(); }
   helpDialog(): Locator { return this.page.getByRole('dialog', { name: 'Keyboard shortcuts' }); }
   /** The toast stack (role=status, "Notifications") and its toasts; errors are role=alert. */
   toastRegion(): Locator { return this.page.getByRole('status', { name: 'Notifications' }); }
