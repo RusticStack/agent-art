@@ -116,8 +116,11 @@ export class AppPage {
   inspectorSection(title: string | RegExp): Locator { return this.page.locator('#inspector .insp-sec').filter({ has: this.page.locator('.panel-label', { hasText: title }) }); }
   reviewCards(): Locator { return this.page.locator('#inspector .review-card'); }
   // ---- dialogs, toasts ----
-  /** The top open dialog (legacy .modal until step 16, else the Bits dialogs except Help). */
-  dialog(): Locator { return this.page.locator('.modal:not(#help):not([hidden]), .dlg:not(.help-dialog)').last(); }
+  /** The top open dialog (Bits dialogs except Help; confirm / prompt are .dlg too). */
+  dialog(): Locator { return this.page.locator('.dlg:not(.help-dialog)').last(); }
+  reviewDialog(): Locator { return this.page.getByRole('dialog', { name: 'Review note' }); }
+  reviewListDialog(): Locator { return this.page.getByRole('dialog', { name: /^Review notes · \d+ open$/ }); }
+  alertDialog(name: string | RegExp): Locator { return this.page.getByRole('alertdialog', { name }); }
   helpDialog(): Locator { return this.page.getByRole('dialog', { name: 'Keyboard shortcuts' }); }
   /** The toast stack (role=status, "Notifications") and its toasts; errors are role=alert. */
   toastRegion(): Locator { return this.page.getByRole('status', { name: 'Notifications' }); }

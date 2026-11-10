@@ -171,11 +171,11 @@ test.describe('3D viewport shading', () => {
     expect(d.gl!.programs).toBeLessThanOrEqual(gl0.programs + 2);
     expect(await page.evaluate(() => document.querySelectorAll('canvas').length)).toBeLessThanOrEqual(canvases0);
 
-    // 13. review mode in Rendered: a click opens the note dialog (the rendered crop is attached as
-    // draft.image; the legacy dialog does not show it, the image check arrives with step 16)
+    // 13. review mode in Rendered: a click opens the note dialog with the rendered crop attached
     await app.press('m');
     await canvas.click();
-    await expect(app.dialog()).toContainText('Review note');
+    await expect(app.reviewDialog()).toBeVisible();
+    await expect(app.reviewDialog().locator('img.rn-crop')).toHaveAttribute('src', /^data:image\/png/);
     await app.press('Escape');
     await app.press('Escape');
 

@@ -253,3 +253,8 @@ button.cu-item:hover { background: var(--panel2); }
 .drop-compare { position: absolute; top: 0; right: 0; bottom: 0; width: 28%; z-index: 5; display: flex; align-items: center; justify-content: center; border: 2px dashed var(--accent); border-radius: 8px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text); font-weight: 600; }
 .drop-compare[hidden] { display: none; }
 .slot.drop-over { outline: 2px dashed var(--accent); outline-offset: -4px; }
+
+/* key / value table built by viewer DOM (audio info); moved from legacy-shell.css in step 16 */
+table.kv { border-collapse: collapse; width: 100%; font-size: 12px; }
+table.kv th { text-align: left; color: var(--muted); font-weight: 400; padding: 1px 8px 1px 0; white-space: nowrap; vertical-align: top; }
+table.kv td { word-break: break-word; }

@@ -9,6 +9,8 @@
   import HelpDialog from './HelpDialog.svelte';
   import PlanCleanupDialog from './PlanCleanupDialog.svelte';
   import CleanupDialog from './CleanupDialog.svelte';
+  import ReviewNoteDialog from './ReviewNoteDialog.svelte';
+  import ReviewListDialog from './ReviewListDialog.svelte';
 </script>
 
 {#each dialogs.stack as spec (spec)}
@@ -22,5 +24,9 @@
     <PlanCleanupDialog {spec} onclose={(done) => dialogs.close(spec, done)} />
   {:else if spec.type === 'cleanup'}
     <CleanupDialog {spec} onclose={() => dialogs.close(spec)} />
+  {:else if spec.type === 'reviewNote'}
+    <ReviewNoteDialog {spec} onclose={(r) => dialogs.close(spec, r)} />
+  {:else if spec.type === 'reviewList'}
+    <ReviewListDialog {spec} onclose={() => dialogs.close(spec)} />
   {/if}
 {/each}

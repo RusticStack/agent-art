@@ -10,7 +10,8 @@ import { api as rest } from './src/lib/api/client.ts';
 import AssetBrowser from './src/components/browser/AssetBrowser.svelte';
 import { hasDragTarget, readDragTarget } from './src/components/browser/drag.ts';
 import Timeline from './src/components/timeline/Timeline.svelte';
-import { Inspector, reviewDialog } from './ui/inspector.js';
+import Inspector from './src/components/inspector/Inspector.svelte';
+import { reviewPrompt } from './src/components/inspector/actions.ts';
 import { adapt } from './src/viewers/legacyAdapter.ts';
 import { CanvasViewer as CanvasViewerTS, TOOL_KEYS } from './src/viewers/canvas/CanvasViewer.ts';
 import { assets } from './src/state/assets.svelte.ts';
@@ -73,7 +74,18 @@ class App {
     mount(Timeline, { target: $('timelinePane'), props: { ontoggleDock: () => this.toggleTimelineDock() } });
     // legacy surface: the Svelte timeline renders from the activity store on its own
     this.timeline = { upsert: (e) => activity.upsert(e), load: (list) => activity.load(list), render() {}, get f() { return activity.filter; } };
-    this.inspector = new Inspector($('inspector'), this);
+    mount(Inspector, { target: $('inspector'), props: {
+      onsetcolor: (hex) => this.setColor(hex), // also pushes the colour to the viewers
+      ontogglepinned: (id) => this.togglePinned(id),
+      ontogglehidden: (id) => this.toggleHidden(id),
+      onnote: (d) => { void this.reviewPrompt(d); },
+      onopen: (t) => { void this.open(t); },
+    } });
+    // legacy surface: the Svelte inspector follows workspace.inspected and live.signals.inspectorTick
+    this.inspector = {
+      show: (t) => { workspace.inspected = !t ? null : t.kind === 'graph' ? { kind: 'graph' } : t; },
+      refreshFor: () => { live.signals.inspectorTick++; },
+    };
     this.setupLayout();
     this.setupDrop();
     this.setupTopbar();
@@ -108,13 +120,9 @@ class App {
   isPinned(id) { return uiState.isPinned(id); }
   toggleHidden(id) {
     void uiState.toggleHidden(id);
-    this.browser.render();
-    if (this.current) this.inspector.show(this.current);
   }
   togglePinned(id) {
     void uiState.togglePinned(id);
-    this.browser.render();
-    if (this.current) this.inspector.show(this.current);
   }
   toggleSolo(id) { uiState.toggleSolo(id); this.browser.render(); }
   clearSolo() { uiState.clearSolo(); this.browser.render(); }
@@ -134,7 +142,6 @@ class App {
     $('reviewCount').hidden = !open;
     this.browser.render();
     for (const s of Object.values(this.slots)) if (s.viewer?.view?.render) s.viewer.view.render();
-    if (this.current) this.inspector.show(this.current);
   }
 
   // ---------- tools / colour ----------
@@ -256,8 +263,7 @@ class App {
   // ---------- review ----------
   reviewMarks(t) { return reviews.marks(t); }
   async reviewPrompt(t) {
-    const r = await reviewDialog(this, t);
-    if (r) { toast(`Review note ${r.id} added — the agent sees it in art_review list and in replies about this asset`, 'ok'); this.setReviewMode(false); }
+    return reviewPrompt(t, () => this.setReviewMode(false));
   }
   setReviewMode(on) {
     editor.setReviewMode(on);
@@ -281,10 +287,7 @@ class App {
     if (b.view === 'anim') delete b.view;
     this.compare(a, b);
   }
-  inspectNode(id) {
-    const [k, n] = splitId(id);
-    this.inspector.show({ kind: k, name: n });
-  }
+  inspectNode(id) { workspace.inspectNode(id); }
 
   // ---------- live events (state/live routes them to the stores; this re-renders the legacy DOM) ----------
   afterEvent(ev) {
@@ -304,8 +307,6 @@ class App {
   watchStores() {
     watch(() => assets.rev, () => this.renderAssets());
     watch(() => reviews.rev, () => this.renderReviews());
-    // the browser rows change ui-state directly; the legacy inspector shows pin / hide state
-    watch(() => [uiState.hidden, uiState.pinned, uiState.solo], () => { if (this.current) this.inspector.show(this.current); });
     watch(() => connection.label, () => this.setStatus());
   }
 
@@ -357,13 +358,7 @@ class App {
     $('toggleBrowser').onclick = () => this.togglePane('browser');
     $('toggleSide').onclick = () => this.togglePane('side');
   }
-  showReviewList() {
-    const list = reviews.sortedAll();
-    const dlg = el('div.modal', { on: { click: (e) => { if (e.target === dlg) dlg.remove(); } } },
-      el('div.modal-card.wide', {}, el('div.pane-head', {}, el('h3', { text: `Review notes · ${list.filter((r) => ACTIVE_REVIEW.has(r.status)).length} open` }), el('div.spacer'), el('button.btn.small', { text: '✕', on: { click: () => dlg.remove() } })),
-        el('div.review-list', {}, ...(list.length ? list.map((r) => { const c = this.inspector.reviewCard(r); c.addEventListener('click', (e) => { if (e.target.closest('button,a')) dlg.remove(); }); return el('div', {}, el('div.mono.small.muted', { text: r.asset }), c); }) : [el('div.muted', { text: 'No review notes yet. Press M, then drag a box (or click a pin) on what needs fixing.' })]))));
-    document.body.append(dlg);
-  }
+  showReviewList() { dialogs.openReviewList(); }
   toggleHelp() { dialogs.toggleHelp(); }
   togglePane(which) {
     const app = $('app');
