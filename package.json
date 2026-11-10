@@ -1,6 +1,6 @@
 {
   "name": "@rusticstack/agent-art",
-  "version": "0.10.0",
+  "version": "1.0.0",
   "description": "Game art and audio for AI agents: MCP server + live web UI for pixel-art sprites, rigs and animations, tilesets, textures, low-poly 3D models (.glb), combat effects, planets, sound effects and music.",
   "type": "module",
   "bin": {

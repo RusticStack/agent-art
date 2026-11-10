@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0 (unreleased)
+## 1.0.0
 
 - Rewritten web UI (Svelte 5 + TypeScript, built with Vite into `dist/ui/`). No feature was removed: every behaviour of the old UI is kept (checked against the parity list in `web/plan.md`, section 1, and covered by Playwright end-to-end tests). Runtime dependencies stay at zero. Additions:
   - Command palette (`Ctrl/Cmd+K`): fuzzy jump to any asset and every shell action; `Alt+Enter` opens an asset in compare.
