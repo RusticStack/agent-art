@@ -77,7 +77,7 @@ function main() {
   // ---- file rules ----
   for (const f of files) {
     if (f.endsWith('.map')) fail(`source map shipped: ${f}`);
-    const ok = f === 'index.html' || f === 'build.json' || f === 'THIRD-PARTY-NOTICES.txt' || /^assets\/[^/]+\.(js|css)$/.test(f);
+    const ok = f === 'index.html' || f === 'build.json' || f === 'THIRD-PARTY-NOTICES.txt' || /^assets\/[^/]+\.(js|css)$/.test(f) || /^assets\/icon-\d+-[\w-]+\.png$/.test(f); // + the brand favicons
     if (!ok) fail(`unexpected file in dist/ui: ${f}`);
     if (/\.(js|css)$/.test(f) && fs.readFileSync(path.join(DIST, f), 'utf8').includes('sourceMappingURL')) fail(`sourceMappingURL in ${f}`);
   }

@@ -5,6 +5,8 @@
   Review, Notes with the count, Graph, Cleanup, Help, follow mode) instead of a horizontally scrolling bar.
 -->
 <script lang="ts">
+  import icon16 from '@/assets/brand/icon-16.png';
+  import icon32 from '@/assets/brand/icon-32.png';
   import { assets } from '@/state/assets.svelte';
   import { dialogs } from '@/state/dialogs.svelte';
   import { editor } from '@/state/editor.svelte';
@@ -36,7 +38,7 @@
     <button type="button" class="btn icon pane-toggle" id="toggleBrowser" title="Assets pane ([)" aria-label="Assets pane ([)"
       aria-expanded={layout.shown('browser')} aria-controls="browser" onclick={() => layout.togglePane('browser')}><Icon name="panel-left" /></button>
   {/if}
-  <div class="brand"><span class="logo" aria-hidden="true"></span>Agent Art</div>
+  <div class="brand"><img class="logo" src={icon16} srcset={`${icon16} 1x, ${icon32} 2x`} width="16" height="16" alt="" aria-hidden="true" />Agent Art</div>
   <StatusPill />
   <span id="wsPath" class="ws mono" title={home ? `workspace: ${home}` : undefined}>{home}</span>
   <div class="spacer"></div>
@@ -77,7 +79,7 @@
 <style>
   .topbar { height: var(--h-topbar, 42px); flex: none; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; }
   .brand { font-weight: 700; display: flex; align-items: center; gap: 8px; letter-spacing: .2px; white-space: nowrap; }
-  .logo { width: 16px; height: 16px; image-rendering: pixelated; background: conic-gradient(from 90deg, var(--green) 0 25%, var(--blue) 0 50%, var(--red) 0 75%, var(--accent) 0); border-radius: 3px; }
+  .logo { width: 16px; height: 16px; image-rendering: pixelated; display: block; }
   /* --muted, not --dim: --dim text is below 4.5:1 on the panel (axe color-contrast) */
   .ws { color: var(--muted); max-width: 26vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; }
   .warm { display: contents; }

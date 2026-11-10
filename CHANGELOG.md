@@ -2,6 +2,7 @@
 
 ## 1.0.0
 
+- New icon and logo, drawn with Agent Art itself: a pixel "A" whose counter is a robot visor, in the banner's gold and purple. The web UI uses it as its favicon (16 / 32 px, plus a 180 px apple-touch icon) and in the top bar instead of the colour wheel. `docs/brand/` has `logo.png` (mark + wordmark), `icon.png` (512 px) and `icon-64.png`.
 - Rewritten web UI (Svelte 5 + TypeScript, built with Vite into `dist/ui/`). No feature was removed: every behaviour of the old UI is kept (checked against the parity list in `web/plan.md`, section 1, and covered by Playwright end-to-end tests). Runtime dependencies stay at zero. Additions:
   - Command palette (`Ctrl/Cmd+K`): fuzzy jump to any asset and every shell action; `Alt+Enter` opens an asset in compare.
   - Asset row context menu (right-click, `Shift+F10`, long-press): open, open in compare, view tabs, pin, hide, solo, show in graph, add a review note, copy name or link, select, plan cleanup. Drag a row onto a viewer slot to open it there, or onto "Compare here" to start a comparison.

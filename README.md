@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/brand/banner.png" alt="Agent Art: game art for AI agents. A pixel-art knight by a campfire on a ledge above a lake at dusk, crates and a potion beside him, a planet and a starfighter in the sky." width="100%"></p>
 
-# Agent Art
+# <img src="docs/brand/icon-64.png" width="32" height="32" alt=""> Agent Art
 
 [![npm](https://img.shields.io/npm/v/@rusticstack/agent-art)](https://www.npmjs.com/package/@rusticstack/agent-art) [![license: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE) ![node >= 20](https://img.shields.io/badge/node-%3E%3D20-339933) ![dependencies: 0](https://img.shields.io/badge/dependencies-0-brightgreen)
 
