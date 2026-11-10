@@ -185,12 +185,16 @@ export const SHADING = {
     const ramp = rampOf(ctx, a);
     const gapC = a.gap_color !== undefined ? ctx.color(a.gap_color) : null;
     const gap = Math.max(0, int(a.gap ?? 1, 'gap'));
-    const size = Math.max(2, num(a.size, 'size', Math.max(3, Math.round(Math.min(w, h) / 3))));
+    // size: one number, or [w, h] for cells of their own width and height
+    const sz = Array.isArray(a.size) ? a.size : [a.size, a.size];
+    if (Array.isArray(a.size) && a.size.length !== 2) throw new Error('size: a number or [w, h]');
+    const size = Math.max(2, num(sz[1], 'size', Math.max(3, Math.round(Math.min(w, h) / 3))));
+    const sizeX = Math.max(2, num(sz[0], 'size', size));
     const jitter = Math.max(0, Math.min(1, num(a.jitter, 'jitter', 0.8)));
     const stretch = num(a.stretch, 'stretch', 1); // >1 = wider cells (bricks/planks-ish), <1 = taller
     const seed = int(a.seed ?? 1, 'seed');
     const rnd = mulberry32(seed);
-    const gw = Math.max(1, Math.round(w / (size * stretch))), gh = Math.max(1, Math.round(h / size));
+    const gw = Math.max(1, Math.round(w / (sizeX * stretch))), gh = Math.max(1, Math.round(h / size));
     const cw = w / gw, ch = h / gh;
     const pts = [];
     // random global offset so cell borders do not line up with the tile edges (grid look)

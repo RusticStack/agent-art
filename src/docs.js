@@ -31,7 +31,7 @@ export const SIGS = {
   quantize: ['colors?,dither?,alpha_threshold?,region', 'snap to palette'],
   // surfaces + form
   shade: ['colors:[dark..light],light?,of?,depth?,profile?,per_color?,region', 'AUTO form shading of drawn shapes (use instead of hand shading)'],
-  cells: ['colors:[dark..light],gap_color?,size?,gap?,layout?,stretch?,seed?,region', 'tileable shaded stones/scales/cracks'],
+  cells: ['colors:[dark..light],gap_color?,size?(n|[w,h]),gap?,layout?,stretch?,seed?,region', 'tileable shaded stones/scales/cracks'],
   noise: ['colors,weights?,scale?,octaves?,despeckle?,seed?,region', 'tileable noise'],
   scatter: ['colors|color,density?|count,size?,seed?,region', 'random specks'],
   damage: ['amount?,seed?,kinds?,on?,palette?,mirror?,region', 'cracks/scorch/dents/holes/scratches from the palette'],

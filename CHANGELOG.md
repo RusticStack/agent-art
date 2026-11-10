@@ -28,6 +28,9 @@
   - Preview, render, rigs, damage, LODs, `bake_ao` and export use the atlas (one material; glass / opacity parts keep theirs). Stale atlases fall back to the part textures and say so. The `/api/model/<name>/uv.png` UI route serves the atlas.
 - The web UI is now built with Vite (first step towards Svelte 5 + TypeScript). Its sources moved from `public/` to `web/`, and the npm package ships the built `dist/ui/` instead. three.js comes from npm (r170, as before) as a separate chunk loaded only when the 3D viewer opens; the vendored copy is gone. Runtime dependencies stay at zero: the build tools are dev dependencies. In a source checkout, run `npm run build:ui` once (the server shows a page saying so until then), or `npm run dev:ui` for hot reload against a running server.
 - Fixes from building the showcase (all additive):
+  - `art_model unwrap {do:"check"}` read the course height of a texture from its mirror lag (a 32 px stone texture gave "31 px courses"); it now takes the smallest repeating lag up to half the texture height.
+  - The "texels do not fit" unwrap error also suggests `{pad:1}` when islands use the default padding of 2.
+  - `art_draw cells` accepts `size:[w, h]` (cells of their own width and height); a single number works as before.
   - CLI bridge: `--home` / `AGENT_ART_HOME` now wins over a server already running on the port when that server serves another workspace (the call runs in-process, with a note on stderr). Before, the call silently went to the live server.
   - CLI bridge: `tool` and `op` image replies without `--out` go to `<home>/views/view.png` / `render.png` instead of the current folder.
   - `art_fp anchors {remove}` on an arm drawing only accepts arm points (`joint`, `end`, `wrist`, `grip`); before, any name was deleted from the drawing meta (`remove:["kind"]` broke it).

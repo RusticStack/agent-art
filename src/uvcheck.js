@@ -103,21 +103,24 @@ function frontSeams(def, built, anchor, front = [0, 0.45, 1]) {
   }
   return out;
 }
-/** Course period of a texture: best autocorrelation lag (4..64) of its row-mean luminance, when the peak > 0.3. */
+/** Course period of a texture: the smallest autocorrelation lag (4..min(64, height/2)) within 10% of the best, of its row-mean luminance, when the peak > 0.3. */
 export function coursePeriod(T) {
   if (!T || T.width * T.height <= 1 || T.height < 8) return null;
   const m = new Float64Array(T.height);
   for (let y = 0; y < T.height; y++) { let s = 0, n = 0; for (let x = 0; x < T.width; x++) { const p = (y * T.width + x) * 4; if (T.data[p + 3]) { s += lum(T.data, p); n++; } } m[y] = n ? s / n : 0; }
   const mean = m.reduce((s, v) => s + v, 0) / m.length, x = m.map((v) => v - mean), e = x.reduce((s, v) => s + v * v, 0);
   if (e < 1e-6) return null;
-  let best = 0, ph = null;
-  for (let lag = 4; lag <= Math.min(64, T.height - 1); lag++) {
+  // up to half the height: the circular autocorrelation is symmetric (lag H-1 scores like lag 1);
+  // multiples of the course height score about as high, so take the smallest lag near the best
+  const rs = [];
+  for (let lag = 4; lag <= Math.min(64, Math.floor(T.height / 2)); lag++) {
     let s = 0;
     for (let y = 0; y < T.height; y++) s += x[y] * x[(y + lag) % T.height];
-    const r = s / e;
-    if (r > best + 1e-9) { best = r; ph = lag; }
+    rs.push([lag, s / e]);
   }
-  return best > 0.3 ? ph : null;
+  const best = rs.reduce((m, [, r]) => Math.max(m, r), 0);
+  if (!(best > 0.3)) return null;
+  return rs.find(([, r]) => r >= best * 0.9)[0];
 }
 const texRef = (p) => (p ? p.side ?? p.texture ?? p.faces?.front ?? null : null);
 function courseCuts(def, built, anchor, skipParts) {

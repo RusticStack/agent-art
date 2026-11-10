@@ -444,7 +444,7 @@ export function packIslands(charts, { pad, max_size: maxSize, texel }) {
   }
   if (!best) {
     const area = cells.reduce((s, c) => s + c.w * c.h, 0);
-    throw new Error(`unwrap: ${area} texels do not fit ${maxSize}x${maxSize} at texel ${texel} px. Fix: unwrap:{max_size:${Math.min(2048, maxSize * 2)}} | {texel:${texel * 2}} | parts:[..] (unwrap the hero parts, the rest stays tiled)`);
+    throw new Error(`unwrap: ${area} texels do not fit ${maxSize}x${maxSize} at texel ${texel} px. Fix: unwrap:{max_size:${Math.min(2048, maxSize * 2)}} | {texel:${texel * 2}} |${pad > 1 ? ` {pad:1} (less padding per island) |` : ''} parts:[..] (unwrap the hero parts, the rest stays tiled)`);
   }
   let used = 0;
   for (const c of charts) { const [x, y] = best.pos.get(c.id); c.rect = [x + pad, y + pad, c.w, c.h]; used += c.w * c.h; }
