@@ -8,7 +8,7 @@ import { api } from '@/lib/api/client';
 import { getBitmap, isAbort } from '@/lib/api/http';
 import { canvasPng } from '@/lib/api/urls';
 import { checker } from '@/lib/util/checker';
-import { h, icon } from '@/lib/util/dom';
+import { h, icon, themeColors } from '@/lib/util/dom';
 import { rafBatch } from '@/lib/util/format';
 import { BaseViewer } from '../base';
 import { button, fillSelect, group, label, range, select, spacer, toggle } from '../controls';
@@ -431,7 +431,8 @@ export class LayersViewer extends BaseViewer {
     const x = c.getContext('2d');
     if (!x) return;
     x.setTransform(dpr, 0, 0, dpr, 0, 0);
-    x.fillStyle = '#15171c'; x.fillRect(0, 0, r.width, L.height);
+    const tc = themeColors();
+    x.fillStyle = tc.canvasBg; x.fillRect(0, 0, r.width, L.height);
     x.font = '10px ui-monospace, monospace';
     x.fillStyle = 'rgba(255,255,255,.04)';
     for (let k = 1; k < parts.length; k += 2) x.fillRect(L.left, L.rankY(k) - L.rowH / 2, L.plotW, L.rowH);
@@ -445,7 +446,7 @@ export class LayersViewer extends BaseViewer {
       x.fillStyle = col;
       x.fillText(lane.part, 4, lane.labelY);
     });
-    x.fillStyle = '#f5a524';
+    x.fillStyle = tc.accent;
     x.fillRect(laneFrameX(L, this.frame, Math.max(1, frames.length)) - 1, 0, 2, L.height);
   }
 

@@ -58,9 +58,10 @@ export function icon(name: IconName, cls = ''): HTMLSpanElement {
 
 export interface ThemeColors {
   stage: string; canvasBg: string; checkerA: string; checkerB: string; accent: string; blue: string; green: string; red: string;
-  muted: string; text: string; line: string; line2: string; panel: string; bg2: string;
+  muted: string; text: string; line: string; line2: string; panel: string; bg2: string; accentInk: string; redFg: string; kAudio: string;
+  text2: string; dim: string; orphanFg: string;
 }
-const FALLBACK: ThemeColors = { stage: '#101216', canvasBg: '#15171c', checkerA: '#3a3d44', checkerB: '#2c2f35', accent: '#f5a524', blue: '#38bdf8', green: '#22c55e', red: '#e5484d', muted: '#8b93a1', text: '#e6e9ef', line: '#2a2f38', line2: '#353b46', panel: '#1a1d23', bg2: '#15171c' };
+const FALLBACK: ThemeColors = { stage: '#101216', canvasBg: '#15171c', checkerA: '#3a3d44', checkerB: '#2c2f35', accent: '#f5a524', blue: '#38bdf8', green: '#22c55e', red: '#e5484d', muted: '#9aa3b2', text: '#e6e9ef', line: '#2a2f38', line2: '#353b46', panel: '#1a1d23', bg2: '#15171c', accentInk: '#111111', redFg: '#fca5a5', kAudio: '#2dd4bf', text2: '#cbd2dc', dim: '#828b9b', orphanFg: '#a5b0c2' };
 
 /** Chrome colours for canvas drawing, read from the CSS tokens once per call. */
 export function themeColors(): ThemeColors {
@@ -72,7 +73,18 @@ export function themeColors(): ThemeColors {
     accent: v('--accent', FALLBACK.accent), blue: v('--blue', FALLBACK.blue), green: v('--green', FALLBACK.green), red: v('--red', FALLBACK.red),
     muted: v('--muted', FALLBACK.muted), text: v('--text', FALLBACK.text), line: v('--line', FALLBACK.line), line2: v('--line2', FALLBACK.line2),
     panel: v('--panel', FALLBACK.panel), bg2: v('--bg2', FALLBACK.bg2),
+    accentInk: v('--accent-ink', FALLBACK.accentInk), redFg: v('--red-fg', FALLBACK.redFg), kAudio: v('--k-audio', FALLBACK.kAudio),
+    text2: v('--text2', FALLBACK.text2), dim: v('--dim', FALLBACK.dim), orphanFg: v('--orphan-fg', FALLBACK.orphanFg),
   };
+}
+
+/** `#rgb` / `#rrggbb` token value with an alpha, for canvas fills (`rgba(...)`); anything else is returned unchanged. */
+export function withAlpha(color: string, a: number): string {
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(color.trim());
+  if (!m) return color;
+  const hex = m[1].length === 3 ? [...m[1]].map((c) => c + c).join('') : m[1];
+  const n = parseInt(hex, 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 }
 
 /** Fill a <pre> with syntax-coloured JSON (one span per token, textContent only). */

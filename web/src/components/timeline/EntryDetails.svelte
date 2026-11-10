@@ -32,6 +32,6 @@
   .tl-status.err { background: var(--red); }
   .tl-args { color: var(--muted); font: 11px ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
   .tl-ms { color: var(--muted); flex: none; font-size: 11px; }
-  .tl-summary { width: 100%; color: #b6bfcc; font-size: 12px; padding-left: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tl-error { width: 100%; color: #ff9a9d; font-size: 12px; padding-left: 14px; white-space: pre-wrap; }
+  .tl-summary { width: 100%; color: var(--text2); font-size: 12px; padding-left: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tl-error { width: 100%; color: var(--red-fg); font-size: 12px; padding-left: 14px; white-space: pre-wrap; }
 </style>

@@ -1,5 +1,6 @@
 /* Agent Art web UI design tokens: dark, dense, tool-like (Aseprite / Blender outliner / CI log).
-   Existing names are kept (viewer code and inline styles use them). Values marked "was" change in step 20. */
+   Existing names are kept (viewer code and inline styles use them). Values marked "was" changed in step 20; tokens marked (step 20) replace literals that used to sit in base.css,
+   viewers.css and component styles, with the same values. */
 :root {
   color-scheme: dark;
 
@@ -16,12 +17,14 @@
   --line2: #353b46;         /* control borders */
   --line3: #4a5260;         /* control border hover */
   --scrim: rgba(0, 0, 0, .55);
+  --tooltip-bg: #0b0c0f;    /* tooltips, one step below --bg (step 20) */
+  --select-bg: #22200f;     /* selected rows in select mode (step 20) */
 
   /* text */
   --text: #e6e9ef;
   --text2: #cbd2dc;         /* secondary body text */
-  --muted: #8b93a1;         /* becomes #9aa3b2 in step 20 */
-  --dim: #5b6372;           /* becomes #7f8898 in step 20 (too low contrast for text) */
+  --muted: #9aa3b2;         /* was #8b93a1 (step 20: AA on every surface) */
+  --dim: #828b9b;           /* was #5b6372; 4.1 said #7f8898, which is 4.36:1 on --panel2, so +3 per channel (step 20) */
 
   /* brand and state */
   --accent: #f5a524; --accent-fg: #ffd28a; --accent-bg: #2b2410; --accent-bg2: #3b2a08; --accent-ink: #111111;
@@ -29,7 +32,8 @@
   --green: #22c55e;  --green-fg: #86efac;  --green-bg: #0f2a19;  --green-line: #1f7a43;
   --red: #e5484d;    --red-fg: #fca5a5;    --red-bg: #2a1416;    --red-line: #7a2a2f;
   --warn-fg: #fcd34d; --warn-line: #8a5a10;
-  --violet: #a78bfa;
+  --violet: #a78bfa; --violet-bg: #2a2140;   /* tagged frame thumbs (step 20) */
+  --orphan-fg: #a5b0c2; --orphan-bg: #1c1f26; --orphan-line: #4b5262;   /* orphan badge, graph orphan label (step 20) */
   --focus: #7cc7ff;
 
   /* asset kinds */

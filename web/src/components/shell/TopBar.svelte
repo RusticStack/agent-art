@@ -77,7 +77,7 @@
 <style>
   .topbar { height: var(--h-topbar, 42px); flex: none; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; }
   .brand { font-weight: 700; display: flex; align-items: center; gap: 8px; letter-spacing: .2px; white-space: nowrap; }
-  .logo { width: 16px; height: 16px; image-rendering: pixelated; background: conic-gradient(from 90deg, #22c55e 0 25%, #38bdf8 0 50%, #e5484d 0 75%, #f5a524 0); border-radius: 3px; }
+  .logo { width: 16px; height: 16px; image-rendering: pixelated; background: conic-gradient(from 90deg, var(--green) 0 25%, var(--blue) 0 50%, var(--red) 0 75%, var(--accent) 0); border-radius: 3px; }
   /* --muted, not --dim: --dim text is below 4.5:1 on the panel (axe color-contrast) */
   .ws { color: var(--muted); max-width: 26vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; }
   .warm { display: contents; }

@@ -2,7 +2,7 @@
 // hover tooltip, thumbnails when zoomed in, keyboard pan / zoom / open on the focused canvas.
 // Fast with thousands of nodes (grid-bucketed repulsion, viewport culling, draw only when dirty).
 import { KIND_COLOR, KIND_ICON } from '@/lib/util/kinds';
-import { h, themeColors } from '@/lib/util/dom';
+import { h, themeColors, type ThemeColors } from '@/lib/util/dom';
 import type { GraphData, GraphRenderer, GraphRendererHost, VisEdge, VisNode } from './renderer';
 import {
   MAX_TICKS, SETTLE_ALPHA, centerOn, edgeLabel, fitView, hitTest, nodeLabel, radius, relColor, stepForce, tipText, wheelFactor, zoomAt,
@@ -41,7 +41,8 @@ export class CanvasRenderer implements GraphRenderer {
   private W = 0;
   private H = 0;
   private dpr = 1;
-  private bg = '#121418';
+  /** Chrome colours from the CSS tokens (4.1); kind and relation colours encode data and stay literal. */
+  private tc: ThemeColors = themeColors();
   private dirty = true;
   private raf = 0;
   private dead = false;
@@ -98,7 +99,7 @@ export class CanvasRenderer implements GraphRenderer {
     this.canvas.height = Math.max(1, Math.round(r.height * this.dpr));
     this.canvas.style.width = r.width + 'px';
     this.canvas.style.height = r.height + 'px';
-    this.bg = themeColors().stage;
+    this.tc = themeColors();
     this.invalidate();
   }
 
@@ -164,7 +165,7 @@ export class CanvasRenderer implements GraphRenderer {
     if (!x) return;
     const dpr = this.dpr, { k, x: vx, y: vy } = this.view, W = this.W, H = this.H;
     x.setTransform(dpr, 0, 0, dpr, 0, 0);
-    x.fillStyle = this.bg; x.fillRect(0, 0, W, H);
+    x.fillStyle = this.tc.stage; x.fillRect(0, 0, W, H);
     if (!this.nodes.length) return;
     x.setTransform(dpr * k, 0, 0, dpr * k, dpr * vx, dpr * vy);
     const inView = (n: VisNode, pad = 40) => { const sx = n.x * k + vx, sy = n.y * k + vy; return sx > -pad && sy > -pad && sx < W + pad && sy < H + pad; };
@@ -188,7 +189,7 @@ export class CanvasRenderer implements GraphRenderer {
       x.fillStyle = col;
       x.beginPath(); x.moveTo(ax, ay); x.lineTo(ax - (dx / d) * s - (dy / d) * s * 0.5, ay - (dy / d) * s + (dx / d) * s * 0.5); x.lineTo(ax - (dx / d) * s + (dy / d) * s * 0.5, ay - (dy / d) * s - (dx / d) * s * 0.5); x.fill();
       if ((labels && !e.derived) || on) {
-        x.fillStyle = '#c7cdd8'; x.font = `${10 / Math.max(0.8, k)}px ui-monospace, monospace`;
+        x.fillStyle = this.tc.text2; x.font = `${10 / Math.max(0.8, k)}px ui-monospace, monospace`;
         x.fillText(edgeLabel(e), (e.a.x + e.b.x) / 2 + 3, (e.a.y + e.b.y) / 2 - 3);
       }
     }
@@ -203,13 +204,13 @@ export class CanvasRenderer implements GraphRenderer {
       const t = big ? this.thumb(n) : null;
       if (t) {
         const s = r * 2.4;
-        x.fillStyle = '#1d2027'; x.fillRect(n.x - s / 2, n.y - s / 2, s, s);
+        x.fillStyle = this.tc.panel; x.fillRect(n.x - s / 2, n.y - s / 2, s, s);
         x.imageSmoothingEnabled = false;
         const q = Math.min(s / t.naturalWidth, s / t.naturalHeight);
         x.drawImage(t, n.x - (t.naturalWidth * q) / 2, n.y - (t.naturalHeight * q) / 2, t.naturalWidth * q, t.naturalHeight * q);
         x.strokeStyle = col; x.lineWidth = 2 / k; x.strokeRect(n.x - s / 2, n.y - s / 2, s, s);
       } else {
-        x.fillStyle = n.missing ? '#2a2d34' : col;
+        x.fillStyle = n.missing ? this.tc.line : col;
         x.beginPath();
         x.arc(n.x, n.y, r, 0, Math.PI * 2); x.fill();
         if (n.kind === 'group') { x.strokeStyle = '#e9d5ff'; x.lineWidth = 2 / k; x.stroke(); }
@@ -219,19 +220,19 @@ export class CanvasRenderer implements GraphRenderer {
       if (n.id === sel || n.id === this.hover?.id) { x.strokeStyle = '#fff'; x.lineWidth = 2 / k; x.beginPath(); x.arc(n.x, n.y, r + 4, 0, Math.PI * 2); x.stroke(); }
       if (this.collapsed.has(n.id)) { x.fillStyle = '#e9d5ff'; x.font = `bold ${11 / Math.max(0.8, k)}px system-ui`; x.fillText('+', n.x + r + 2, n.y - r); }
       // badges: open review notes, approved
-      if (n.reviews) { x.fillStyle = '#f5a524'; x.beginPath(); x.arc(n.x + r, n.y - r, 7 / Math.max(0.7, k), 0, Math.PI * 2); x.fill(); x.fillStyle = '#111'; x.font = `bold ${9 / Math.max(0.7, k)}px system-ui`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(String(n.reviews), n.x + r, n.y - r + 0.5); x.textAlign = 'left'; x.textBaseline = 'alphabetic'; }
-      if (n.approved) { x.fillStyle = '#22c55e'; x.font = `bold ${12 / Math.max(0.7, k)}px system-ui`; x.fillText('✓', n.x - r - 10 / Math.max(0.7, k), n.y - r + 4); }
+      if (n.reviews) { x.fillStyle = this.tc.accent; x.beginPath(); x.arc(n.x + r, n.y - r, 7 / Math.max(0.7, k), 0, Math.PI * 2); x.fill(); x.fillStyle = this.tc.accentInk; x.font = `bold ${9 / Math.max(0.7, k)}px system-ui`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(String(n.reviews), n.x + r, n.y - r + 0.5); x.textAlign = 'left'; x.textBaseline = 'alphabetic'; }
+      if (n.approved) { x.fillStyle = this.tc.green; x.font = `bold ${12 / Math.max(0.7, k)}px system-ui`; x.fillText('✓', n.x - r - 10 / Math.max(0.7, k), n.y - r + 4); }
       // cleanup badges: superseded (red slash + dashed ring), orphan (dashed grey ring)
       if (n.superseded || n.orphan) {
-        x.save(); x.setLineDash([3 / k, 3 / k]); x.lineWidth = 1.5 / k; x.strokeStyle = n.superseded ? '#f87171' : '#8b93a1';
+        x.save(); x.setLineDash([3 / k, 3 / k]); x.lineWidth = 1.5 / k; x.strokeStyle = n.superseded ? '#f87171' : this.tc.muted;
         x.beginPath(); x.arc(n.x, n.y, r + 7 / Math.max(0.7, k), 0, Math.PI * 2); x.stroke(); x.restore();
         if (n.superseded) { x.strokeStyle = '#f87171'; x.lineWidth = 2 / k; x.beginPath(); x.moveTo(n.x - r * 0.8, n.y + r * 0.8); x.lineTo(n.x + r * 0.8, n.y - r * 0.8); x.stroke(); }
-        if (k > 0.6) { x.fillStyle = n.superseded ? '#fca5a5' : '#a5b0c2'; x.font = `${9 / Math.max(0.75, k)}px system-ui`; x.fillText(n.superseded ? 'superseded' : 'orphan', n.x - r, n.y + r + 12 / Math.max(0.75, k)); }
+        if (k > 0.6) { x.fillStyle = n.superseded ? this.tc.redFg : this.tc.orphanFg; x.font = `${9 / Math.max(0.75, k)}px system-ui`; x.fillText(n.superseded ? 'superseded' : 'orphan', n.x - r, n.y + r + 12 / Math.max(0.75, k)); }
       }
       if (k > 0.45 || n.id === sel || hl.has(n.id) || n.kind === 'group') {
-        x.fillStyle = n.missing ? '#6b7280' : '#e6e9ef'; x.font = `${(n.kind === 'group' ? 12 : 11) / Math.max(0.75, k)}px system-ui`;
+        x.fillStyle = n.missing ? this.tc.dim : this.tc.text; x.font = `${(n.kind === 'group' ? 12 : 11) / Math.max(0.75, k)}px system-ui`;
         x.fillText(nodeLabel(n), n.x + r + 4, n.y + 4);
-        if (n.tags?.length && k > 1) { x.fillStyle = '#9aa3b2'; x.font = `${9 / k}px system-ui`; x.fillText(n.tags.map((tg) => '#' + tg).join(' '), n.x + r + 4, n.y + 16 / Math.max(0.75, k)); }
+        if (n.tags?.length && k > 1) { x.fillStyle = this.tc.muted; x.font = `${9 / k}px system-ui`; x.fillText(n.tags.map((tg) => '#' + tg).join(' '), n.x + r + 4, n.y + 16 / Math.max(0.75, k)); }
       }
       x.globalAlpha = 1;
     }

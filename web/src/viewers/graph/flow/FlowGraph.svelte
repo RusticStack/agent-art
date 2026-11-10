@@ -4,6 +4,7 @@
   import '@xyflow/svelte/dist/base.css';
   import { setContext } from 'svelte';
   import { Background, BackgroundVariant, Controls, MiniMap, SvelteFlow, type Node } from '@xyflow/svelte';
+  import { KIND_COLOR } from '@/lib/util/kinds';
   import { LABEL_ZOOM, LOD_FAR_ZOOM } from '../cards';
   import AssetNode from './AssetNode.svelte';
   import FlowApi from './FlowApi.svelte';
@@ -20,7 +21,7 @@
   const labels = $derived(bridge.zoom > LABEL_ZOOM ? 'on' : 'off');
   const ARROWS: Record<string, [number, number]> = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
 
-  const kindColor = (n: Node): string => (typeof n.data.color === 'string' ? n.data.color : '#94a3b8');
+  const kindColor = (n: Node): string => (typeof n.data.color === 'string' ? n.data.color : KIND_COLOR.file);
 
   /** Enter on a focused node selects it; Enter on the selected node opens it. Arrow moves count as a drag end. */
   function onKey(e: KeyboardEvent) {

@@ -24,7 +24,7 @@
   void load();
 
   const sections = $derived(u ? [
-    { title: 'By kind', bars: usageBars(u.by_kind), color: (k: string) => `var(--k-${k}, #94a3b8)` },
+    { title: 'By kind', bars: usageBars(u.by_kind), color: (k: string) => `var(--k-${k}, var(--k-file))` },
     { title: 'By project', bars: usageBars(u.by_project), color: () => 'var(--k-project)' },
     { title: 'By group', bars: usageBars(u.by_group), color: () => 'var(--k-group)' },
   ] : []);

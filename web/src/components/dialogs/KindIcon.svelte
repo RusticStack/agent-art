@@ -8,4 +8,4 @@
   const kind = $derived(splitId(id)[0]);
 </script>
 
-<span class="cu-kicon" style:color="var(--k-{kind}, #94a3b8)" title={KIND_LABEL[kind] ?? kind}><Icon name={KIND_ICON_NAME[kind] ?? 'file'} size={14} /></span>
+<span class="cu-kicon" style:color="var(--k-{kind}, var(--k-file))" title={KIND_LABEL[kind] ?? kind}><Icon name={KIND_ICON_NAME[kind] ?? 'file'} size={14} /></span>

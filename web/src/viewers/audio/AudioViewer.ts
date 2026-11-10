@@ -5,7 +5,7 @@ import type { AnyEvent, AudioInfo } from '@/lib/api/types';
 import { api } from '@/lib/api/client';
 import { getArrayBuffer, isAbort } from '@/lib/api/http';
 import { audioWav, exportFile } from '@/lib/api/urls';
-import { h, icon, themeColors, type ThemeColors } from '@/lib/util/dom';
+import { h, icon, themeColors, withAlpha, type ThemeColors } from '@/lib/util/dom';
 import { fmtMs } from '@/lib/util/format';
 import { store } from '@/lib/util/storage';
 import { BaseViewer } from '../base';
@@ -20,9 +20,6 @@ import { wavSampleRate } from './wav';
 
 type AudioTarget = { kind: 'audio' | 'export'; name: string };
 
-const WAVE_COLOR = '#2dd4bf';
-const SEL_FILL = 'rgba(56,189,248,.18)';
-const MARK_FILL = 'rgba(245,165,36,.25)';
 const ANALYSIS_ALT = 'Analysis image the agent reads: waveform, spectrogram, loudness';
 
 export class AudioViewer extends BaseViewer {
@@ -201,11 +198,11 @@ export class AudioViewer extends BaseViewer {
     const b = this.buffer;
     if (!b) return base;
     const d = b.duration || 1;
-    if (this.sel) { x.fillStyle = SEL_FILL; x.fillRect((this.sel[0] / d) * W, 0, ((this.sel[1] - this.sel[0]) / d) * W, H); }
+    if (this.sel) { x.fillStyle = withAlpha(c.blue, 0.18); x.fillRect((this.sel[0] / d) * W, 0, ((this.sel[1] - this.sel[0]) / d) * W, H); }
     const peaks = this.wavePeaks(W), lane = H / peaks.length;
     peaks.forEach((p, k) => {
       const mid = lane * k + lane / 2;
-      x.fillStyle = WAVE_COLOR;
+      x.fillStyle = c.kAudio;
       for (let i = 0; i < W; i++) x.fillRect(i, mid - p.max[i] * lane * 0.45, 1, Math.max(1, (p.max[i] - p.min[i]) * lane * 0.45));
       x.fillStyle = 'rgba(255,255,255,.08)'; x.fillRect(0, mid, W, 1);
     });
@@ -216,7 +213,7 @@ export class AudioViewer extends BaseViewer {
     for (const m of this.host.reviewMarks({ kind: this.kind, name: this.name })) {
       const [t0, t1] = m.time || [];
       if (t0 === undefined) continue;
-      x.fillStyle = MARK_FILL; x.fillRect((t0 / d) * W, 0, Math.max(2, (((t1 ?? t0) - t0) / d) * W), H);
+      x.fillStyle = withAlpha(c.accent, 0.25); x.fillRect((t0 / d) * W, 0, Math.max(2, (((t1 ?? t0) - t0) / d) * W), H);
       x.fillStyle = c.accent; x.fillText(m.id, (t0 / d) * W + 3, 12 * dpr);
     }
     return base;
@@ -253,7 +250,7 @@ export class AudioViewer extends BaseViewer {
     if (!mags) return;
     const nBars = Math.max(1, Math.min(160, Math.floor(W / (3 * dpr))));
     const levels = (this.barLevels = bars(mags, sr, nBars, this.barLevels ?? undefined));
-    x.fillStyle = live ? c.blue : WAVE_COLOR;
+    x.fillStyle = live ? c.blue : c.kAudio;
     for (let i = 0; i < nBars; i++) {
       const hgt = levels[i] * (H - 14 * dpr);
       x.fillRect((i / nBars) * W, H - 12 * dpr - hgt, Math.max(1, W / nBars - dpr), hgt);

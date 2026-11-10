@@ -91,7 +91,7 @@
   {#if thumb}
     <img class="thumb" src={thumb} loading="lazy" alt="" onerror={() => { brokenThumb = thumb; }} />
   {:else}
-    <span class="kicon" style:color="var(--k-{row.kind}, #94a3b8)"><Icon name={icon} size={14} /></span>
+    <span class="kicon" style:color="var(--k-{row.kind}, var(--k-file))"><Icon name={icon} size={14} /></span>
   {/if}
   <span class="label" title={row.meta ? `${row.label} · ${row.meta}` : row.label}>
     <span class="name">{row.label}</span>
@@ -124,7 +124,7 @@
   }
   .row:hover { background: var(--panel2); }
   .row.active { background: var(--accent-bg); border-left-color: var(--accent); }
-  .row.selected { background: #22200f; }
+  .row.selected { background: var(--select-bg); }
   .row.is-hidden { opacity: .4; }
   .row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   .twisty { width: 12px; flex: none; color: var(--muted); display: inline-flex; justify-content: center; }

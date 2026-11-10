@@ -36,7 +36,7 @@
   .tl-thumbs { display: flex; gap: 8px; padding: 4px 0 0 14px; height: 48px; box-sizing: border-box; flex-wrap: nowrap; overflow: hidden; }
   .tl-pair { display: inline-flex; align-items: center; gap: 3px; flex: none; height: 44px; box-sizing: border-box; background: var(--bg2); border: 1px solid var(--line); border-radius: 5px; padding: 2px 4px; color: inherit; font: inherit; cursor: pointer; }
   .tl-pair:hover { border-color: var(--line2); }
-  .tl-pair img { height: 36px; width: auto; max-width: 72px; object-fit: contain; image-rendering: pixelated; background: repeating-conic-gradient(#2c2f35 0 25%, #3a3d44 0 50%) 0 0 / 6px 6px; border-radius: 2px; }
+  .tl-pair img { height: 36px; width: auto; max-width: 72px; object-fit: contain; image-rendering: pixelated; background: repeating-conic-gradient(var(--checker-b) 0 25%, var(--checker-a) 0 50%) 0 0 / 6px 6px; border-radius: 2px; }
   .tl-pair img.gone { display: none; }
   .arrow { color: var(--dim); font-size: 11px; }
   .tl-asset { font-size: 10px; color: var(--muted); max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

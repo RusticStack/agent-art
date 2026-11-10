@@ -3,7 +3,8 @@
 // Used by the canvas editor, snapshots, comparisons, rig parts and export PNGs.
 import type { Rect, ReviewMark } from '@/lib/api/types';
 import type { DrawCommand } from '@/lib/api/client';
-import { checker } from '@/lib/util/checker';
+import { checker, setCheckerColors } from '@/lib/util/checker';
+import { themeColors, withAlpha, type ThemeColors } from '@/lib/util/dom';
 import { clamp } from '@/lib/util/format';
 import { watchDpr } from '../base';
 import type { Tool } from '../types';
@@ -91,10 +92,14 @@ export class PixelView {
   private blinkTimer: ReturnType<typeof setInterval> | null = null;
   private blinkShowOverlay = false;
   private splitDrag = false;
+  /** Chrome colours from the CSS tokens (4.1), read once per mount. */
+  private colors: ThemeColors;
 
   constructor(host: HTMLElement, opts: PixelViewOptions = {}) {
     this.host = host;
     this.opts = opts;
+    this.colors = themeColors();
+    setCheckerColors({ a: this.colors.checkerA, b: this.colors.checkerB });
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'pixel-canvas';
     this.canvas.tabIndex = 0;
@@ -327,7 +332,7 @@ export class PixelView {
     ctx.imageSmoothingEnabled = z < 1;
     const ov = this.overlay && this.overlay.rect.w === w && this.overlay.rect.h === h ? this.overlay : null;
     const ghosts = !ov && this.onion ? this.opts.onionFrames?.() : null;
-    if (ghosts && !this.ghosts) this.ghosts = { prev: tinted(this.strip, 'rgba(229,72,77,1)'), next: tinted(this.strip, 'rgba(56,189,248,1)') };
+    if (ghosts && !this.ghosts) this.ghosts = { prev: tinted(this.strip, this.colors.red), next: tinted(this.strip, this.colors.blue) };
     if (ov?.mode === 'diff') this.ensureDiff();
     for (let ty = 0; ty < t; ty++) for (let tx = 0; tx < t; tx++) {
       const dx = this.ox + tx * w * z, dy = this.oy + ty * h * z;
@@ -360,18 +365,18 @@ export class PixelView {
       for (let j = j0; j <= j1; j++) { ctx.fillStyle = j % 8 === 0 ? 'rgba(0,0,0,.4)' : j % 4 === 0 ? 'rgba(0,0,0,.28)' : 'rgba(0,0,0,.12)'; ctx.fillRect(vx0, this.oy + j * z, vx1 - vx0, 1); }
     }
     if (this.frameLines && this.frameLines < h) {
-      ctx.fillStyle = 'rgba(245,165,36,.85)';
+      ctx.fillStyle = withAlpha(this.colors.accent, 0.85);
       for (let ty = 0; ty < t; ty++) for (let f = 1; f < h / this.frameLines; f++) ctx.fillRect(this.ox, this.oy + (ty * h + f * this.frameLines) * z - 1, W, 2);
     }
     if (t > 1) {
-      ctx.strokeStyle = 'rgba(245,165,36,.9)';
+      ctx.strokeStyle = withAlpha(this.colors.accent, 0.9);
       ctx.lineWidth = 2;
       ctx.strokeRect(this.ox + w * z + 1, this.oy + h * z + 1, w * z - 2, h * z - 2);
     }
     const ox = this.ox + (t > 1 ? w * z : 0), oy = this.oy + (t > 1 ? h * z : 0);
     if (ov?.mode === 'swipe') {
       const bx = ox + Math.round(w * (ov.split ?? 0.5)) * z;
-      ctx.fillStyle = '#f5a524';
+      ctx.fillStyle = this.colors.accent;
       ctx.fillRect(bx - 1, oy, 2, h * z);
       const hy = oy + (h * z) / 2;
       ctx.fillRect(bx - 4, hy - 12, 8, 24);
@@ -391,20 +396,20 @@ export class PixelView {
     for (const m of marks) {
       if (!m.region) continue;
       const [mx, my, mw, mh] = m.region;
-      ctx.strokeStyle = m.live ? '#f5a524' : m.status === 'fixed' ? '#22c55e' : '#f5a524';
+      ctx.strokeStyle = m.status === 'fixed' && !m.live ? this.colors.green : this.colors.accent;
       ctx.lineWidth = 2;
       ctx.setLineDash(m.live ? [4, 3] : []);
       if (mw === 1 && mh === 1 && !m.live) {
         ctx.beginPath(); ctx.arc(ox + (mx + 0.5) * z, oy + (my + 0.5) * z, Math.max(5, z * 0.6), 0, Math.PI * 2); ctx.stroke();
       } else ctx.strokeRect(ox + mx * z - 1, oy + my * z - 1, mw * z + 2, mh * z + 2);
       ctx.setLineDash([]);
-      if (m.id) { ctx.fillStyle = '#f5a524'; ctx.font = 'bold 11px system-ui'; const tw = ctx.measureText(m.id).width + 6; ctx.fillRect(ox + mx * z - 1, oy + my * z - 15, tw, 14); ctx.fillStyle = '#111'; ctx.fillText(m.id, ox + mx * z + 2, oy + my * z - 4); }
+      if (m.id) { ctx.fillStyle = this.colors.accent; ctx.font = 'bold 11px system-ui'; const tw = ctx.measureText(m.id).width + 6; ctx.fillRect(ox + mx * z - 1, oy + my * z - 15, tw, 14); ctx.fillStyle = this.colors.accentInk; ctx.fillText(m.id, ox + mx * z + 2, oy + my * z - 4); }
     }
     const f = this.flashRect;
     if (f) {
       const age = (performance.now() - f.t) / 1200;
       if (age < 1) {
-        ctx.strokeStyle = `rgba(56,189,248,${1 - age})`;
+        ctx.strokeStyle = withAlpha(this.colors.blue, 1 - age);
         ctx.lineWidth = 2;
         ctx.strokeRect(ox + f.x * z - 1, oy + f.y * z - 1, f.w * z + 2, f.h * z + 2);
       }

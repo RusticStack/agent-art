@@ -2,6 +2,7 @@
 // of all frames). Export mode: frame rects and anchors from an Aseprite-style JSON, at their sheet positions.
 import type { AnimTag, CanvasMeta } from '@/lib/api/types';
 import { checker } from '@/lib/util/checker';
+import { themeColors } from '@/lib/util/dom';
 
 export const ANCHOR_COLORS = ['#f5a524', '#38bdf8', '#22c55e', '#e5484d', '#a78bfa', '#2dd4bf', '#f472b6', '#facc15'];
 export const GAP = 6;
@@ -120,7 +121,8 @@ export function drawSheet(canvas: HTMLCanvasElement, img: CanvasImageSource, cel
   const names = new Map<string, string>();
   const cx = canvas.getContext('2d');
   if (!cx) return names;
-  cx.fillStyle = '#16181d'; cx.fillRect(0, 0, W, H);
+  const tc = themeColors();   // chrome (background, labels) from the tokens; anchor colours encode data and stay literal
+  cx.fillStyle = tc.canvasBg; cx.fillRect(0, 0, W, H);
   cx.imageSmoothingEnabled = false;
   for (const c of cells) {
     checker(cx, c.dx, c.dy, c.w * scale, c.h * scale, Math.max(4, scale * 2));
@@ -128,7 +130,7 @@ export function drawSheet(canvas: HTMLCanvasElement, img: CanvasImageSource, cel
     cx.strokeStyle = 'rgba(255,255,255,.12)';
     cx.strokeRect(c.dx + 0.5, c.dy + 0.5, c.w * scale - 1, c.h * scale - 1);
     if (labels) {
-      cx.fillStyle = '#9aa3b2'; cx.font = '10px ui-monospace, monospace';
+      cx.fillStyle = tc.muted; cx.font = '10px ui-monospace, monospace';
       cx.fillText(`${c.label}${c.sub ? ' · ' + c.sub : ''}`, c.dx + 1, c.dy + c.h * scale + 11);
     }
     if (showAnchors && c.anchors) for (const [n, a] of Object.entries(c.anchors)) {

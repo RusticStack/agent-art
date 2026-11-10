@@ -66,7 +66,7 @@
   .tl-entry { border-bottom: 1px solid var(--line); padding: 5px 8px 6px; cursor: pointer; }
   .tl-entry:hover { background: var(--panel2); }
   .tl-entry.is-hidden { opacity: .45; }
-  .tl-entry.user { background: rgba(56, 189, 248, .04); }
+  .tl-entry.user { background: color-mix(in srgb, var(--blue) 4%, transparent); }
   .tl-entry.user:hover { background: var(--panel2); }
   .tl-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .tl-open { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; background: none; border: 0; padding: 0; margin: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; border-radius: 3px; }
@@ -77,13 +77,13 @@
   @media (prefers-reduced-motion: reduce) { .tl-entry.running .tl-status { animation: none; } }
   .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .tl-tool { font-weight: 600; font-family: ui-monospace, monospace; font-size: 12px; flex: none; }
-  .tl-action { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; background: var(--panel2); border: 1px solid var(--line2); border-radius: 4px; padding: 0 5px; color: #cbd2dc; flex: none; }
+  .tl-action { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; background: var(--panel2); border: 1px solid var(--line2); border-radius: 4px; padding: 0 5px; color: var(--text2); flex: none; }
   .tl-args { color: var(--muted); font: 11px ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
   .act { flex: none; }
   .twisty :global(.icon) { transition: transform var(--t-fast, 120ms); }
   .twisty[aria-expanded='true'] :global(.icon) { transform: rotate(90deg); }
   @media (prefers-reduced-motion: reduce) { .twisty :global(.icon) { transition: none; } }
   .tl-ms, .tl-time { color: var(--muted); flex: none; font-size: 11px; }
-  .tl-summary { color: #b6bfcc; font-size: 12px; padding-left: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tl-error { color: #ff9a9d; font-size: 12px; padding-left: 14px; white-space: pre-wrap; }
+  .tl-summary { color: var(--text2); font-size: 12px; padding-left: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tl-error { color: var(--red-fg); font-size: 12px; padding-left: 14px; white-space: pre-wrap; }
 </style>
