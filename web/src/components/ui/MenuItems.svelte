@@ -21,12 +21,6 @@
 {/each}
 
 <style>
-  :global(.menu) { z-index: var(--z-tooltip); min-width: 180px; padding: var(--s-2); background: var(--panel); border: 1px solid var(--line2); border-radius: var(--r-4); box-shadow: var(--shadow-1); }
-  :global(.menu-item) { display: flex; align-items: center; gap: var(--s-4); height: var(--h-row); padding: 0 var(--s-4); border-radius: var(--r-2); cursor: pointer; outline: none; }
-  :global(.menu-item[data-highlighted]) { background: var(--panel2); }
-  :global(.menu-item[data-disabled]) { opacity: .45; cursor: default; }
-  :global(.menu-item.danger) { color: var(--red-fg); }
-  :global(.menu-sep) { height: 1px; margin: var(--s-2) 0; background: var(--line); }
   .menu-icon { display: inline-flex; width: 16px; color: var(--muted); }
   .menu-label { flex: 1; white-space: nowrap; }
 </style>

@@ -22,8 +22,8 @@ export class AppPage {
   browserPane(): Locator { return this.page.locator('#browser'); }
   browserRow(name: string, kind = 'canvas'): Locator { return this.page.locator(`#browser .row[data-id="${kind}:${name}"]`).first(); }
   browserSection(key: string): Locator { return this.page.locator(`#browser .section[data-key="${key}"]`); }
-  /** The first row under the Pinned header (rows are siblings of the section header in the legacy tree). */
-  pinnedRow(id: string): Locator { return this.page.locator(`#browser .section[data-key="pinned"] + .row[data-id="${id}"]`); }
+  /** A row in the Pinned section (rows carry their section; virtua wraps each row, so no sibling selectors). */
+  pinnedRow(id: string): Locator { return this.page.locator(`#browser .row[data-section="pinned"][data-id="${id}"]`); }
   filterInput(): Locator { return this.page.locator('#browser input.search'); }
   async openAsset(name: string, kind = 'canvas') {
     const row = this.browserRow(name, kind);
@@ -38,8 +38,18 @@ export class AppPage {
     if (await this.filterInput().inputValue()) await this.filterInput().fill('');
   }
   rowAction(name: string, act: 'solo' | 'pin' | 'eye', kind = 'canvas'): Locator { return this.browserRow(name, kind).locator(`[data-act="${act}"]`); }
+  /** The row buttons show on hover / focus: hover the row, then click. */
+  async clickRowAction(name: string, act: 'solo' | 'pin' | 'eye', kind = 'canvas') { await this.browserRow(name, kind).hover(); await this.rowAction(name, act, kind).click(); }
   async enterSelectMode() { await this.browserPane().getByRole('button', { name: /Select$/ }).click(); }
   selectionBar(): Locator { return this.page.locator('#browser .selbar'); }
+  showHiddenButton(): Locator { return this.browserPane().getByRole('button', { name: /^hidden$/ }); }
+  tree(): Locator { return this.page.getByRole('tree', { name: 'Assets' }); }
+  treeRows(): Locator { return this.page.locator('#browser [role=treeitem]'); }
+  menu(): Locator { return this.page.getByRole('menu'); }
+  menuItem(name: string | RegExp): Locator { return this.menu().getByRole('menuitem', typeof name === 'string' ? { name, exact: true } : { name }); }
+  /** The "Compare here" drop zone shown on the right of the viewers during an asset drag. */
+  dropCompare(): Locator { return this.page.locator('#viewers .drop-compare'); }
+  viewers(): Locator { return this.page.locator('#viewers'); }
   // ---- viewers ----
   slot(s: 'A' | 'B'): Locator { return this.page.locator(`#slot${s}`); }
   slotWrap(s: 'A' | 'B'): Locator { return this.page.locator(`#slotWrap${s}`); }

@@ -7,7 +7,8 @@ import './src/styles/viewers.css';
 import './src/styles/legacy-shell.css';
 import { $, el, api, getJSON, store, toast, onToast, splitId, KIND_ICON } from './ui/util.js';
 import { api as rest } from './src/lib/api/client.ts';
-import { Browser } from './ui/browser.js';
+import AssetBrowser from './src/components/browser/AssetBrowser.svelte';
+import { hasDragTarget, readDragTarget } from './src/components/browser/drag.ts';
 import Timeline from './src/components/timeline/Timeline.svelte';
 import { Inspector, reviewDialog } from './ui/inspector.js';
 import { adapt } from './src/viewers/legacyAdapter.ts';
@@ -66,12 +67,15 @@ class App {
       if (n && !dialogHost) dialogHost = import('./src/components/dialogs/DialogHost.svelte').then((m) => mount(m.default, { target: document.body }));
     });
     this.slots = { A: { host: $('slotA'), viewer: null, target: null, tabs: $('tabsA'), title: $('titleA') }, B: { host: $('slotB'), viewer: null, target: null, tabs: $('tabsB'), title: $('titleB') } };
-    this.browser = new Browser($('browser'), this);
+    const browser = mount(AssetBrowser, { target: $('browser'), props: { reviewNote: (d) => { void this.reviewPrompt(d); } } });
+    // legacy surface: the Svelte browser renders from the stores, follows workspace.currentId and signals.flash
+    this.browser = { render() {}, markActive() {}, flash() {}, focusSearch: () => browser.focusSearch() };
     mount(Timeline, { target: $('timelinePane'), props: { ontoggleDock: () => this.toggleTimelineDock() } });
     // legacy surface: the Svelte timeline renders from the activity store on its own
     this.timeline = { upsert: (e) => activity.upsert(e), load: (list) => activity.load(list), render() {}, get f() { return activity.filter; } };
     this.inspector = new Inspector($('inspector'), this);
     this.setupLayout();
+    this.setupDrop();
     this.setupTopbar();
     this.setupKeys();
     onToast((text, kind) => toasts.push(text, kind));
@@ -287,7 +291,6 @@ class App {
     this.setStatus();
     if (ev.type === 'hello') return;
     if (ev.type === 'activity' || ev.type === 'resync') return; // the activity store has it; the timeline re-renders
-    if (ev.type === 'change' && ev.source === 'agent') this.browser.flash(`canvas:${ev.canvas}`);
     if (ev.type === 'change' && this.current?.kind === 'canvas' && this.current.name === ev.canvas && !this.current.snap && this.current.view && this.current.view !== 'edit') this.inspector.refreshFor({ name: ev.canvas });
   }
   /** Follow mode: open whatever the agent is touching (skips hidden / non-solo assets). */
@@ -301,8 +304,37 @@ class App {
   watchStores() {
     watch(() => assets.rev, () => this.renderAssets());
     watch(() => reviews.rev, () => this.renderReviews());
-    watch(() => [uiState.hidden, uiState.pinned, uiState.solo], () => this.browser.render());
+    // the browser rows change ui-state directly; the legacy inspector shows pin / hide state
+    watch(() => [uiState.hidden, uiState.pinned, uiState.solo], () => { if (this.current) this.inspector.show(this.current); });
     watch(() => connection.label, () => this.setStatus());
+  }
+
+  // ---------- drag an asset row onto a viewer slot (RV3) ----------
+  setupDrop() {
+    const viewers = $('viewers');
+    const zone = el('div.drop-compare', { text: 'Compare here' });
+    zone.hidden = true;
+    viewers.append(zone);
+    let depth = 0;
+    const end = () => { depth = 0; zone.hidden = true; for (const s of ['A', 'B']) this.slots[s].host.classList.remove('drop-over'); };
+    viewers.addEventListener('dragenter', (e) => { if (!hasDragTarget(e)) return; depth++; zone.hidden = this.comparing; });
+    viewers.addEventListener('dragleave', (e) => { if (hasDragTarget(e) && --depth <= 0) end(); });
+    viewers.addEventListener('dragover', (e) => {
+      if (!hasDragTarget(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      const over = e.target instanceof Node && zone.contains(e.target) ? null : this.slots.B.host.contains(e.target) ? 'B' : 'A';
+      for (const s of ['A', 'B']) this.slots[s].host.classList.toggle('drop-over', s === over);
+    });
+    viewers.addEventListener('drop', (e) => {
+      const t = readDragTarget(e);
+      const toB = e.target instanceof Node && (zone.contains(e.target) || this.slots.B.host.contains(e.target));
+      end();
+      if (!t) return;
+      e.preventDefault();
+      void this.open(t, { slot: toB ? 'B' : 'A' });
+    });
+    window.addEventListener('dragend', end);
   }
 
   // ---------- chrome ----------
